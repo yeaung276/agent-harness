@@ -30,6 +30,28 @@
             </tbody>
           </table>
         </section>
+
+        <section class="doc-section" id="api-tokens">
+          <h2>API tokens</h2>
+
+          <h3>api_tokens</h3>
+          <table>
+            <thead>
+              <tr><th>Column</th><th>Type</th><th>Notes</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>id</code></td><td><code>uuid</code></td><td>Primary key, <code>gen_random_uuid()</code>.</td></tr>
+              <tr><td><code>user_id</code></td><td><code>uuid</code></td><td>References <code>users.id</code>: who created it, shown as Created by. Deleted with that user.</td></tr>
+              <tr><td><code>name</code></td><td><code>text</code></td><td>The label the user gave it.</td></tr>
+              <tr><td><code>token_hash</code></td><td><code>text</code></td><td>Unique. SHA-256 of the token, hex. The token itself is never stored.</td></tr>
+              <tr><td><code>token_start</code></td><td><code>text</code></td><td>The first 8 characters, <code>pat_</code> and 4 more, so the user can tell tokens apart.</td></tr>
+              <tr><td><code>expires_at</code></td><td><code>timestamptz</code></td><td>30 days, 90 days or 1 year after creation. Null means it never expires.</td></tr>
+              <tr><td><code>last_used_at</code></td><td><code>timestamptz</code></td><td>Null until first used. Updated at most once a minute.</td></tr>
+              <tr><td><code>created_at</code></td><td><code>timestamptz</code></td><td><code>now()</code>.</td></tr>
+            </tbody>
+          </table>
+          <p>Every user sees every token and can revoke any of them. Revoking deletes the row.</p>
+        </section>
       </div>
     </main>
   </div>

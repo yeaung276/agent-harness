@@ -1,12 +1,13 @@
-import { drizzle, type NodePgDatabase } from 'drizzle-orm/node-postgres'
+import { drizzle } from 'drizzle-orm/node-postgres'
 import fp from 'fastify-plugin'
 import { Pool } from 'pg'
 
 import * as schema from '../db/schema.ts'
+import type { Db } from '../db/type.ts'
 
 declare module 'fastify' {
   interface FastifyInstance {
-    db: NodePgDatabase<typeof schema>
+    db: Db
   }
 }
 

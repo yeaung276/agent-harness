@@ -1,0 +1,83 @@
+<% layout('./app') %>
+<div class="px-8 py-6">
+  <h1 class="text-xl font-semibold tracking-tight">API tokens</h1>
+  <p class="mt-1 text-sm text-gray-600">Other systems call the API with <code class="font-mono">Authorization: Bearer &lt;token&gt;</code> and act as the user who created the token. Everyone sees and can revoke every token.</p>
+
+  <% if (it.created) { %>
+  <div class="mt-6 rounded-lg border border-green-200 bg-green-50 p-4">
+    <p class="text-sm font-medium text-green-900">Copy <%= it.created.name %> now. You won't be able to see it again.</p>
+    <code class="mt-2 block select-all break-all rounded-md border border-green-200 bg-white px-3 py-2 font-mono text-sm"><%= it.created.token %></code>
+  </div>
+  <% } %>
+
+  <form method="post" action="/tokens" class="mt-6 flex flex-wrap items-end gap-3">
+    <label class="block">
+      <span class="text-sm font-medium">Name</span>
+      <input name="name" required maxlength="100" class="mt-1 block w-64 rounded-md border border-gray-300 px-3 py-2 text-sm">
+    </label>
+    <label class="block">
+      <span class="text-sm font-medium">Expires</span>
+      <select name="expiresIn" class="mt-1 block rounded-md border border-gray-300 px-3 py-2 text-sm">
+        <option value="30">30 days</option>
+        <option value="90" selected>90 days</option>
+        <option value="365">1 year</option>
+        <option value="never">Never</option>
+      </select>
+    </label>
+    <button type="submit" class="rounded-md bg-gray-900 px-3 py-2 text-sm font-medium text-white hover:bg-gray-700">Create token</button>
+  </form>
+
+  <div class="mt-6 overflow-x-auto rounded-lg border border-gray-200">
+    <table class="w-full text-left text-sm">
+      <thead class="bg-gray-50 text-xs uppercase tracking-wide text-gray-500">
+        <tr>
+          <th class="px-4 py-2.5 font-medium">Name</th>
+          <th class="px-4 py-2.5 font-medium">Token</th>
+          <th class="px-4 py-2.5 font-medium">Expires</th>
+          <th class="px-4 py-2.5 font-medium">Last used</th>
+          <th class="px-4 py-2.5 font-medium">Created</th>
+          <th class="px-4 py-2.5 font-medium">Created by</th>
+          <th class="px-4 py-2.5"></th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-gray-200">
+        <% if (!it.tokens.length) { %>
+        <tr><td colspan="7" class="px-4 py-6 text-center text-gray-500"><%= it.pagination.total ? 'No tokens on this page.' : 'No tokens yet.' %></td></tr>
+        <% } %>
+        <% it.tokens.forEach(token => { %>
+        <tr>
+          <td class="px-4 py-2.5 font-medium"><%= token.name %></td>
+          <td class="px-4 py-2.5 font-mono text-gray-600"><%= token.tokenStart %>…</td>
+          <td class="px-4 py-2.5 text-gray-600"><%= token.expires %></td>
+          <td class="px-4 py-2.5 text-gray-600"><%= token.lastUsed %></td>
+          <td class="px-4 py-2.5 text-gray-600"><%= token.created %></td>
+          <td class="px-4 py-2.5 text-gray-600"><%= token.createdBy %></td>
+          <td class="px-4 py-2.5 text-right">
+            <form method="post" action="/tokens/<%= token.id %>/delete" onsubmit="return confirm('Revoke this token? Calls using it will stop working.')">
+              <button type="submit" class="text-sm text-red-600 hover:text-red-800">Revoke</button>
+            </form>
+          </td>
+        </tr>
+        <% }) %>
+      </tbody>
+    </table>
+  </div>
+
+  <% if (it.pagination.total) { %>
+  <nav class="mt-3 flex items-center justify-between text-sm text-gray-600" aria-label="Pagination">
+    <span><%= it.tokens.length ? `${it.pagination.from}–${it.pagination.to} of ${it.pagination.total}` : `${it.pagination.total} in all` %></span>
+    <div class="flex gap-2">
+      <% if (it.pagination.prev) { %>
+      <a href="/tokens?page=<%= it.pagination.prev %>" class="rounded-md border border-gray-300 px-3 py-1.5 hover:bg-gray-50">Previous</a>
+      <% } else { %>
+      <span class="rounded-md border border-gray-200 px-3 py-1.5 text-gray-300">Previous</span>
+      <% } %>
+      <% if (it.pagination.next) { %>
+      <a href="/tokens?page=<%= it.pagination.next %>" class="rounded-md border border-gray-300 px-3 py-1.5 hover:bg-gray-50">Next</a>
+      <% } else { %>
+      <span class="rounded-md border border-gray-200 px-3 py-1.5 text-gray-300">Next</span>
+      <% } %>
+    </div>
+  </nav>
+  <% } %>
+</div>

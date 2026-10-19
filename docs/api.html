@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Code-Harness API</title>
+  <link rel="stylesheet" href="assets/site.css?v=3">
+</head>
+<body data-root="" data-page="api">
+  <div class="layout">
+    <aside class="sidebar"></aside>
+    <main>
+      <div class="content">
+        <h1>API</h1>
+        <p class="lede">The public API other systems call, at <code>/api/v1</code>.</p>
+
+        <section class="doc-section" id="authentication">
+          <h2>Authentication</h2>
+          <p>Every call sends <code>Authorization: Bearer &lt;token&gt;</code>. Any user creates tokens on the API tokens page of the web app, and a call made with one acts as the user who created it. The token is shown once, when it is created; only its SHA-256 hash is stored, in <a href="schema.html#api-tokens"><code>api_tokens</code></a>.</p>
+          <p>A token is <code>pat_</code> followed by 32 random bytes, base64url: 47 characters in all. Every user sees every token and can revoke any of them; a revoked token stops working on the next call.</p>
+
+          <h3>Refused calls</h3>
+          <table>
+            <thead>
+              <tr><th>When</th><th>Response</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>No <code>Authorization</code> header, or not <code>Bearer</code></td><td rowspan="3"><code>401</code> with <code>WWW-Authenticate: Bearer</code>. The body is the same in every case, so a caller can't tell an unknown token from a revoked one.</td></tr>
+              <tr><td>The token is unknown or revoked</td></tr>
+              <tr><td>The token has expired</td></tr>
+            </tbody>
+          </table>
+
+          <h3>Endpoints</h3>
+<div class="routes">
+<details class="route">
+  <summary><span class="method get">GET</span><code class="route-path">/api/v1/me</code><span class="route-summary">The user who created the token</span></summary>
+  <div class="route-body">
+<h4>Response 200</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;id&quot;,
+    &quot;email&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;id&quot;: {
+      &quot;format&quot;: &quot;uuid&quot;,
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;email&quot;: {
+      &quot;type&quot;: &quot;string&quot;
+    }
+  }
+}</code></pre>
+<h4>Errors · 401</h4>
+<pre class="schema"><code>{&quot;type&quot;:&quot;object&quot;,&quot;required&quot;:[&quot;error&quot;],&quot;properties&quot;:{&quot;error&quot;:{&quot;type&quot;:&quot;string&quot;}}}</code></pre>
+  </div>
+</details>
+</div>
+        </section>
+      </div>
+    </main>
+  </div>
+  <script src="assets/site.js?v=3"></script>
+</body>
+</html>

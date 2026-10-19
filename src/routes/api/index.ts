@@ -1,3 +1,10 @@
 import type { FastifyPluginAsyncTypebox } from '@fastify/type-provider-typebox'
 
-export const api: FastifyPluginAsyncTypebox = async () => {}
+import { requireToken } from './auth.ts'
+import { me } from './me.ts'
+
+export const api: FastifyPluginAsyncTypebox = async app => {
+  await app.register(requireToken)
+
+  await app.register(me)
+}

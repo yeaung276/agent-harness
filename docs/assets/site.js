@@ -1,5 +1,6 @@
 const NAV = [
   { id: "appx-preview", title: "Architecture", href: "index.html" },
+  { id: "api", title: "API", href: "api.html" },
   { id: "commands", title: "Commands", href: "commands.html" },
   { id: "schema", title: "Schema", href: "schema.html" },
   { id: "cache-keys", title: "Cache keys", href: "cache-keys.html" },
