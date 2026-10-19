@@ -1,12 +1,12 @@
 import type { TypeBoxTypeProvider } from '@fastify/type-provider-typebox'
 import Fastify, { type FastifyServerOptions } from 'fastify'
 
-import { api } from './api/index.ts'
 import type { Config } from './config.ts'
-import { mcp } from './mcp/index.ts'
 import { db } from './plugins/db.ts'
 import { redis } from './plugins/redis.ts'
-import { web } from './web/index.ts'
+import { api } from './routes/api/index.ts'
+import { mcp } from './routes/mcp/index.ts'
+import { web } from './routes/web/index.ts'
 
 declare module 'fastify' {
   interface FastifyInstance {

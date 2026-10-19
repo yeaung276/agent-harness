@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, test } from 'bun:test'
 
-import { buildApp } from '../../src/app.ts'
-import { loadConfig } from '../../src/config.ts'
+import { buildApp } from '../../../src/app.ts'
+import { loadConfig } from '../../../src/config.ts'
 
 const app = await buildApp(
   loadConfig({

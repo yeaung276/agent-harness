@@ -7,8 +7,8 @@
   "scripts": {
     "dev": "bun run --parallel dev:server dev:css",
     "dev:server": "bun --watch src/index.ts",
-    "dev:css": "tailwindcss -i src/web/views/styles.css -o src/web/public/app.css --watch",
-    "build": "tailwindcss -i src/web/views/styles.css -o src/web/public/app.css --minify",
+    "dev:css": "tailwindcss -i src/routes/web/views/styles.css -o src/routes/web/public/app.css --watch",
+    "build": "tailwindcss -i src/routes/web/views/styles.css -o src/routes/web/public/app.css --minify",
     "start": "bun src/index.ts",
     "typecheck": "tsc",
     "test": "bun test",
