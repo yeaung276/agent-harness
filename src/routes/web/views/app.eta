@@ -1,0 +1,22 @@
+<% layout('./layout') %>
+<% const nav = [{ id: 'workspaces', title: 'Workspaces', href: '/workspaces' }] %>
+<div class="flex min-h-screen">
+  <aside class="flex w-56 shrink-0 flex-col border-r border-gray-200 bg-gray-50">
+    <a href="/" class="px-5 py-4 text-sm font-semibold tracking-tight">Code-Harness</a>
+    <nav class="flex-1 px-3">
+      <ul class="space-y-1">
+        <% nav.forEach(item => { %>
+        <li>
+          <a href="<%= item.href %>" class="block rounded-md px-2 py-1.5 text-sm <%= item.id === it.active ? 'bg-gray-200 font-medium text-gray-900' : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900' %>"<%~ item.id === it.active ? ' aria-current="page"' : '' %>><%= item.title %></a>
+        </li>
+        <% }) %>
+      </ul>
+    </nav>
+    <form method="post" action="/logout" class="border-t border-gray-200 p-3">
+      <button type="submit" class="w-full rounded-md px-2 py-1.5 text-left text-sm text-gray-600 hover:bg-gray-100 hover:text-gray-900">Log out</button>
+    </form>
+  </aside>
+  <main class="min-w-0 flex-1">
+    <%~ it.body %>
+  </main>
+</div>

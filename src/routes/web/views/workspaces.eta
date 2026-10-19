@@ -1,0 +1,31 @@
+<% layout('./app') %>
+<div class="px-8 py-6">
+  <h1 class="text-xl font-semibold tracking-tight">Workspaces</h1>
+  <div class="mt-6 overflow-x-auto rounded-lg border border-gray-200">
+    <table class="w-full text-left text-sm">
+      <thead class="bg-gray-50 text-xs uppercase tracking-wide text-gray-500">
+        <tr>
+          <th class="px-4 py-2.5 font-medium">Name</th>
+          <th class="px-4 py-2.5 font-medium">Status</th>
+          <th class="px-4 py-2.5 font-medium">Owner</th>
+          <th class="px-4 py-2.5 font-medium">Updated</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-gray-200">
+        <% it.workspaces.forEach(workspace => { %>
+        <tr class="hover:bg-gray-50">
+          <td class="px-4 py-2.5 font-medium"><%= workspace.name %></td>
+          <td class="px-4 py-2.5">
+            <span class="inline-flex items-center gap-1.5">
+              <span class="size-2 rounded-full <%= workspace.status === 'Running' ? 'bg-green-500' : 'bg-gray-400' %>"></span>
+              <%= workspace.status %>
+            </span>
+          </td>
+          <td class="px-4 py-2.5 text-gray-600"><%= workspace.owner %></td>
+          <td class="px-4 py-2.5 text-gray-600"><%= workspace.updated %></td>
+        </tr>
+        <% }) %>
+      </tbody>
+    </table>
+  </div>
+</div>

@@ -1,0 +1,18 @@
+<% layout('./layout') %>
+<main class="mx-auto flex min-h-screen max-w-sm flex-col justify-center px-4">
+  <h1 class="text-2xl font-semibold tracking-tight">Log in</h1>
+  <form method="post" action="/login" class="mt-8 space-y-4">
+    <% if (it.error) { %>
+    <p class="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700"><%= it.error %></p>
+    <% } %>
+    <label class="block">
+      <span class="text-sm font-medium">Email</span>
+      <input name="email" type="email" value="<%= it.email %>" autocomplete="username" required autofocus class="mt-1 block w-full rounded-md border border-gray-300 bg-transparent px-3 py-2">
+    </label>
+    <label class="block">
+      <span class="text-sm font-medium">Password</span>
+      <input name="password" type="password" autocomplete="current-password" required class="mt-1 block w-full rounded-md border border-gray-300 bg-transparent px-3 py-2">
+    </label>
+    <button type="submit" class="w-full rounded-md bg-gray-900 px-3 py-2 text-sm font-medium text-white hover:bg-gray-700">Log in</button>
+  </form>
+</main>

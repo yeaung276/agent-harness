@@ -6,7 +6,7 @@
     <title><%= it.title %></title>
     <link rel="stylesheet" href="/public/app.css">
   </head>
-  <body class="min-h-screen bg-white text-gray-900 antialiased dark:bg-gray-950 dark:text-gray-100">
+  <body class="min-h-screen bg-white text-gray-900 antialiased">
     <%~ it.body %>
   </body>
 </html>

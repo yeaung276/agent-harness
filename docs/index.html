@@ -1,0 +1,2352 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Code-Harness Architecture</title>
+  <link rel="stylesheet" href="assets/site.css?v=3">
+</head>
+<body data-root="" data-page="appx-preview">
+  <div class="layout">
+    <aside class="sidebar"></aside>
+    <main>
+      <div class="content">
+        <h1>Architecture</h1>
+
+        <section class="doc-section" id="overview">
+          <h2>Overview</h2>
+          <p>preview-runner runs as one server pod and many worker pods. The server pod is the only entry point: appx calls its API, and users' browsers load previews through its proxy. Worker pods run the app previews and browser sessions. Each app is pinned to one worker pod, so its dev server and its browser sessions share that pod's localhost, and the dev server's port never leaves the pod.</p>
+          <p>Placement is decided per call from Redis. Worker pods publish their load, and the first call for an app claims the worker pod with the most headroom. The claim holds until that pod stops reporting.</p>
+
+          <figure>
+            <div class="diagram">
+              <svg class="c4" viewBox="0 0 1120 870" role="img" aria-label="preview-runner as one server pod and many worker pods. 1: appx starts a preview, creates a browser session or makes a browser call on the server pod. In the server pod, a stateless Deployment, the preview and browser API reads the rows in Postgres, which the worker pods write with host set to their name, and maps a sessionId to its row and appId. Beside it, the preview proxy, a reverse proxy for requests carrying the signed preview cookie, serves the app preview to the user's browser over HTTP and WebSocket. Both use the placement controller, a shared module below them, not an API, to find the worker pod of an appId. 2: the controller reads placement:appId in Redis; if it names a worker pod that is still alive, that pod is used. 3: if there is none or the pod is gone, it reads every pods:name stats entry, picks the worker pod with the most headroom and sets placement:appId with NX, so an app's preview and sessions stay on one worker pod. 4: the API forwards the call to the internal API of the assigned worker pod, at the address in its pods entry. The worker pods are a StatefulSet, so each keeps its name, worker-0, worker-1 and so on, across restarts. On that worker pod, the internal API drives the sandbox, which runs the app's preview dev server on localhost:port, and Chromium, which holds one page per session. 5: because both run on the same pod, Chromium reaches the app's preview on localhost. 6: every worker pod's stats reporter writes pods:name with cpu, memory, previews, sessions and its address every 10 seconds, expiring after 30 seconds. The preview proxy sends preview traffic to the assigned worker's port forwarder on port 4002, which hands it to the sandbox on localhost:port, so sandbox ports never leave the pod. worker-1, worker-2 and more have the same parts as worker-0.">
+                <defs>
+                  <marker id="rp-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                    <path d="M0 0L10 5L0 10z" class="arrowhead"/>
+                  </marker>
+                </defs>
+
+                <rect class="person" x="60" y="16" width="180" height="56" rx="20"/>
+                <text class="on-dark name" x="150" y="39" text-anchor="middle">User's browser</text>
+                <text class="on-dark type" x="150" y="56" text-anchor="middle">[app preview in an iframe]</text>
+
+                <rect class="external" x="520" y="16" width="300" height="56" rx="8"/>
+                <text class="on-dark name" x="670" y="39" text-anchor="middle">appx</text>
+                <text class="on-dark type" x="670" y="56" text-anchor="middle">[appId or sessionId on every call]</text>
+
+                <rect class="boundary" x="20" y="120" width="780" height="360" rx="10"/>
+                <text class="label name" x="400" y="144" text-anchor="middle">server pod</text>
+                <text class="label type" x="400" y="160" text-anchor="middle">[Deployment · stateless · preview-runner API]</text>
+
+                <rect class="component" x="40" y="180" width="220" height="140" rx="8"/>
+                <text class="on-light name" x="150" y="204" text-anchor="middle">Preview proxy</text>
+                <text class="on-light type" x="150" y="221" text-anchor="middle">[reverse proxy · signed preview cookie]</text>
+                <text class="on-light type" x="150" y="246" text-anchor="middle">appId → that app's worker pod</text>
+                <text class="on-light type" x="150" y="263" text-anchor="middle">→ its port forwarder</text>
+
+                <rect class="component" x="540" y="180" width="240" height="140" rx="8"/>
+                <text class="on-light name" x="660" y="204" text-anchor="middle">preview + browser API</text>
+                <text class="on-light type" x="660" y="221" text-anchor="middle">[api/preview · api/browser]</text>
+                <text class="on-light type" x="660" y="246" text-anchor="middle">preview: start · stop · exec</text>
+                <text class="on-light type" x="660" y="263" text-anchor="middle">browser: session · calls · close</text>
+                <text class="on-light type" x="660" y="280" text-anchor="middle">rows with host = worker pod</text>
+                <text class="on-light type" x="660" y="297" text-anchor="middle">sessionId → row → appId</text>
+
+                <rect class="component" x="240" y="350" width="360" height="110" rx="8"/>
+                <text class="on-light name" x="420" y="372" text-anchor="middle">placement controller</text>
+                <text class="on-light type" x="420" y="389" text-anchor="middle">[shared module, not an API · by appId]</text>
+                <text class="on-light type" x="256" y="412"><tspan font-weight="600">2.</tspan> GET placement:&lt;appId&gt; → its worker pod, if alive</text>
+                <text class="on-light type" x="256" y="429"><tspan font-weight="600">3.</tspan> else most headroom in pods:*, SET NX</text>
+                <text class="on-light type" x="256" y="446">sticky: an app's preview and sessions on one worker pod</text>
+
+                <rect class="external" x="840" y="215" width="260" height="70" rx="8"/>
+                <text class="on-dark name" x="970" y="240" text-anchor="middle">Postgres</text>
+                <text class="on-dark type" x="970" y="257" text-anchor="middle">previews · browser_sessions</text>
+                <text class="on-dark type" x="970" y="273" text-anchor="middle">host = worker pod name</text>
+
+                <rect class="external" x="840" y="330" width="260" height="150" rx="8"/>
+                <text class="on-dark name" x="970" y="354" text-anchor="middle">Redis</text>
+                <text class="on-dark type" x="970" y="371" text-anchor="middle">[central]</text>
+                <text class="on-dark type" x="970" y="396" text-anchor="middle">pods:&lt;name&gt; → cpu, memory,</text>
+                <text class="on-dark type" x="970" y="412" text-anchor="middle">previews, sessions, address</text>
+                <text class="on-dark type" x="970" y="428" text-anchor="middle">expires 30 s after its last write</text>
+                <text class="on-dark type" x="970" y="452" text-anchor="middle">placement:&lt;appId&gt; → worker pod name</text>
+
+                <rect class="boundary" x="20" y="520" width="936" height="330" rx="10"/>
+                <text class="label name" x="940" y="826" text-anchor="end">worker pods</text>
+                <text class="label type" x="940" y="840" text-anchor="end">[StatefulSet · stable names · scaled out]</text>
+
+                <rect class="group" x="36" y="536" width="744" height="296" rx="8"/>
+                <text class="label name" x="768" y="824" text-anchor="end">worker-0 · POD_NAME</text>
+
+                <rect class="component" x="50" y="550" width="40" height="236" rx="6"/>
+                <text class="on-light name" x="70" y="666" text-anchor="middle" transform="rotate(-90 70 668)">port forwarder</text>
+                <text class="on-light type" x="70" y="680" text-anchor="middle" transform="rotate(-90 70 668)">[&lt;appId&gt; → localhost:&lt;port&gt;]</text>
+
+                <rect class="component" x="104" y="550" width="660" height="46" rx="6"/>
+                <text class="on-light name" x="434" y="569" text-anchor="middle">internal API</text>
+                <text class="on-light type" x="434" y="585" text-anchor="middle">[/internal/preview/* · /internal/browser/*]</text>
+
+                <rect class="component" x="104" y="616" width="290" height="84" rx="6"/>
+                <text class="on-light name" x="249" y="640" text-anchor="middle">Sandbox</text>
+                <text class="on-light type" x="249" y="657" text-anchor="middle">[preview dev servers]</text>
+                <text class="on-light type" x="249" y="678" text-anchor="middle">localhost:&lt;port&gt; per app</text>
+
+                <rect class="component" x="474" y="616" width="290" height="84" rx="6"/>
+                <text class="on-light name" x="619" y="640" text-anchor="middle">Chromium</text>
+                <text class="on-light type" x="619" y="657" text-anchor="middle">[core/browser]</text>
+                <text class="on-light type" x="619" y="678" text-anchor="middle">one page per session</text>
+
+                <rect class="component" x="104" y="740" width="660" height="46" rx="6"/>
+                <text class="on-light name" x="434" y="759" text-anchor="middle">stats reporter</text>
+                <text class="on-light type" x="434" y="775" text-anchor="middle">[every 10 s]</text>
+
+                <rect class="component" x="800" y="580" width="140" height="50" rx="6"/>
+                <text class="on-light name" x="870" y="601" text-anchor="middle">worker-1</text>
+                <text class="on-light type" x="870" y="618" text-anchor="middle">same parts as worker-0</text>
+                <rect class="component" x="800" y="640" width="140" height="50" rx="6"/>
+                <text class="on-light name" x="870" y="661" text-anchor="middle">worker-2</text>
+                <text class="on-light type" x="870" y="678" text-anchor="middle">same parts as worker-0</text>
+                <rect class="tbd" x="800" y="700" width="140" height="36" rx="6"/>
+                <text class="note" x="870" y="723" text-anchor="middle">more workers</text>
+
+                <line class="edge" x1="150" y1="180" x2="150" y2="74" marker-end="url(#rp-arrow)"/>
+                <text class="edge-label" x="158" y="92">serves the preview</text>
+                <text class="note" x="158" y="106">HTTP + WS</text>
+
+                <line class="edge" x1="620" y1="72" x2="620" y2="178" marker-end="url(#rp-arrow)"/>
+                <text class="edge-label" x="628" y="92"><tspan font-weight="600">1.</tspan> start preview · create session · browser calls</text>
+                <text class="note" x="628" y="106">to the server pod</text>
+
+                <line class="edge" x1="780" y1="250" x2="838" y2="250" marker-end="url(#rp-arrow)"/>
+                <text class="edge-label" x="820" y="242" text-anchor="middle">rows</text>
+
+                <line class="edge" x1="250" y1="320" x2="250" y2="348" marker-end="url(#rp-arrow)"/>
+                <line class="edge" x1="560" y1="320" x2="560" y2="348" marker-end="url(#rp-arrow)"/>
+
+                <line class="edge" x1="600" y1="405" x2="838" y2="405" marker-end="url(#rp-arrow)"/>
+                <text class="edge-label" x="670" y="397" text-anchor="middle">2 · 3</text>
+
+                <line class="edge" x1="740" y1="320" x2="740" y2="548" marker-end="url(#rp-arrow)"/>
+                <text class="edge-label" x="732" y="496" text-anchor="end"><tspan font-weight="600">4.</tspan> forwards to the assigned worker</text>
+                <text class="note" x="732" y="510" text-anchor="end">address from pods:&lt;name&gt;</text>
+
+                <line class="edge" x1="70" y1="320" x2="70" y2="548" marker-end="url(#rp-arrow)"/>
+                <text class="edge-label" x="78" y="496">app traffic</text>
+                <text class="note" x="78" y="510">to the worker's :4002</text>
+
+                <line class="edge" x1="249" y1="596" x2="249" y2="614" marker-end="url(#rp-arrow)"/>
+                <line class="edge" x1="619" y1="596" x2="619" y2="614" marker-end="url(#rp-arrow)"/>
+                <line class="edge" x1="474" y1="658" x2="396" y2="658" marker-end="url(#rp-arrow)"/>
+                <line class="edge" x1="90" y1="658" x2="102" y2="658" marker-end="url(#rp-arrow)"/>
+                <text class="edge-label" x="434" y="722" text-anchor="middle"><tspan font-weight="600">5.</tspan> same pod: Chromium reaches localhost:&lt;port&gt;</text>
+
+                <polyline class="edge" points="764,763 970,763 970,482" marker-end="url(#rp-arrow)"/>
+                <line class="edge" x1="940" y1="605" x2="970" y2="605"/>
+                <line class="edge" x1="940" y1="665" x2="970" y2="665"/>
+                <text class="edge-label" x="978" y="620"><tspan font-weight="600">6.</tspan> SET pods:&lt;name&gt;</text>
+                <text class="note" x="978" y="634">every 10 s, expires 30 s</text>
+              </svg>
+            </div>
+            <figcaption>C4 component diagram: preview-runner as one server pod and many worker pods. Numbers follow one call. Solid arrows are calls. Grey boxes are outside preview-runner.</figcaption>
+          </figure>
+
+          <h3>Components</h3>
+          <table>
+            <thead>
+              <tr><th>Component</th><th>Pod</th><th>What it does</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Preview proxy</td><td>Server</td><td>Takes every request that carries the signed preview cookie, HTTP and WebSocket, and sends it to the cookie's app on its worker pod. <code>/__preview/view</code> sets the cookie in exchange for a view token another service mints; the proxy verifies the cookie and reads the appId. The app is served at the root of the preview host, so its absolute links such as <code>/css/…</code> keep working.</td></tr>
+              <tr><td>preview + browser API</td><td>Server</td><td>The endpoints appx calls. Finds the app's worker, for a session through its row's appId, and forwards each call to that worker's internal API. The worker writes the rows.</td></tr>
+              <tr><td>Placement controller</td><td>Server</td><td>A module both of the above use: appId → worker pod, through Redis.</td></tr>
+              <tr><td>Internal API</td><td>Worker</td><td><code>/internal/preview/*</code> and <code>/internal/browser/*</code>. Drives this pod's sandbox and Chromium.</td></tr>
+              <tr><td>Port forwarder</td><td>Worker</td><td>On the pod's own port, 4002. Hands <code>&lt;appId&gt;</code> traffic to <code>localhost:&lt;port&gt;</code>.</td></tr>
+              <tr><td>Sandbox</td><td>Worker</td><td>Runs each app's dev server on a port from <code>PREVIEW_PORT_MIN</code>–<code>MAX</code>, bound to 127.0.0.1.</td></tr>
+              <tr><td>Chromium</td><td>Worker</td><td>The <code>core/browser</code> plugin: one Chromium in its own network namespace, one page per session. See <a href="#browser-sessions">Browser sessions</a>.</td></tr>
+              <tr><td>Stats reporter</td><td>Worker</td><td>Writes this pod's load and address to Redis every 10 s.</td></tr>
+            </tbody>
+          </table>
+
+          <h3>Redis keys</h3>
+          <table>
+            <thead>
+              <tr><th>Key</th><th>Value</th><th>Written by</th><th>Lifetime</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>pods:&lt;name&gt;</code></td><td>cpu, memory, previews, sessions, address</td><td>A worker's stats reporter</td><td>Expires 30 s after its last write.</td></tr>
+              <tr><td><code>placement:&lt;appId&gt;</code></td><td>Worker pod name</td><td>Placement controller, <code>SET NX</code></td><td>Until that worker's <code>pods</code> key is gone; then the next call replaces it.</td></tr>
+            </tbody>
+          </table>
+
+          <h3>Scaling and failure</h3>
+          <table>
+            <thead>
+              <tr><th>When</th><th>What happens</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>A worker pod is added</td><td>It starts reporting and takes new apps by headroom. Apps already placed stay where they are.</td></tr>
+              <tr><td>A worker pod dies</td><td>Its <code>pods</code> key expires within 30 s. The next call for each of its apps places the app on another worker; the preview restarts there and browser sessions reopen from their rows.</td></tr>
+              <tr><td>The server pod restarts</td><td>Rows are in Postgres and placements in Redis, so nothing is lost. Previews and pages on the workers keep running.</td></tr>
+              <tr><td>Two calls place one app at once</td><td><code>SET NX</code> lets one win; the other reads the winner.</td></tr>
+              <tr><td>Network</td><td>A NetworkPolicy lets only the server pod reach the workers' port 4002. Sandbox ports bind to 127.0.0.1 and never leave the pod.</td></tr>
+            </tbody>
+          </table>
+
+          <h3>API</h3>
+          <p>What appx and users&#x27; browsers call on the server pod. <code>/__preview/view</code> is checked first, with or without a cookie. Then a request that carries the signed preview cookie is app traffic, whatever its path, so an app&#x27;s own <code>/v1/…</code> routes reach the app. Any other request is an API call: it finds the app&#x27;s worker through the placement controller, a session through its row&#x27;s appId, and forwards to the worker&#x27;s <code>/internal</code> route. <code>503</code> means no worker has room or the app&#x27;s worker can&#x27;t be reached.</p>
+          <p>A request without the cookie reaches the API, so the API&#x27;s mTLS check must be on before the preview host is public. <code>/__preview/view</code> is the one public route; its token is its authentication.</p>
+<div class="routes">
+<details class="route">
+  <summary><span class="method get">GET</span><code class="route-path">/__preview/view</code><span class="route-summary">Exchange a view token for the preview cookie, then open the app at /</span></summary>
+  <div class="route-body">
+<h4>Query</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;appId&quot;,
+    &quot;token&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;appId&quot;: {
+      &quot;minLength&quot;: 1,
+      &quot;maxLength&quot;: 64,
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;token&quot;: {
+      &quot;minLength&quot;: 1,
+      &quot;type&quot;: &quot;string&quot;
+    }
+  }
+}</code></pre>
+<p>The token is an HS256 JWT <code>{ appId, exp }</code> another service mints with <code>PREVIEW_TOKEN_SECRET</code>. It must verify, be unexpired and name the same appId.</p>
+<h4>Response 302</h4>
+<p><code>Location: /</code> and <code>Set-Cookie: promptx_preview=&lt;JWT { appId, exp }&gt;; HttpOnly; Secure; SameSite=None; Partitioned; Path=/</code>. The cookie is signed with the same secret and lasts 12 h.</p>
+<h4>Errors · 400, 403</h4>
+<pre class="schema"><code>{&quot;type&quot;:&quot;object&quot;,&quot;required&quot;:[&quot;error&quot;],&quot;properties&quot;:{&quot;error&quot;:{&quot;type&quot;:&quot;string&quot;}}}</code></pre>
+  </div>
+</details>
+<details class="route">
+  <summary><span class="method get">ANY</span><code class="route-path">/*</code><span class="route-summary">With the preview cookie: the cookie&#x27;s app from its worker, HTTP and WebSocket; places the app if needed</span></summary>
+  <div class="route-body">
+<h4>Request</h4>
+<p>Any method and path, or a WebSocket upgrade, carrying the signed preview cookie.</p>
+<h4>Response</h4>
+<p>The app&#x27;s own response, through its worker&#x27;s port forwarder.</p>
+<h4>Errors · 403, 503</h4>
+<p><code>403</code> when the cookie does not verify or has expired; the request does not fall through to the API.</p>
+<pre class="schema"><code>{&quot;type&quot;:&quot;object&quot;,&quot;required&quot;:[&quot;error&quot;],&quot;properties&quot;:{&quot;error&quot;:{&quot;type&quot;:&quot;string&quot;}}}</code></pre>
+  </div>
+</details>
+<details class="route">
+  <summary><span class="method post">POST</span><code class="route-path">/v1/previews/start</code><span class="route-summary">Place the app and start its sandbox on that worker; returns at once</span></summary>
+  <div class="route-body">
+<h4>Request body</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;appId&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;appId&quot;: {
+      &quot;minLength&quot;: 1,
+      &quot;maxLength&quot;: 64,
+      &quot;type&quot;: &quot;string&quot;
+    }
+  }
+}</code></pre>
+<h4>Response 200</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;appId&quot;,
+    &quot;status&quot;,
+    &quot;port&quot;,
+    &quot;error&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;appId&quot;: {
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;status&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;enum&quot;: [
+        &quot;stopped&quot;,
+        &quot;installing&quot;,
+        &quot;starting&quot;,
+        &quot;running&quot;,
+        &quot;failed&quot;
+      ]
+    },
+    &quot;port&quot;: {
+      &quot;anyOf&quot;: [
+        {
+          &quot;type&quot;: &quot;integer&quot;
+        },
+        {
+          &quot;type&quot;: &quot;null&quot;
+        }
+      ]
+    },
+    &quot;error&quot;: {
+      &quot;anyOf&quot;: [
+        {
+          &quot;type&quot;: &quot;string&quot;
+        },
+        {
+          &quot;type&quot;: &quot;null&quot;
+        }
+      ]
+    }
+  }
+}</code></pre>
+<h4>Errors · 400, 404, 503</h4>
+<pre class="schema"><code>{&quot;type&quot;:&quot;object&quot;,&quot;required&quot;:[&quot;error&quot;],&quot;properties&quot;:{&quot;error&quot;:{&quot;type&quot;:&quot;string&quot;}}}</code></pre>
+  </div>
+</details>
+<details class="route">
+  <summary><span class="method post">POST</span><code class="route-path">/v1/previews/status</code><span class="route-summary">Get the preview&#x27;s status; an app on no worker is stopped</span></summary>
+  <div class="route-body">
+<h4>Request body</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;appId&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;appId&quot;: {
+      &quot;minLength&quot;: 1,
+      &quot;maxLength&quot;: 64,
+      &quot;type&quot;: &quot;string&quot;
+    }
+  }
+}</code></pre>
+<h4>Response 200</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;appId&quot;,
+    &quot;status&quot;,
+    &quot;port&quot;,
+    &quot;error&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;appId&quot;: {
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;status&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;enum&quot;: [
+        &quot;stopped&quot;,
+        &quot;installing&quot;,
+        &quot;starting&quot;,
+        &quot;running&quot;,
+        &quot;failed&quot;
+      ]
+    },
+    &quot;port&quot;: {
+      &quot;anyOf&quot;: [
+        {
+          &quot;type&quot;: &quot;integer&quot;
+        },
+        {
+          &quot;type&quot;: &quot;null&quot;
+        }
+      ]
+    },
+    &quot;error&quot;: {
+      &quot;anyOf&quot;: [
+        {
+          &quot;type&quot;: &quot;string&quot;
+        },
+        {
+          &quot;type&quot;: &quot;null&quot;
+        }
+      ]
+    }
+  }
+}</code></pre>
+<h4>Errors · 400, 503</h4>
+<pre class="schema"><code>{&quot;type&quot;:&quot;object&quot;,&quot;required&quot;:[&quot;error&quot;],&quot;properties&quot;:{&quot;error&quot;:{&quot;type&quot;:&quot;string&quot;}}}</code></pre>
+  </div>
+</details>
+<details class="route">
+  <summary><span class="method post">POST</span><code class="route-path">/v1/previews/stop</code><span class="route-summary">Stop the app&#x27;s sandbox on its worker; an app on no worker is already stopped</span></summary>
+  <div class="route-body">
+<h4>Request body</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;appId&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;appId&quot;: {
+      &quot;minLength&quot;: 1,
+      &quot;maxLength&quot;: 64,
+      &quot;type&quot;: &quot;string&quot;
+    }
+  }
+}</code></pre>
+<h4>Response 200</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;appId&quot;,
+    &quot;status&quot;,
+    &quot;port&quot;,
+    &quot;error&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;appId&quot;: {
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;status&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;enum&quot;: [
+        &quot;stopped&quot;,
+        &quot;installing&quot;,
+        &quot;starting&quot;,
+        &quot;running&quot;,
+        &quot;failed&quot;
+      ]
+    },
+    &quot;port&quot;: {
+      &quot;anyOf&quot;: [
+        {
+          &quot;type&quot;: &quot;integer&quot;
+        },
+        {
+          &quot;type&quot;: &quot;null&quot;
+        }
+      ]
+    },
+    &quot;error&quot;: {
+      &quot;anyOf&quot;: [
+        {
+          &quot;type&quot;: &quot;string&quot;
+        },
+        {
+          &quot;type&quot;: &quot;null&quot;
+        }
+      ]
+    }
+  }
+}</code></pre>
+<h4>Errors · 400, 503</h4>
+<pre class="schema"><code>{&quot;type&quot;:&quot;object&quot;,&quot;required&quot;:[&quot;error&quot;],&quot;properties&quot;:{&quot;error&quot;:{&quot;type&quot;:&quot;string&quot;}}}</code></pre>
+  </div>
+</details>
+<details class="route">
+  <summary><span class="method post">POST</span><code class="route-path">/v1/previews/restart</code><span class="route-summary">Stop, then start the sandbox; places the app if needed</span></summary>
+  <div class="route-body">
+<h4>Request body</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;appId&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;appId&quot;: {
+      &quot;minLength&quot;: 1,
+      &quot;maxLength&quot;: 64,
+      &quot;type&quot;: &quot;string&quot;
+    }
+  }
+}</code></pre>
+<h4>Response 200</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;appId&quot;,
+    &quot;status&quot;,
+    &quot;port&quot;,
+    &quot;error&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;appId&quot;: {
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;status&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;enum&quot;: [
+        &quot;stopped&quot;,
+        &quot;installing&quot;,
+        &quot;starting&quot;,
+        &quot;running&quot;,
+        &quot;failed&quot;
+      ]
+    },
+    &quot;port&quot;: {
+      &quot;anyOf&quot;: [
+        {
+          &quot;type&quot;: &quot;integer&quot;
+        },
+        {
+          &quot;type&quot;: &quot;null&quot;
+        }
+      ]
+    },
+    &quot;error&quot;: {
+      &quot;anyOf&quot;: [
+        {
+          &quot;type&quot;: &quot;string&quot;
+        },
+        {
+          &quot;type&quot;: &quot;null&quot;
+        }
+      ]
+    }
+  }
+}</code></pre>
+<h4>Errors · 400, 404, 503</h4>
+<pre class="schema"><code>{&quot;type&quot;:&quot;object&quot;,&quot;required&quot;:[&quot;error&quot;],&quot;properties&quot;:{&quot;error&quot;:{&quot;type&quot;:&quot;string&quot;}}}</code></pre>
+  </div>
+</details>
+<details class="route">
+  <summary><span class="method post">POST</span><code class="route-path">/v1/previews/exec</code><span class="route-summary">Run a shell command in the app&#x27;s sandbox; places the app if needed</span></summary>
+  <div class="route-body">
+<h4>Request body</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;appId&quot;,
+    &quot;command&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;appId&quot;: {
+      &quot;minLength&quot;: 1,
+      &quot;maxLength&quot;: 64,
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;command&quot;: {
+      &quot;minLength&quot;: 1,
+      &quot;maxLength&quot;: 4000,
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;timeoutMs&quot;: {
+      &quot;minimum&quot;: 1000,
+      &quot;maximum&quot;: 240000,
+      &quot;default&quot;: 120000,
+      &quot;type&quot;: &quot;integer&quot;
+    }
+  }
+}</code></pre>
+<h4>Response 200</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;appId&quot;,
+    &quot;command&quot;,
+    &quot;exitCode&quot;,
+    &quot;durationMs&quot;,
+    &quot;output&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;appId&quot;: {
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;command&quot;: {
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;exitCode&quot;: {
+      &quot;anyOf&quot;: [
+        {
+          &quot;type&quot;: &quot;integer&quot;
+        },
+        {
+          &quot;type&quot;: &quot;null&quot;
+        }
+      ]
+    },
+    &quot;durationMs&quot;: {
+      &quot;type&quot;: &quot;integer&quot;
+    },
+    &quot;output&quot;: {
+      &quot;maxLength&quot;: 16384,
+      &quot;type&quot;: &quot;string&quot;
+    }
+  }
+}</code></pre>
+<h4>Errors · 400, 404, 503</h4>
+<pre class="schema"><code>{&quot;type&quot;:&quot;object&quot;,&quot;required&quot;:[&quot;error&quot;],&quot;properties&quot;:{&quot;error&quot;:{&quot;type&quot;:&quot;string&quot;}}}</code></pre>
+  </div>
+</details>
+<details class="route">
+  <summary><span class="method post">POST</span><code class="route-path">/v1/browser/session</code><span class="route-summary">Place the app and open a session on its worker</span></summary>
+  <div class="route-body">
+<h4>Request body</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;appId&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;appId&quot;: {
+      &quot;minLength&quot;: 1,
+      &quot;maxLength&quot;: 64,
+      &quot;type&quot;: &quot;string&quot;
+    }
+  }
+}</code></pre>
+<h4>Response 200</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;sessionId&quot;,
+    &quot;appId&quot;,
+    &quot;previewUrl&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;sessionId&quot;: {
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;appId&quot;: {
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;previewUrl&quot;: {
+      &quot;anyOf&quot;: [
+        {
+          &quot;type&quot;: &quot;string&quot;
+        },
+        {
+          &quot;type&quot;: &quot;null&quot;
+        }
+      ]
+    }
+  }
+}</code></pre>
+<h4>Errors · 400, 429, 503</h4>
+<pre class="schema"><code>{&quot;type&quot;:&quot;object&quot;,&quot;required&quot;:[&quot;error&quot;],&quot;properties&quot;:{&quot;error&quot;:{&quot;type&quot;:&quot;string&quot;}}}</code></pre>
+  </div>
+</details>
+<details class="route">
+  <summary><span class="method post">POST</span><code class="route-path">/v1/browser/session/:id/navigate</code><span class="route-summary">Go to a URL; a path such as /orders opens the app&#x27;s preview</span></summary>
+  <div class="route-body">
+<h4>Request body</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;url&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;url&quot;: {
+      &quot;minLength&quot;: 1,
+      &quot;maxLength&quot;: 4000,
+      &quot;type&quot;: &quot;string&quot;
+    }
+  }
+}</code></pre>
+<h4>Response 200</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;title&quot;,
+    &quot;url&quot;,
+    &quot;text&quot;,
+    &quot;refs&quot;,
+    &quot;status&quot;,
+    &quot;error&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;title&quot;: {
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;url&quot;: {
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;text&quot;: {
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;refs&quot;: {
+      &quot;type&quot;: &quot;array&quot;,
+      &quot;items&quot;: {
+        &quot;type&quot;: &quot;object&quot;,
+        &quot;required&quot;: [
+          &quot;ref&quot;,
+          &quot;tag&quot;,
+          &quot;role&quot;,
+          &quot;name&quot;,
+          &quot;value&quot;,
+          &quot;placeholder&quot;,
+          &quot;href&quot;
+        ],
+        &quot;properties&quot;: {
+          &quot;ref&quot;: {
+            &quot;type&quot;: &quot;integer&quot;
+          },
+          &quot;tag&quot;: {
+            &quot;type&quot;: &quot;string&quot;
+          },
+          &quot;role&quot;: {
+            &quot;anyOf&quot;: [
+              {
+                &quot;type&quot;: &quot;string&quot;
+              },
+              {
+                &quot;type&quot;: &quot;null&quot;
+              }
+            ]
+          },
+          &quot;name&quot;: {
+            &quot;type&quot;: &quot;string&quot;
+          },
+          &quot;value&quot;: {
+            &quot;type&quot;: &quot;string&quot;
+          },
+          &quot;placeholder&quot;: {
+            &quot;type&quot;: &quot;string&quot;
+          },
+          &quot;href&quot;: {
+            &quot;type&quot;: &quot;string&quot;
+          }
+        }
+      }
+    },
+    &quot;status&quot;: {
+      &quot;anyOf&quot;: [
+        {
+          &quot;type&quot;: &quot;integer&quot;
+        },
+        {
+          &quot;type&quot;: &quot;null&quot;
+        }
+      ]
+    },
+    &quot;error&quot;: {
+      &quot;anyOf&quot;: [
+        {
+          &quot;type&quot;: &quot;string&quot;
+        },
+        {
+          &quot;type&quot;: &quot;null&quot;
+        }
+      ]
+    }
+  }
+}</code></pre>
+<h4>Errors · 400, 404, 503, 504</h4>
+<pre class="schema"><code>{&quot;type&quot;:&quot;object&quot;,&quot;required&quot;:[&quot;error&quot;],&quot;properties&quot;:{&quot;error&quot;:{&quot;type&quot;:&quot;string&quot;}}}</code></pre>
+  </div>
+</details>
+<details class="route">
+  <summary><span class="method post">POST</span><code class="route-path">/v1/browser/session/:id/read</code><span class="route-summary">Read the page&#x27;s text and the refs it can act on</span></summary>
+  <div class="route-body">
+<h4>Request body</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;properties&quot;: {
+    &quot;maxChars&quot;: {
+      &quot;minimum&quot;: 1,
+      &quot;maximum&quot;: 100000,
+      &quot;type&quot;: &quot;integer&quot;
+    }
+  }
+}</code></pre>
+<h4>Response 200</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;title&quot;,
+    &quot;url&quot;,
+    &quot;text&quot;,
+    &quot;refs&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;title&quot;: {
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;url&quot;: {
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;text&quot;: {
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;refs&quot;: {
+      &quot;type&quot;: &quot;array&quot;,
+      &quot;items&quot;: {
+        &quot;type&quot;: &quot;object&quot;,
+        &quot;required&quot;: [
+          &quot;ref&quot;,
+          &quot;tag&quot;,
+          &quot;role&quot;,
+          &quot;name&quot;,
+          &quot;value&quot;,
+          &quot;placeholder&quot;,
+          &quot;href&quot;
+        ],
+        &quot;properties&quot;: {
+          &quot;ref&quot;: {
+            &quot;type&quot;: &quot;integer&quot;
+          },
+          &quot;tag&quot;: {
+            &quot;type&quot;: &quot;string&quot;
+          },
+          &quot;role&quot;: {
+            &quot;anyOf&quot;: [
+              {
+                &quot;type&quot;: &quot;string&quot;
+              },
+              {
+                &quot;type&quot;: &quot;null&quot;
+              }
+            ]
+          },
+          &quot;name&quot;: {
+            &quot;type&quot;: &quot;string&quot;
+          },
+          &quot;value&quot;: {
+            &quot;type&quot;: &quot;string&quot;
+          },
+          &quot;placeholder&quot;: {
+            &quot;type&quot;: &quot;string&quot;
+          },
+          &quot;href&quot;: {
+            &quot;type&quot;: &quot;string&quot;
+          }
+        }
+      }
+    }
+  }
+}</code></pre>
+<h4>Errors · 400, 404, 503, 504</h4>
+<pre class="schema"><code>{&quot;type&quot;:&quot;object&quot;,&quot;required&quot;:[&quot;error&quot;],&quot;properties&quot;:{&quot;error&quot;:{&quot;type&quot;:&quot;string&quot;}}}</code></pre>
+  </div>
+</details>
+<details class="route">
+  <summary><span class="method post">POST</span><code class="route-path">/v1/browser/session/:id/click</code><span class="route-summary">Click the element with a ref</span></summary>
+  <div class="route-body">
+<h4>Request body</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;ref&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;ref&quot;: {
+      &quot;minimum&quot;: 1,
+      &quot;type&quot;: &quot;integer&quot;
+    }
+  }
+}</code></pre>
+<h4>Response 200</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;title&quot;,
+    &quot;url&quot;,
+    &quot;text&quot;,
+    &quot;refs&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;title&quot;: {
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;url&quot;: {
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;text&quot;: {
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;refs&quot;: {
+      &quot;type&quot;: &quot;array&quot;,
+      &quot;items&quot;: {
+        &quot;type&quot;: &quot;object&quot;,
+        &quot;required&quot;: [
+          &quot;ref&quot;,
+          &quot;tag&quot;,
+          &quot;role&quot;,
+          &quot;name&quot;,
+          &quot;value&quot;,
+          &quot;placeholder&quot;,
+          &quot;href&quot;
+        ],
+        &quot;properties&quot;: {
+          &quot;ref&quot;: {
+            &quot;type&quot;: &quot;integer&quot;
+          },
+          &quot;tag&quot;: {
+            &quot;type&quot;: &quot;string&quot;
+          },
+          &quot;role&quot;: {
+            &quot;anyOf&quot;: [
+              {
+                &quot;type&quot;: &quot;string&quot;
+              },
+              {
+                &quot;type&quot;: &quot;null&quot;
+              }
+            ]
+          },
+          &quot;name&quot;: {
+            &quot;type&quot;: &quot;string&quot;
+          },
+          &quot;value&quot;: {
+            &quot;type&quot;: &quot;string&quot;
+          },
+          &quot;placeholder&quot;: {
+            &quot;type&quot;: &quot;string&quot;
+          },
+          &quot;href&quot;: {
+            &quot;type&quot;: &quot;string&quot;
+          }
+        }
+      }
+    }
+  }
+}</code></pre>
+<h4>Errors · 400, 404, 503, 504</h4>
+<pre class="schema"><code>{&quot;type&quot;:&quot;object&quot;,&quot;required&quot;:[&quot;error&quot;],&quot;properties&quot;:{&quot;error&quot;:{&quot;type&quot;:&quot;string&quot;}}}</code></pre>
+  </div>
+</details>
+<details class="route">
+  <summary><span class="method post">POST</span><code class="route-path">/v1/browser/session/:id/type</code><span class="route-summary">Type into the element with a ref, then submit if asked</span></summary>
+  <div class="route-body">
+<h4>Request body</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;ref&quot;,
+    &quot;text&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;ref&quot;: {
+      &quot;minimum&quot;: 1,
+      &quot;type&quot;: &quot;integer&quot;
+    },
+    &quot;text&quot;: {
+      &quot;maxLength&quot;: 10000,
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;submit&quot;: {
+      &quot;default&quot;: false,
+      &quot;type&quot;: &quot;boolean&quot;
+    }
+  }
+}</code></pre>
+<h4>Response 200</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;title&quot;,
+    &quot;url&quot;,
+    &quot;text&quot;,
+    &quot;refs&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;title&quot;: {
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;url&quot;: {
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;text&quot;: {
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;refs&quot;: {
+      &quot;type&quot;: &quot;array&quot;,
+      &quot;items&quot;: {
+        &quot;type&quot;: &quot;object&quot;,
+        &quot;required&quot;: [
+          &quot;ref&quot;,
+          &quot;tag&quot;,
+          &quot;role&quot;,
+          &quot;name&quot;,
+          &quot;value&quot;,
+          &quot;placeholder&quot;,
+          &quot;href&quot;
+        ],
+        &quot;properties&quot;: {
+          &quot;ref&quot;: {
+            &quot;type&quot;: &quot;integer&quot;
+          },
+          &quot;tag&quot;: {
+            &quot;type&quot;: &quot;string&quot;
+          },
+          &quot;role&quot;: {
+            &quot;anyOf&quot;: [
+              {
+                &quot;type&quot;: &quot;string&quot;
+              },
+              {
+                &quot;type&quot;: &quot;null&quot;
+              }
+            ]
+          },
+          &quot;name&quot;: {
+            &quot;type&quot;: &quot;string&quot;
+          },
+          &quot;value&quot;: {
+            &quot;type&quot;: &quot;string&quot;
+          },
+          &quot;placeholder&quot;: {
+            &quot;type&quot;: &quot;string&quot;
+          },
+          &quot;href&quot;: {
+            &quot;type&quot;: &quot;string&quot;
+          }
+        }
+      }
+    }
+  }
+}</code></pre>
+<h4>Errors · 400, 404, 503, 504</h4>
+<pre class="schema"><code>{&quot;type&quot;:&quot;object&quot;,&quot;required&quot;:[&quot;error&quot;],&quot;properties&quot;:{&quot;error&quot;:{&quot;type&quot;:&quot;string&quot;}}}</code></pre>
+  </div>
+</details>
+<details class="route">
+  <summary><span class="method post">POST</span><code class="route-path">/v1/browser/session/:id/screenshot</code><span class="route-summary">Screenshot the page as a PNG</span></summary>
+  <div class="route-body">
+<h4>Request body</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;properties&quot;: {
+    &quot;fullPage&quot;: {
+      &quot;default&quot;: false,
+      &quot;type&quot;: &quot;boolean&quot;
+    }
+  }
+}</code></pre>
+<h4>Response 200</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;png&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;png&quot;: {
+      &quot;contentEncoding&quot;: &quot;base64&quot;,
+      &quot;type&quot;: &quot;string&quot;
+    }
+  }
+}</code></pre>
+<h4>Errors · 400, 404, 503, 504</h4>
+<pre class="schema"><code>{&quot;type&quot;:&quot;object&quot;,&quot;required&quot;:[&quot;error&quot;],&quot;properties&quot;:{&quot;error&quot;:{&quot;type&quot;:&quot;string&quot;}}}</code></pre>
+  </div>
+</details>
+<details class="route">
+  <summary><span class="method post">POST</span><code class="route-path">/v1/browser/session/:id/run</code><span class="route-summary">Run Playwright code in the runner: the body of async (page) =&gt; …</span></summary>
+  <div class="route-body">
+<h4>Request body</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;code&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;code&quot;: {
+      &quot;minLength&quot;: 1,
+      &quot;maxLength&quot;: 100000,
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;timeoutMs&quot;: {
+      &quot;minimum&quot;: 1000,
+      &quot;maximum&quot;: 120000,
+      &quot;default&quot;: 60000,
+      &quot;type&quot;: &quot;integer&quot;
+    }
+  }
+}</code></pre>
+<h4>Response 200</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;result&quot;,
+    &quot;error&quot;,
+    &quot;durationMs&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;result&quot;: {},
+    &quot;error&quot;: {
+      &quot;anyOf&quot;: [
+        {
+          &quot;type&quot;: &quot;string&quot;
+        },
+        {
+          &quot;type&quot;: &quot;null&quot;
+        }
+      ]
+    },
+    &quot;durationMs&quot;: {
+      &quot;type&quot;: &quot;integer&quot;
+    }
+  }
+}</code></pre>
+<h4>Errors · 400, 404, 503</h4>
+<pre class="schema"><code>{&quot;type&quot;:&quot;object&quot;,&quot;required&quot;:[&quot;error&quot;],&quot;properties&quot;:{&quot;error&quot;:{&quot;type&quot;:&quot;string&quot;}}}</code></pre>
+  </div>
+</details>
+<details class="route">
+  <summary><span class="method post">POST</span><code class="route-path">/v1/browser/session/:id/close</code><span class="route-summary">Close the session on its worker and delete its row</span></summary>
+  <div class="route-body">
+<h4>Response 200</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;sessionId&quot;,
+    &quot;closed&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;sessionId&quot;: {
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;closed&quot;: {
+      &quot;type&quot;: &quot;boolean&quot;
+    }
+  }
+}</code></pre>
+<h4>Errors · 400, 404, 503</h4>
+<pre class="schema"><code>{&quot;type&quot;:&quot;object&quot;,&quot;required&quot;:[&quot;error&quot;],&quot;properties&quot;:{&quot;error&quot;:{&quot;type&quot;:&quot;string&quot;}}}</code></pre>
+  </div>
+</details>
+</div>
+        </section>
+
+        <section class="doc-section" id="sandbox">
+          <h2>Application sandboxes</h2>
+          <p>Each worker pod runs the sandboxes of the apps placed on it, one per app. The <code>core/sandbox</code> plugin owns them in memory. The <code>previews</code> row records each app's status and which worker runs it, and only that worker writes it.</p>
+
+          <figure>
+            <div class="diagram">
+              <svg class="c4" viewBox="0 0 1000 720" role="img" aria-label="A sandbox on a worker pod. Calls come from the server pod's preview API to the worker's internal API: start, status, stop, restart or exec with an appId. App traffic comes from the preview proxy to the worker's port forwarder on port 4002. The internal API drives the core/sandbox plugin, app.sandbox. Its sandbox manager maps an appId to its sandbox in memory, runs one start at a time per app, writes status to the previews row in Postgres only where host is this pod, publishes app.updated to Redis on each change, and on startup marks this pod's rows stopped. It takes a port from the pod's pool, 4100 to 4149, and spawns the sandbox under bubblewrap. The sweeper stops sandboxes idle for 15 minutes. The port forwarder sends an app's traffic to 127.0.0.1 on its port, and when the app has no running sandbox it wakes it through the manager. Each sandbox has its own network namespace and holds the app's dev server, npm run dev with PORT 3000 inside mapped to 127.0.0.1 on the pool port and watching files by polling; install, which runs npm ci, prisma generate and prisma db push when the lockfile changed; and exec, sh -c with a 2 minute default and 4 minute maximum, returning the exit code and the last 16 KB of output. A sandbox mounts the app's folder from the shared workspace volume at /app, and node_modules from the pod-local deps cache. Its only egress is the app's database and the internet, including the npm registry. Other apps get one sandbox each on the same pod.">
+                <defs>
+                  <marker id="sb-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                    <path d="M0 0L10 5L0 10z" class="arrowhead"/>
+                  </marker>
+                </defs>
+
+                <rect class="component" x="36" y="120" width="44" height="540" rx="6"/>
+                <text class="on-light name" x="58" y="388" text-anchor="middle" transform="rotate(-90 58 390)">port forwarder</text>
+                <text class="on-light type" x="58" y="402" text-anchor="middle" transform="rotate(-90 58 390)">[:4002 · &lt;appId&gt; → 127.0.0.1:&lt;port&gt;]</text>
+
+                <rect class="component" x="100" y="120" width="580" height="44" rx="6"/>
+                <text class="on-light name" x="390" y="139" text-anchor="middle">internal API</text>
+                <text class="on-light type" x="390" y="155" text-anchor="middle">[/internal/preview/* · drives app.sandbox]</text>
+
+                <rect class="group" x="100" y="184" width="580" height="492" rx="8"/>
+                <text class="label name" x="668" y="668" text-anchor="end">core/sandbox plugin · app.sandbox</text>
+
+                <rect class="component" x="116" y="200" width="548" height="90" rx="8"/>
+                <text class="on-light name" x="390" y="222" text-anchor="middle">sandbox manager</text>
+                <text class="on-light type" x="390" y="239" text-anchor="middle">[appId → sandbox · in memory]</text>
+                <text class="on-light type" x="132" y="262">one start at a time per app</text>
+                <text class="on-light type" x="132" y="279">writes the row only WHERE host = me</text>
+                <text class="on-light type" x="400" y="262">each change → app.updated</text>
+                <text class="on-light type" x="400" y="279">pod starts → its rows → stopped</text>
+
+                <rect class="component" x="116" y="306" width="240" height="44" rx="6"/>
+                <text class="on-light name" x="236" y="325" text-anchor="middle">port pool</text>
+                <text class="on-light type" x="236" y="341" text-anchor="middle">[4100–4149 · this pod]</text>
+
+                <rect class="component" x="424" y="306" width="240" height="44" rx="6"/>
+                <text class="on-light name" x="544" y="325" text-anchor="middle">sweeper</text>
+                <text class="on-light type" x="544" y="341" text-anchor="middle">[idle 15 min → stop]</text>
+
+                <rect class="group" x="116" y="366" width="548" height="236" rx="8"/>
+                <text class="label name" x="128" y="596">sandboxes · bwrap · own network namespace</text>
+
+                <rect class="group" x="132" y="382" width="516" height="160" rx="8"/>
+                <text class="label name" x="144" y="534">sandbox · app A</text>
+
+                <rect class="component" x="148" y="398" width="150" height="120" rx="6"/>
+                <text class="on-light name" x="223" y="420" text-anchor="middle">dev server</text>
+                <text class="on-light type" x="223" y="437" text-anchor="middle">[npm run dev]</text>
+                <text class="on-light type" x="223" y="460" text-anchor="middle">PORT=3000 inside</text>
+                <text class="on-light type" x="223" y="477" text-anchor="middle">→ 127.0.0.1:&lt;port&gt;</text>
+                <text class="on-light type" x="223" y="494" text-anchor="middle">watches by polling</text>
+
+                <rect class="component" x="314" y="398" width="160" height="120" rx="6"/>
+                <text class="on-light name" x="394" y="420" text-anchor="middle">install</text>
+                <text class="on-light type" x="394" y="437" text-anchor="middle">[when the lockfile changed]</text>
+                <text class="on-light type" x="394" y="460" text-anchor="middle">npm ci</text>
+                <text class="on-light type" x="394" y="477" text-anchor="middle">prisma generate</text>
+                <text class="on-light type" x="394" y="494" text-anchor="middle">prisma db push</text>
+
+                <rect class="component" x="490" y="398" width="142" height="120" rx="6"/>
+                <text class="on-light name" x="561" y="420" text-anchor="middle">exec</text>
+                <text class="on-light type" x="561" y="437" text-anchor="middle">[sh -c]</text>
+                <text class="on-light type" x="561" y="460" text-anchor="middle">2 min default</text>
+                <text class="on-light type" x="561" y="477" text-anchor="middle">4 min max</text>
+                <text class="on-light type" x="561" y="494" text-anchor="middle">exit + last 16 KB</text>
+
+                <rect class="tbd" x="132" y="550" width="516" height="30" rx="6"/>
+                <text class="note" x="390" y="570" text-anchor="middle">app B, app C … one sandbox per app on this pod</text>
+
+                <rect class="component" x="116" y="616" width="240" height="44" rx="6"/>
+                <text class="on-light name" x="236" y="635" text-anchor="middle">deps cache</text>
+                <text class="on-light type" x="236" y="651" text-anchor="middle">[pod-local disk · /app/node_modules]</text>
+
+                <rect class="external" x="720" y="180" width="260" height="62" rx="8"/>
+                <text class="on-dark name" x="850" y="201" text-anchor="middle">Postgres</text>
+                <text class="on-dark type" x="850" y="218" text-anchor="middle">previews: one row per app</text>
+                <text class="on-dark type" x="850" y="233" text-anchor="middle">status · host · port · error</text>
+
+                <rect class="external" x="720" y="252" width="260" height="46" rx="8"/>
+                <text class="on-dark name" x="850" y="271" text-anchor="middle">Redis</text>
+                <text class="on-dark type" x="850" y="288" text-anchor="middle">[app.updated]</text>
+
+                <rect class="external" x="720" y="382" width="260" height="64" rx="8"/>
+                <text class="on-dark name" x="850" y="404" text-anchor="middle">Workspace volume</text>
+                <text class="on-dark type" x="850" y="421" text-anchor="middle">[shared · RWX]</text>
+                <text class="on-dark type" x="850" y="437" text-anchor="middle">WORKSPACE_ROOT/&lt;appId&gt;</text>
+
+                <rect class="external" x="720" y="458" width="260" height="46" rx="8"/>
+                <text class="on-dark name" x="850" y="477" text-anchor="middle">App database</text>
+                <text class="on-dark type" x="850" y="494" text-anchor="middle">[its own Postgres role]</text>
+
+                <rect class="external" x="720" y="516" width="260" height="46" rx="8"/>
+                <text class="on-dark name" x="850" y="535" text-anchor="middle">Internet</text>
+                <text class="on-dark type" x="850" y="552" text-anchor="middle">[npm registry · public APIs]</text>
+
+                <line class="edge" x1="58" y1="16" x2="58" y2="118" marker-end="url(#sb-arrow)"/>
+                <text class="edge-label" x="66" y="46">app traffic, HTTP + WS</text>
+                <text class="note" x="66" y="60">from the preview proxy, to :4002</text>
+
+                <line class="edge" x1="390" y1="16" x2="390" y2="118" marker-end="url(#sb-arrow)"/>
+                <text class="edge-label" x="398" y="46">start · status · stop · restart · exec</text>
+                <text class="note" x="398" y="60">from the server pod's preview API</text>
+
+                <line class="edge" x1="390" y1="164" x2="390" y2="198" marker-end="url(#sb-arrow)"/>
+
+                <line class="edge" x1="80" y1="245" x2="114" y2="245" marker-end="url(#sb-arrow)"/>
+                <text class="edge-label halo" x="97" y="238" text-anchor="middle">wake</text>
+
+                <line class="edge" x1="664" y1="212" x2="718" y2="212" marker-end="url(#sb-arrow)"/>
+                <text class="edge-label halo" x="691" y="204" text-anchor="middle">status</text>
+                <line class="edge" x1="664" y1="272" x2="718" y2="272" marker-end="url(#sb-arrow)"/>
+
+                <line class="edge" x1="236" y1="290" x2="236" y2="304" marker-end="url(#sb-arrow)"/>
+                <line class="edge" x1="390" y1="290" x2="390" y2="364" marker-end="url(#sb-arrow)"/>
+                <text class="edge-label" x="390" y="326" text-anchor="middle">spawn</text>
+                <text class="note" x="390" y="340" text-anchor="middle">bwrap</text>
+                <line class="edge" x1="544" y1="350" x2="544" y2="364" marker-end="url(#sb-arrow)"/>
+
+                <line class="edge" x1="80" y1="458" x2="146" y2="458" marker-end="url(#sb-arrow)"/>
+                <line class="edge" x1="314" y1="458" x2="300" y2="458" marker-end="url(#sb-arrow)"/>
+
+                <line class="edge" x1="236" y1="616" x2="236" y2="604" marker-end="url(#sb-arrow)"/>
+
+                <line class="edge" x1="648" y1="410" x2="718" y2="410" marker-end="url(#sb-arrow)"/>
+                <text class="edge-label halo" x="683" y="402" text-anchor="middle">/app</text>
+                <line class="edge" x1="648" y1="476" x2="718" y2="476" marker-end="url(#sb-arrow)"/>
+                <text class="edge-label halo" x="683" y="468" text-anchor="middle">egress</text>
+                <line class="edge" x1="648" y1="532" x2="718" y2="532" marker-end="url(#sb-arrow)"/>
+                <text class="edge-label halo" x="683" y="524" text-anchor="middle">egress</text>
+              </svg>
+            </div>
+            <figcaption>C4 component diagram: a sandbox on a worker pod. Solid arrows are calls. Grey boxes are outside preview-runner.</figcaption>
+          </figure>
+
+          <h3>Endpoints</h3>
+<div class="routes">
+<details class="route">
+  <summary><span class="method post">POST</span><code class="route-path">/internal/preview/start</code><span class="route-summary">Start the app&#x27;s sandbox; returns at once</span></summary>
+  <div class="route-body">
+<h4>Request body</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;appId&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;appId&quot;: {
+      &quot;minLength&quot;: 1,
+      &quot;maxLength&quot;: 64,
+      &quot;type&quot;: &quot;string&quot;
+    }
+  }
+}</code></pre>
+<h4>Response 200</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;appId&quot;,
+    &quot;status&quot;,
+    &quot;port&quot;,
+    &quot;error&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;appId&quot;: {
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;status&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;enum&quot;: [
+        &quot;stopped&quot;,
+        &quot;installing&quot;,
+        &quot;starting&quot;,
+        &quot;running&quot;,
+        &quot;failed&quot;
+      ]
+    },
+    &quot;port&quot;: {
+      &quot;anyOf&quot;: [
+        {
+          &quot;type&quot;: &quot;integer&quot;
+        },
+        {
+          &quot;type&quot;: &quot;null&quot;
+        }
+      ]
+    },
+    &quot;error&quot;: {
+      &quot;anyOf&quot;: [
+        {
+          &quot;type&quot;: &quot;string&quot;
+        },
+        {
+          &quot;type&quot;: &quot;null&quot;
+        }
+      ]
+    }
+  }
+}</code></pre>
+<h4>Errors · 400, 404, 503</h4>
+<pre class="schema"><code>{&quot;type&quot;:&quot;object&quot;,&quot;required&quot;:[&quot;error&quot;],&quot;properties&quot;:{&quot;error&quot;:{&quot;type&quot;:&quot;string&quot;}}}</code></pre>
+  </div>
+</details>
+<details class="route">
+  <summary><span class="method post">POST</span><code class="route-path">/internal/preview/status</code><span class="route-summary">Get the sandbox&#x27;s status</span></summary>
+  <div class="route-body">
+<h4>Request body</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;appId&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;appId&quot;: {
+      &quot;minLength&quot;: 1,
+      &quot;maxLength&quot;: 64,
+      &quot;type&quot;: &quot;string&quot;
+    }
+  }
+}</code></pre>
+<h4>Response 200</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;appId&quot;,
+    &quot;status&quot;,
+    &quot;port&quot;,
+    &quot;error&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;appId&quot;: {
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;status&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;enum&quot;: [
+        &quot;stopped&quot;,
+        &quot;installing&quot;,
+        &quot;starting&quot;,
+        &quot;running&quot;,
+        &quot;failed&quot;
+      ]
+    },
+    &quot;port&quot;: {
+      &quot;anyOf&quot;: [
+        {
+          &quot;type&quot;: &quot;integer&quot;
+        },
+        {
+          &quot;type&quot;: &quot;null&quot;
+        }
+      ]
+    },
+    &quot;error&quot;: {
+      &quot;anyOf&quot;: [
+        {
+          &quot;type&quot;: &quot;string&quot;
+        },
+        {
+          &quot;type&quot;: &quot;null&quot;
+        }
+      ]
+    }
+  }
+}</code></pre>
+<h4>Errors · 400</h4>
+<pre class="schema"><code>{&quot;type&quot;:&quot;object&quot;,&quot;required&quot;:[&quot;error&quot;],&quot;properties&quot;:{&quot;error&quot;:{&quot;type&quot;:&quot;string&quot;}}}</code></pre>
+  </div>
+</details>
+<details class="route">
+  <summary><span class="method post">POST</span><code class="route-path">/internal/preview/stop</code><span class="route-summary">Stop the sandbox</span></summary>
+  <div class="route-body">
+<h4>Request body</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;appId&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;appId&quot;: {
+      &quot;minLength&quot;: 1,
+      &quot;maxLength&quot;: 64,
+      &quot;type&quot;: &quot;string&quot;
+    }
+  }
+}</code></pre>
+<h4>Response 200</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;appId&quot;,
+    &quot;status&quot;,
+    &quot;port&quot;,
+    &quot;error&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;appId&quot;: {
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;status&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;enum&quot;: [
+        &quot;stopped&quot;,
+        &quot;installing&quot;,
+        &quot;starting&quot;,
+        &quot;running&quot;,
+        &quot;failed&quot;
+      ]
+    },
+    &quot;port&quot;: {
+      &quot;anyOf&quot;: [
+        {
+          &quot;type&quot;: &quot;integer&quot;
+        },
+        {
+          &quot;type&quot;: &quot;null&quot;
+        }
+      ]
+    },
+    &quot;error&quot;: {
+      &quot;anyOf&quot;: [
+        {
+          &quot;type&quot;: &quot;string&quot;
+        },
+        {
+          &quot;type&quot;: &quot;null&quot;
+        }
+      ]
+    }
+  }
+}</code></pre>
+<h4>Errors · 400</h4>
+<pre class="schema"><code>{&quot;type&quot;:&quot;object&quot;,&quot;required&quot;:[&quot;error&quot;],&quot;properties&quot;:{&quot;error&quot;:{&quot;type&quot;:&quot;string&quot;}}}</code></pre>
+  </div>
+</details>
+<details class="route">
+  <summary><span class="method post">POST</span><code class="route-path">/internal/preview/restart</code><span class="route-summary">Stop, then start the sandbox</span></summary>
+  <div class="route-body">
+<h4>Request body</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;appId&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;appId&quot;: {
+      &quot;minLength&quot;: 1,
+      &quot;maxLength&quot;: 64,
+      &quot;type&quot;: &quot;string&quot;
+    }
+  }
+}</code></pre>
+<h4>Response 200</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;appId&quot;,
+    &quot;status&quot;,
+    &quot;port&quot;,
+    &quot;error&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;appId&quot;: {
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;status&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;enum&quot;: [
+        &quot;stopped&quot;,
+        &quot;installing&quot;,
+        &quot;starting&quot;,
+        &quot;running&quot;,
+        &quot;failed&quot;
+      ]
+    },
+    &quot;port&quot;: {
+      &quot;anyOf&quot;: [
+        {
+          &quot;type&quot;: &quot;integer&quot;
+        },
+        {
+          &quot;type&quot;: &quot;null&quot;
+        }
+      ]
+    },
+    &quot;error&quot;: {
+      &quot;anyOf&quot;: [
+        {
+          &quot;type&quot;: &quot;string&quot;
+        },
+        {
+          &quot;type&quot;: &quot;null&quot;
+        }
+      ]
+    }
+  }
+}</code></pre>
+<h4>Errors · 400, 404, 503</h4>
+<pre class="schema"><code>{&quot;type&quot;:&quot;object&quot;,&quot;required&quot;:[&quot;error&quot;],&quot;properties&quot;:{&quot;error&quot;:{&quot;type&quot;:&quot;string&quot;}}}</code></pre>
+  </div>
+</details>
+<details class="route">
+  <summary><span class="method post">POST</span><code class="route-path">/internal/preview/exec</code><span class="route-summary">Run a shell command in the app&#x27;s sandbox</span></summary>
+  <div class="route-body">
+<h4>Request body</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;appId&quot;,
+    &quot;command&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;appId&quot;: {
+      &quot;minLength&quot;: 1,
+      &quot;maxLength&quot;: 64,
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;command&quot;: {
+      &quot;minLength&quot;: 1,
+      &quot;maxLength&quot;: 4000,
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;timeoutMs&quot;: {
+      &quot;minimum&quot;: 1000,
+      &quot;maximum&quot;: 240000,
+      &quot;default&quot;: 120000,
+      &quot;type&quot;: &quot;integer&quot;
+    }
+  }
+}</code></pre>
+<h4>Response 200</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;appId&quot;,
+    &quot;command&quot;,
+    &quot;exitCode&quot;,
+    &quot;durationMs&quot;,
+    &quot;output&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;appId&quot;: {
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;command&quot;: {
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;exitCode&quot;: {
+      &quot;anyOf&quot;: [
+        {
+          &quot;type&quot;: &quot;integer&quot;
+        },
+        {
+          &quot;type&quot;: &quot;null&quot;
+        }
+      ]
+    },
+    &quot;durationMs&quot;: {
+      &quot;type&quot;: &quot;integer&quot;
+    },
+    &quot;output&quot;: {
+      &quot;maxLength&quot;: 16384,
+      &quot;type&quot;: &quot;string&quot;
+    }
+  }
+}</code></pre>
+<h4>Errors · 400, 404</h4>
+<pre class="schema"><code>{&quot;type&quot;:&quot;object&quot;,&quot;required&quot;:[&quot;error&quot;],&quot;properties&quot;:{&quot;error&quot;:{&quot;type&quot;:&quot;string&quot;}}}</code></pre>
+  </div>
+</details>
+</div>
+
+          <h3>Lifecycle</h3>
+          <table>
+            <thead>
+              <tr><th>Event</th><th>What happens</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>A worker pod starts</td><td>Rows with <code>host</code> = this pod → <code>stopped</code>; their sandboxes died with it.</td></tr>
+              <tr><td>Any status change</td><td>Written to the row <code>WHERE host = me</code> and published as <code>app.updated</code>.</td></tr>
+              <tr><td>Start</td><td>App folder missing → <code>404</code>. Already <code>installing</code>, <code>starting</code> or <code>running</code> → return its status. No free pool port → <code>503</code>. Otherwise take the port, set the row to <code>installing</code> with <code>host = me</code>, and return at once. Then in the background: <code>npm ci</code> if the lockfile changed since this pod's deps cache was built → <code>prisma generate</code> → <code>prisma db push</code> → <code>starting</code>, launch the dev server → <code>running</code> once it listens. A failing step, or no listener within 90 s → <code>failed</code> with the tail of its output.</td></tr>
+              <tr><td>Preview request, <code>running</code></td><td>The port forwarder sends it to <code>127.0.0.1:&lt;port&gt;</code>. Requests and open WebSockets count as use.</td></tr>
+              <tr><td>Preview request, <code>stopped</code></td><td>The port forwarder wakes it through the manager and holds the request until <code>running</code>, up to 90 s. Still installing after that → <code>503</code> with <code>Retry-After</code>.</td></tr>
+              <tr><td>Preview request, <code>failed</code></td><td><code>502</code> with the error. Traffic doesn't restart it; start or restart does.</td></tr>
+              <tr><td>Exec</td><td><code>sh -c</code> in the app's confinement, whether or not the dev server runs. Waits for a running install first. At <code>timeoutMs</code> (2 min default, 4 min max) the process tree is killed and <code>exitCode</code> is <code>null</code>. Counts as use.</td></tr>
+              <tr><td>Stop</td><td>Kill the process tree, a running install included → free the port → <code>stopped</code>.</td></tr>
+              <tr><td>Restart</td><td>Stop, then start.</td></tr>
+              <tr><td>Dev server exits on its own</td><td>Free the port → <code>failed</code> with the tail of its output.</td></tr>
+              <tr><td>Idle, 15 min with no preview traffic, open WebSocket or exec</td><td>The sweeper stops it. The next preview request wakes it. Status calls don't count as use.</td></tr>
+              <tr><td>A worker pod dies</td><td>Placement moves the app. The next start or preview request starts it on the new worker, which takes over the row with <code>host</code> = the new pod and installs into its own deps cache.</td></tr>
+              <tr><td>A worker pod shuts down</td><td>Stop every sandbox → its rows <code>stopped</code>.</td></tr>
+            </tbody>
+          </table>
+
+          <h3>Confinement</h3>
+          <table>
+            <thead>
+              <tr><th>Layer</th><th>Setting</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Namespaces</td><td>Its own user, pid, ipc, uts, cgroup and network namespaces.</td></tr>
+              <tr><td>Files</td><td><code>/app</code> is <code>WORKSPACE_ROOT/&lt;appId&gt;</code> on the shared volume, read-write. <code>/app/node_modules</code> comes from the pod-local deps cache. System paths read-only. <code>/tmp</code> empty; <code>HOME=/tmp</code>.</td></tr>
+              <tr><td>Network</td><td>Its own namespace through pasta. Inbound: only port 3000, mapped to the pod's <code>127.0.0.1:&lt;port&gt;</code>. Outbound: the app's database and the internet. Nothing on the pod or cluster: not other sandboxes, not Chromium, not the internal API on 4002.</td></tr>
+              <tr><td>Limits</td><td>A cgroup per sandbox caps memory, CPU and process count, so one app can't starve the pod.</td></tr>
+              <tr><td>Environment</td><td><code>PORT=3000</code>, <code>DATABASE_URL</code> (the app's own role), <code>SESSION_SECRET</code>, file watching by polling, plus <code>PATH</code>, <code>LANG</code>, <code>TZ</code>. Nothing else from the runner.</td></tr>
+              <tr><td>Local dev</td><td><code>SANDBOX_MODE=none</code> runs unconfined, allowed only with <code>ENVIRONMENT=local</code>.</td></tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section class="doc-section" id="browser-sessions">
+          <h2>Browser sessions</h2>
+
+          <figure>
+            <div class="diagram">
+              <svg class="c4" viewBox="0 0 1000 802" role="img" aria-label="Browser sessions on a worker pod. Calls come from the server pod's browser API to the worker's internal API: session, navigate, read, click, type, screenshot, run or close. The internal API drives the core/browser plugin, app.browser, which owns the session manager and the sweeper. The session manager starts one Chromium in its own network namespace and restarts it if it exits. It maps a sessionId to its page in memory. Create checks the caps, inserts the row and opens a page. A call returns 404 if the row's lastUsedAt is over 30 minutes old, reopens the page from the row if it is not in memory, runs one call at a time per session, and writes appUrl, storageState and lastUsedAt back. Close closes the context and deletes the row. It reads and writes the session row in Postgres browser_sessions, an app having many, and reads the app's preview port from previews. Over CDP it opens and closes pages in Chromium, where each session has its own context and one page. Its ops turn navigate, read, click, type and screenshot into code. For every call it hands the code, its own ops or the LLM's, and the page's id to a runner, a Node process under bubblewrap started per call, with no secrets and a network that reaches only Chromium's CDP port. Chromium's namespace lets out only public addresses and the pool ports 4100 to 4149 on the pod's loopback, and its files hold no workspace and no secrets. The sweeper runs every minute and closes pages idle for 5 minutes. Every request a session's page makes also goes through the network rule on its context: public addresses and loopback on the app's own preview port are allowed, anything else is blocked. Allowed requests reach public sites and the app's preview at localhost:port.">
+                <defs>
+                  <marker id="bs-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                    <path d="M0 0L10 5L0 10z" class="arrowhead"/>
+                  </marker>
+                </defs>
+
+                <rect class="component" x="40" y="120" width="600" height="44" rx="6"/>
+                <text class="on-light name" x="340" y="139" text-anchor="middle">internal API</text>
+                <text class="on-light type" x="340" y="155" text-anchor="middle">[/internal/browser/* · drives app.browser]</text>
+
+                <rect class="group" x="40" y="184" width="600" height="592" rx="8"/>
+                <text class="label name" x="52" y="752">core/browser plugin · app.browser</text>
+                <text class="note" x="52" y="767">owns the session manager and the sweeper</text>
+
+                <rect class="component" x="56" y="200" width="568" height="182" rx="8"/>
+                <text class="on-light name" x="340" y="222" text-anchor="middle">session manager</text>
+                <text class="on-light type" x="340" y="239" text-anchor="middle">[sessionId → page · in memory]</text>
+                <text class="on-light type" x="72" y="262">start: Chromium, restart on exit</text>
+                <text class="on-light type" x="72" y="279">create: check caps, insert row, open page</text>
+                <text class="on-light type" x="72" y="296">call: row check → runner → write row</text>
+                <text class="on-light type" x="72" y="313">close: close context, delete row</text>
+                <text class="on-light type" x="356" y="262">lastUsedAt over 30 min → 404</text>
+                <text class="on-light type" x="356" y="279">reopens from row if not in memory</text>
+                <text class="on-light type" x="356" y="296">one call at a time per session</text>
+                <text class="on-light type" x="356" y="313">writes appUrl, storageState, lastUsedAt</text>
+                <rect x="72" y="326" width="536" height="44" rx="6" style="fill:none;stroke:var(--c4-on-light);stroke-opacity:0.45"/>
+                <text class="on-light name" x="340" y="345" text-anchor="middle">ops</text>
+                <text class="on-light type" x="340" y="361" text-anchor="middle">[navigate · read · click · type · screenshot · arbitrary → code]</text>
+
+                <rect class="group" x="56" y="432" width="320" height="288" rx="8"/>
+                <text class="label name" x="68" y="708">Chromium · one, shared</text>
+                <rect class="component" x="76" y="448" width="280" height="44" rx="6"/>
+                <text class="on-light name" x="216" y="467" text-anchor="middle">session A</text>
+                <text class="on-light type" x="216" y="483" text-anchor="middle">own context + one page</text>
+                <rect class="component" x="76" y="502" width="280" height="44" rx="6"/>
+                <text class="on-light name" x="216" y="521" text-anchor="middle">session B</text>
+                <text class="on-light type" x="216" y="537" text-anchor="middle">own context + one page</text>
+                <rect class="tbd" x="76" y="556" width="280" height="36" rx="6"/>
+                <text class="note" x="216" y="579" text-anchor="middle">one per session, any app</text>
+                <text class="note" x="76" y="622">own network namespace · pasta + nft</text>
+                <text class="note" x="76" y="638">out: public addresses + pool ports 4100–4149</text>
+                <text class="note" x="76" y="654">in: CDP only · bwrap: no workspace, no secrets</text>
+
+                <rect class="component" x="400" y="432" width="224" height="84" rx="8"/>
+                <text class="on-light name" x="512" y="454" text-anchor="middle">runner</text>
+                <text class="on-light type" x="512" y="471" text-anchor="middle">[node · bwrap · one per call]</text>
+                <text class="on-light type" x="512" y="490" text-anchor="middle">no secrets · own cgroup</text>
+                <text class="on-light type" x="512" y="506" text-anchor="middle">network: Chromium's CDP only</text>
+
+                <rect class="component" x="400" y="528" width="224" height="122" rx="8"/>
+                <text class="on-light name" x="512" y="552" text-anchor="middle">Network rule</text>
+                <text class="on-light type" x="512" y="569" text-anchor="middle">[guard.ts · on each context]</text>
+                <text class="on-light type" x="512" y="590" text-anchor="middle">public address: allowed</text>
+                <text class="on-light type" x="512" y="606" text-anchor="middle">loopback + app's preview</text>
+                <text class="on-light type" x="512" y="622" text-anchor="middle">port: allowed</text>
+                <text class="on-light type" x="512" y="638" text-anchor="middle">anything else: blocked</text>
+
+                <rect class="component" x="400" y="662" width="224" height="58" rx="8"/>
+                <text class="on-light name" x="512" y="681" text-anchor="middle">sweeper</text>
+                <text class="on-light type" x="512" y="698" text-anchor="middle">[every minute]</text>
+                <text class="on-light type" x="512" y="713" text-anchor="middle">idle 5 min → close page</text>
+
+                <rect class="external" x="740" y="200" width="240" height="90" rx="8"/>
+                <text class="on-dark name" x="860" y="226" text-anchor="middle">Postgres</text>
+                <text class="on-dark type" x="860" y="243" text-anchor="middle">browser_sessions: one row</text>
+                <text class="on-dark type" x="860" y="259" text-anchor="middle">per session, an app has many</text>
+                <text class="on-dark type" x="860" y="275" text-anchor="middle">previews: the app's port</text>
+
+                <rect class="external" x="740" y="549" width="240" height="80" rx="8"/>
+                <text class="on-dark name" x="860" y="573" text-anchor="middle">Websites</text>
+                <text class="on-dark type" x="860" y="590" text-anchor="middle">public sites</text>
+                <text class="on-dark type" x="860" y="606" text-anchor="middle">app preview · localhost:&lt;port&gt;</text>
+
+                <line class="edge" x1="340" y1="16" x2="340" y2="118" marker-end="url(#bs-arrow)"/>
+                <text class="edge-label" x="348" y="40">session · navigate · read · click</text>
+                <text class="edge-label" x="348" y="54">type · screenshot · run · close</text>
+                <text class="note" x="348" y="70">from the server pod's browser API</text>
+
+                <line class="edge" x1="340" y1="164" x2="340" y2="198" marker-end="url(#bs-arrow)"/>
+
+                <line class="edge" x1="624" y1="245" x2="738" y2="245" marker-end="url(#bs-arrow)"/>
+                <text class="edge-label halo" x="681" y="237" text-anchor="middle">row by sessionId</text>
+                <text class="note" x="681" y="261" text-anchor="middle">+ the app's port</text>
+
+                <line class="edge" x1="216" y1="382" x2="216" y2="430" marker-end="url(#bs-arrow)"/>
+                <text class="edge-label" x="224" y="400">CDP · tab management</text>
+                <text class="note" x="224" y="413">open · close · network rule</text>
+                <text class="note" x="224" y="426">save appUrl, storageState</text>
+
+                <line class="edge" x1="512" y1="382" x2="512" y2="430" marker-end="url(#bs-arrow)"/>
+                <text class="edge-label" x="520" y="400">page ops</text>
+                <text class="note" x="520" y="413">each op, as code</text>
+
+                <line class="edge" x1="400" y1="474" x2="378" y2="474" marker-end="url(#bs-arrow)"/>
+
+                <line class="edge" x1="376" y1="572" x2="398" y2="572" marker-end="url(#bs-arrow)"/>
+                <line class="edge" x1="624" y1="589" x2="738" y2="589" marker-end="url(#bs-arrow)"/>
+                <text class="edge-label" x="681" y="581" text-anchor="middle">allowed</text>
+                <line class="edge" x1="400" y1="691" x2="378" y2="691" marker-end="url(#bs-arrow)"/>
+              </svg>
+            </div>
+            <figcaption>C4 component diagram: browser sessions on a worker pod. Solid arrows are calls. Grey boxes are outside preview-runner.</figcaption>
+          </figure>
+
+          <h3>Endpoints</h3>
+<div class="routes">
+<details class="route">
+  <summary><span class="method post">POST</span><code class="route-path">/internal/browser/session</code><span class="route-summary">Open a session for the app: its own context and one page</span></summary>
+  <div class="route-body">
+<h4>Request body</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;appId&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;appId&quot;: {
+      &quot;minLength&quot;: 1,
+      &quot;maxLength&quot;: 64,
+      &quot;type&quot;: &quot;string&quot;
+    }
+  }
+}</code></pre>
+<h4>Response 200</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;sessionId&quot;,
+    &quot;appId&quot;,
+    &quot;previewUrl&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;sessionId&quot;: {
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;appId&quot;: {
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;previewUrl&quot;: {
+      &quot;anyOf&quot;: [
+        {
+          &quot;type&quot;: &quot;string&quot;
+        },
+        {
+          &quot;type&quot;: &quot;null&quot;
+        }
+      ]
+    }
+  }
+}</code></pre>
+<h4>Errors · 400, 429, 503</h4>
+<pre class="schema"><code>{&quot;type&quot;:&quot;object&quot;,&quot;required&quot;:[&quot;error&quot;],&quot;properties&quot;:{&quot;error&quot;:{&quot;type&quot;:&quot;string&quot;}}}</code></pre>
+  </div>
+</details>
+<details class="route">
+  <summary><span class="method post">POST</span><code class="route-path">/internal/browser/navigate</code><span class="route-summary">Go to a URL; a path such as /orders opens the app&#x27;s preview</span></summary>
+  <div class="route-body">
+<h4>Request body</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;sessionId&quot;,
+    &quot;url&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;sessionId&quot;: {
+      &quot;minLength&quot;: 1,
+      &quot;maxLength&quot;: 21,
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;url&quot;: {
+      &quot;minLength&quot;: 1,
+      &quot;maxLength&quot;: 4000,
+      &quot;type&quot;: &quot;string&quot;
+    }
+  }
+}</code></pre>
+<h4>Response 200</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;title&quot;,
+    &quot;url&quot;,
+    &quot;text&quot;,
+    &quot;refs&quot;,
+    &quot;status&quot;,
+    &quot;error&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;title&quot;: {
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;url&quot;: {
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;text&quot;: {
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;refs&quot;: {
+      &quot;type&quot;: &quot;array&quot;,
+      &quot;items&quot;: {
+        &quot;type&quot;: &quot;object&quot;,
+        &quot;required&quot;: [
+          &quot;ref&quot;,
+          &quot;tag&quot;,
+          &quot;role&quot;,
+          &quot;name&quot;,
+          &quot;value&quot;,
+          &quot;placeholder&quot;,
+          &quot;href&quot;
+        ],
+        &quot;properties&quot;: {
+          &quot;ref&quot;: {
+            &quot;type&quot;: &quot;integer&quot;
+          },
+          &quot;tag&quot;: {
+            &quot;type&quot;: &quot;string&quot;
+          },
+          &quot;role&quot;: {
+            &quot;anyOf&quot;: [
+              {
+                &quot;type&quot;: &quot;string&quot;
+              },
+              {
+                &quot;type&quot;: &quot;null&quot;
+              }
+            ]
+          },
+          &quot;name&quot;: {
+            &quot;type&quot;: &quot;string&quot;
+          },
+          &quot;value&quot;: {
+            &quot;type&quot;: &quot;string&quot;
+          },
+          &quot;placeholder&quot;: {
+            &quot;type&quot;: &quot;string&quot;
+          },
+          &quot;href&quot;: {
+            &quot;type&quot;: &quot;string&quot;
+          }
+        }
+      }
+    },
+    &quot;status&quot;: {
+      &quot;anyOf&quot;: [
+        {
+          &quot;type&quot;: &quot;integer&quot;
+        },
+        {
+          &quot;type&quot;: &quot;null&quot;
+        }
+      ]
+    },
+    &quot;error&quot;: {
+      &quot;anyOf&quot;: [
+        {
+          &quot;type&quot;: &quot;string&quot;
+        },
+        {
+          &quot;type&quot;: &quot;null&quot;
+        }
+      ]
+    }
+  }
+}</code></pre>
+<h4>Errors · 400, 404, 503, 504</h4>
+<pre class="schema"><code>{&quot;type&quot;:&quot;object&quot;,&quot;required&quot;:[&quot;error&quot;],&quot;properties&quot;:{&quot;error&quot;:{&quot;type&quot;:&quot;string&quot;}}}</code></pre>
+  </div>
+</details>
+<details class="route">
+  <summary><span class="method post">POST</span><code class="route-path">/internal/browser/read</code><span class="route-summary">Read the page&#x27;s text and the refs it can act on</span></summary>
+  <div class="route-body">
+<h4>Request body</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;sessionId&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;sessionId&quot;: {
+      &quot;minLength&quot;: 1,
+      &quot;maxLength&quot;: 21,
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;maxChars&quot;: {
+      &quot;minimum&quot;: 1,
+      &quot;maximum&quot;: 100000,
+      &quot;type&quot;: &quot;integer&quot;
+    }
+  }
+}</code></pre>
+<h4>Response 200</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;title&quot;,
+    &quot;url&quot;,
+    &quot;text&quot;,
+    &quot;refs&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;title&quot;: {
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;url&quot;: {
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;text&quot;: {
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;refs&quot;: {
+      &quot;type&quot;: &quot;array&quot;,
+      &quot;items&quot;: {
+        &quot;type&quot;: &quot;object&quot;,
+        &quot;required&quot;: [
+          &quot;ref&quot;,
+          &quot;tag&quot;,
+          &quot;role&quot;,
+          &quot;name&quot;,
+          &quot;value&quot;,
+          &quot;placeholder&quot;,
+          &quot;href&quot;
+        ],
+        &quot;properties&quot;: {
+          &quot;ref&quot;: {
+            &quot;type&quot;: &quot;integer&quot;
+          },
+          &quot;tag&quot;: {
+            &quot;type&quot;: &quot;string&quot;
+          },
+          &quot;role&quot;: {
+            &quot;anyOf&quot;: [
+              {
+                &quot;type&quot;: &quot;string&quot;
+              },
+              {
+                &quot;type&quot;: &quot;null&quot;
+              }
+            ]
+          },
+          &quot;name&quot;: {
+            &quot;type&quot;: &quot;string&quot;
+          },
+          &quot;value&quot;: {
+            &quot;type&quot;: &quot;string&quot;
+          },
+          &quot;placeholder&quot;: {
+            &quot;type&quot;: &quot;string&quot;
+          },
+          &quot;href&quot;: {
+            &quot;type&quot;: &quot;string&quot;
+          }
+        }
+      }
+    }
+  }
+}</code></pre>
+<h4>Errors · 400, 404, 503, 504</h4>
+<pre class="schema"><code>{&quot;type&quot;:&quot;object&quot;,&quot;required&quot;:[&quot;error&quot;],&quot;properties&quot;:{&quot;error&quot;:{&quot;type&quot;:&quot;string&quot;}}}</code></pre>
+  </div>
+</details>
+<details class="route">
+  <summary><span class="method post">POST</span><code class="route-path">/internal/browser/click</code><span class="route-summary">Click the element with a ref</span></summary>
+  <div class="route-body">
+<h4>Request body</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;sessionId&quot;,
+    &quot;ref&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;sessionId&quot;: {
+      &quot;minLength&quot;: 1,
+      &quot;maxLength&quot;: 21,
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;ref&quot;: {
+      &quot;minimum&quot;: 1,
+      &quot;type&quot;: &quot;integer&quot;
+    }
+  }
+}</code></pre>
+<h4>Response 200</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;title&quot;,
+    &quot;url&quot;,
+    &quot;text&quot;,
+    &quot;refs&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;title&quot;: {
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;url&quot;: {
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;text&quot;: {
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;refs&quot;: {
+      &quot;type&quot;: &quot;array&quot;,
+      &quot;items&quot;: {
+        &quot;type&quot;: &quot;object&quot;,
+        &quot;required&quot;: [
+          &quot;ref&quot;,
+          &quot;tag&quot;,
+          &quot;role&quot;,
+          &quot;name&quot;,
+          &quot;value&quot;,
+          &quot;placeholder&quot;,
+          &quot;href&quot;
+        ],
+        &quot;properties&quot;: {
+          &quot;ref&quot;: {
+            &quot;type&quot;: &quot;integer&quot;
+          },
+          &quot;tag&quot;: {
+            &quot;type&quot;: &quot;string&quot;
+          },
+          &quot;role&quot;: {
+            &quot;anyOf&quot;: [
+              {
+                &quot;type&quot;: &quot;string&quot;
+              },
+              {
+                &quot;type&quot;: &quot;null&quot;
+              }
+            ]
+          },
+          &quot;name&quot;: {
+            &quot;type&quot;: &quot;string&quot;
+          },
+          &quot;value&quot;: {
+            &quot;type&quot;: &quot;string&quot;
+          },
+          &quot;placeholder&quot;: {
+            &quot;type&quot;: &quot;string&quot;
+          },
+          &quot;href&quot;: {
+            &quot;type&quot;: &quot;string&quot;
+          }
+        }
+      }
+    }
+  }
+}</code></pre>
+<h4>Errors · 400, 404, 503, 504</h4>
+<pre class="schema"><code>{&quot;type&quot;:&quot;object&quot;,&quot;required&quot;:[&quot;error&quot;],&quot;properties&quot;:{&quot;error&quot;:{&quot;type&quot;:&quot;string&quot;}}}</code></pre>
+  </div>
+</details>
+<details class="route">
+  <summary><span class="method post">POST</span><code class="route-path">/internal/browser/type</code><span class="route-summary">Type into the element with a ref, then submit if asked</span></summary>
+  <div class="route-body">
+<h4>Request body</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;sessionId&quot;,
+    &quot;ref&quot;,
+    &quot;text&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;sessionId&quot;: {
+      &quot;minLength&quot;: 1,
+      &quot;maxLength&quot;: 21,
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;ref&quot;: {
+      &quot;minimum&quot;: 1,
+      &quot;type&quot;: &quot;integer&quot;
+    },
+    &quot;text&quot;: {
+      &quot;maxLength&quot;: 10000,
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;submit&quot;: {
+      &quot;default&quot;: false,
+      &quot;type&quot;: &quot;boolean&quot;
+    }
+  }
+}</code></pre>
+<h4>Response 200</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;title&quot;,
+    &quot;url&quot;,
+    &quot;text&quot;,
+    &quot;refs&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;title&quot;: {
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;url&quot;: {
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;text&quot;: {
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;refs&quot;: {
+      &quot;type&quot;: &quot;array&quot;,
+      &quot;items&quot;: {
+        &quot;type&quot;: &quot;object&quot;,
+        &quot;required&quot;: [
+          &quot;ref&quot;,
+          &quot;tag&quot;,
+          &quot;role&quot;,
+          &quot;name&quot;,
+          &quot;value&quot;,
+          &quot;placeholder&quot;,
+          &quot;href&quot;
+        ],
+        &quot;properties&quot;: {
+          &quot;ref&quot;: {
+            &quot;type&quot;: &quot;integer&quot;
+          },
+          &quot;tag&quot;: {
+            &quot;type&quot;: &quot;string&quot;
+          },
+          &quot;role&quot;: {
+            &quot;anyOf&quot;: [
+              {
+                &quot;type&quot;: &quot;string&quot;
+              },
+              {
+                &quot;type&quot;: &quot;null&quot;
+              }
+            ]
+          },
+          &quot;name&quot;: {
+            &quot;type&quot;: &quot;string&quot;
+          },
+          &quot;value&quot;: {
+            &quot;type&quot;: &quot;string&quot;
+          },
+          &quot;placeholder&quot;: {
+            &quot;type&quot;: &quot;string&quot;
+          },
+          &quot;href&quot;: {
+            &quot;type&quot;: &quot;string&quot;
+          }
+        }
+      }
+    }
+  }
+}</code></pre>
+<h4>Errors · 400, 404, 503, 504</h4>
+<pre class="schema"><code>{&quot;type&quot;:&quot;object&quot;,&quot;required&quot;:[&quot;error&quot;],&quot;properties&quot;:{&quot;error&quot;:{&quot;type&quot;:&quot;string&quot;}}}</code></pre>
+  </div>
+</details>
+<details class="route">
+  <summary><span class="method post">POST</span><code class="route-path">/internal/browser/screenshot</code><span class="route-summary">Screenshot the page as a PNG</span></summary>
+  <div class="route-body">
+<h4>Request body</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;sessionId&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;sessionId&quot;: {
+      &quot;minLength&quot;: 1,
+      &quot;maxLength&quot;: 21,
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;fullPage&quot;: {
+      &quot;default&quot;: false,
+      &quot;type&quot;: &quot;boolean&quot;
+    }
+  }
+}</code></pre>
+<h4>Response 200</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;png&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;png&quot;: {
+      &quot;contentEncoding&quot;: &quot;base64&quot;,
+      &quot;type&quot;: &quot;string&quot;
+    }
+  }
+}</code></pre>
+<h4>Errors · 400, 404, 503, 504</h4>
+<pre class="schema"><code>{&quot;type&quot;:&quot;object&quot;,&quot;required&quot;:[&quot;error&quot;],&quot;properties&quot;:{&quot;error&quot;:{&quot;type&quot;:&quot;string&quot;}}}</code></pre>
+  </div>
+</details>
+<details class="route">
+  <summary><span class="method post">POST</span><code class="route-path">/internal/browser/run</code><span class="route-summary">Run Playwright code in the runner: the body of async (page) =&gt; …</span></summary>
+  <div class="route-body">
+<h4>Request body</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;sessionId&quot;,
+    &quot;code&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;sessionId&quot;: {
+      &quot;minLength&quot;: 1,
+      &quot;maxLength&quot;: 21,
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;code&quot;: {
+      &quot;minLength&quot;: 1,
+      &quot;maxLength&quot;: 100000,
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;timeoutMs&quot;: {
+      &quot;minimum&quot;: 1000,
+      &quot;maximum&quot;: 120000,
+      &quot;default&quot;: 60000,
+      &quot;type&quot;: &quot;integer&quot;
+    }
+  }
+}</code></pre>
+<h4>Response 200</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;result&quot;,
+    &quot;error&quot;,
+    &quot;durationMs&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;result&quot;: {},
+    &quot;error&quot;: {
+      &quot;anyOf&quot;: [
+        {
+          &quot;type&quot;: &quot;string&quot;
+        },
+        {
+          &quot;type&quot;: &quot;null&quot;
+        }
+      ]
+    },
+    &quot;durationMs&quot;: {
+      &quot;type&quot;: &quot;integer&quot;
+    }
+  }
+}</code></pre>
+<h4>Errors · 400, 404, 503</h4>
+<pre class="schema"><code>{&quot;type&quot;:&quot;object&quot;,&quot;required&quot;:[&quot;error&quot;],&quot;properties&quot;:{&quot;error&quot;:{&quot;type&quot;:&quot;string&quot;}}}</code></pre>
+  </div>
+</details>
+<details class="route">
+  <summary><span class="method post">POST</span><code class="route-path">/internal/browser/close</code><span class="route-summary">Close the session&#x27;s context and delete its row</span></summary>
+  <div class="route-body">
+<h4>Request body</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;sessionId&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;sessionId&quot;: {
+      &quot;minLength&quot;: 1,
+      &quot;maxLength&quot;: 21,
+      &quot;type&quot;: &quot;string&quot;
+    }
+  }
+}</code></pre>
+<h4>Response 200</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;sessionId&quot;,
+    &quot;closed&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;sessionId&quot;: {
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;closed&quot;: {
+      &quot;type&quot;: &quot;boolean&quot;
+    }
+  }
+}</code></pre>
+<h4>Errors · 400, 404</h4>
+<pre class="schema"><code>{&quot;type&quot;:&quot;object&quot;,&quot;required&quot;:[&quot;error&quot;],&quot;properties&quot;:{&quot;error&quot;:{&quot;type&quot;:&quot;string&quot;}}}</code></pre>
+  </div>
+</details>
+</div>
+
+          <h3>Lifecycle</h3>
+          <table>
+            <thead>
+              <tr><th>Event</th><th>What happens</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>A worker pod starts</td><td>Its <code>core/browser</code> plugin starts the session manager, which starts its one Chromium in its own confinement and connects to it over CDP. Then the plugin starts the sweeper.</td></tr>
+              <tr><td>Create</td><td>Check the caps per app and per host, counting sessions used in the last 30 min → insert the row with the app's worker pod as host → open a context with the network rule and one page on that pod.</td></tr>
+              <tr><td>Call, page in memory</td><td>Load the row → forward to its worker pod → run the call's ops code in a runner, one call at a time per session → write appUrl, storageState, lastUsedAt.</td></tr>
+              <tr><td>Call, page not in memory</td><td>Open a context from the row's storageState and go to its appUrl → then the call as above. Concurrent calls wait for the same open.</td></tr>
+              <tr><td>Call, lastUsedAt over 30 min old</td><td><code>404 session_not_found</code>. The row is kept.</td></tr>
+              <tr><td><code>run</code></td><td>Start a runner with the LLM's code and the page's id → it connects to Chromium over CDP, finds the page, runs <code>async (page) =&gt; …</code> and prints the result → write appUrl, storageState, lastUsedAt. It holds the session's turn, so no other call runs on the page meanwhile.</td></tr>
+              <tr><td><code>run</code> times out</td><td>Kill the runner → close the session's context → the next call reopens it from the row. The run answers with the timeout in its <code>error</code>; any other op answers <code>504 call_timed_out</code>.</td></tr>
+              <tr><td>Idle, 5 min without a call</td><td>The plugin's sweeper closes the session's context and page. The row stays; the next call reopens it from the row.</td></tr>
+              <tr><td>Close</td><td>Close the context → delete the row.</td></tr>
+              <tr><td>Chromium exits</td><td>The session manager starts a new one and reconnects. Pages in memory are dropped; each session's next call reopens it from its row. Until it's back, calls get <code>503 browser_unavailable</code>.</td></tr>
+              <tr><td>A worker pod restarts or dies</td><td>Its Chromium and pages are gone → each session's next call reopens it from its row, on the worker pod the app is placed on.</td></tr>
+              <tr><td>A worker pod shuts down</td><td>Its plugin stops the sweeper and closes Chromium.</td></tr>
+            </tbody>
+          </table>
+
+          <h3>Confinement</h3>
+          <table>
+            <thead>
+              <tr><th>Layer</th><th>Chromium</th><th>Runner</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Namespaces</td><td>Its own user, pid, ipc, uts, cgroup and network namespaces.</td><td>The same, its own per run.</td></tr>
+              <tr><td>Files</td><td>System paths and the browser build read-only. <code>/tmp</code> empty, holding the profile. No workspace, no service account token.</td><td>System paths, Node and the runner's <code>playwright</code> read-only. <code>/tmp</code> empty.</td></tr>
+              <tr><td>Network</td><td>Its own namespace through pasta. Inbound: only CDP, from the pod's <code>127.0.0.1:&lt;BROWSER_CDP_PORT&gt;</code>. Outbound: DNS, public addresses, and the pool ports 4100–4149 on the pod's loopback. Private ranges are dropped: not the internal API on 4002, not the cluster, not cloud metadata.</td><td>Its own namespace through pasta. Outbound: only Chromium's CDP port on the pod's loopback.</td></tr>
+              <tr><td>Per-context rule</td><td>Each session's context allows public addresses and its own app's preview port. It keeps one app's session off another app's preview; <code>run</code> can get past it, not past the namespace.</td><td>—</td></tr>
+              <tr><td>Limits</td><td>One cgroup caps memory, CPU and process count for the whole browser.</td><td>One cgroup per run.</td></tr>
+              <tr><td>Environment</td><td><code>PATH</code>, <code>LANG</code>, <code>TZ</code>, <code>HOME=/tmp</code>. Nothing else from the runner.</td><td>The same, plus the CDP address.</td></tr>
+              <tr><td>Local dev</td><td colspan="2"><code>SANDBOX_MODE=none</code> runs both unconfined, allowed only with <code>ENVIRONMENT=local</code>.</td></tr>
+            </tbody>
+          </table>
+        </section>
+      </div>
+    </main>
+  </div>
+  <script src="assets/site.js?v=3"></script>
+</body>
+</html>

@@ -18,7 +18,10 @@ const logger = ({ NODE_ENV, LOG_LEVEL }: Config): FastifyServerOptions['logger']
   NODE_ENV === 'development'
     ? {
         level: LOG_LEVEL,
-        transport: { target: 'pino-pretty', options: { translateTime: 'HH:MM:ss.l', ignore: 'pid,hostname' } },
+        transport: {
+          target: 'pino-pretty',
+          options: { colorize: true, translateTime: 'HH:MM:ss.l', ignore: 'pid,hostname', singleLine: true },
+        },
       }
     : { level: LOG_LEVEL }
 

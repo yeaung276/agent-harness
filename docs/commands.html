@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Code-Harness Commands</title>
+  <link rel="stylesheet" href="assets/site.css?v=3">
+</head>
+<body data-root="" data-page="commands">
+  <div class="layout">
+    <aside class="sidebar"></aside>
+    <main>
+      <div class="content">
+        <h1>Commands</h1>
+        <p class="lede">Commands run from a shell where the server runs: a checkout with its <code>.env</code>, or <code>docker compose exec app</code>. They read the same config as the server and talk to Postgres directly.</p>
+
+        <section class="doc-section" id="authentication">
+          <h2>Authentication</h2>
+          <p>There is no register page. A user exists only after <code>user:create</code> adds them, and logs in on the web with that email and password. Passwords can&#x27;t be changed for now.</p>
+
+          <h3>user:create</h3>
+          <pre class="schema"><code>bun run user:create &lt;email&gt;</code></pre>
+          <table>
+            <thead>
+              <tr><th>Step</th><th>What happens</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Email</td><td>Trimmed and lowercased. Not an email address → exit 1.</td></tr>
+              <tr><td>Password</td><td>Asked twice, without echo. From a pipe, the first line of stdin, asked once. Fewer than 8 characters, or the two don&#x27;t match → exit 1.</td></tr>
+              <tr><td>Save</td><td>Hashed with argon2id and inserted into <code>users</code>. The email is already there → exit 1, nothing changes.</td></tr>
+              <tr><td>Done</td><td>Prints the new user&#x27;s id → exit 0.</td></tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section class="doc-section" id="database">
+          <h2>Database</h2>
+          <p>Migrations are SQL files in <code>drizzle/</code>, committed with the code. <code>bun run db:generate</code> writes a new one from the changes in <code>src/db/schema.ts</code>. The server never migrates; run <code>db:migrate</code> by hand before starting a version with new migrations.</p>
+
+          <h3>db:migrate</h3>
+          <pre class="schema"><code>bun run db:migrate</code></pre>
+          <table>
+            <thead>
+              <tr><th>Step</th><th>What happens</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Read</td><td>The migrations in <code>drizzle/</code>, and the last one applied, from <code>drizzle.__drizzle_migrations</code>.</td></tr>
+              <tr><td>Apply</td><td>Every newer one, in order, in one transaction, each recorded in <code>drizzle.__drizzle_migrations</code>. One fails → all roll back, exit 1.</td></tr>
+              <tr><td>Done</td><td>Exit 0. Nothing newer → nothing changes.</td></tr>
+            </tbody>
+          </table>
+        </section>
+      </div>
+    </main>
+  </div>
+  <script src="assets/site.js?v=3"></script>
+</body>
+</html>

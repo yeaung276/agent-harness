@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Code-Harness Cache Keys</title>
+  <link rel="stylesheet" href="assets/site.css?v=3">
+</head>
+<body data-root="" data-page="cache-keys">
+  <div class="layout">
+    <aside class="sidebar"></aside>
+    <main>
+      <div class="content">
+        <h1>Cache keys</h1>
+        <p class="lede">Redis keys.</p>
+
+        <section class="doc-section" id="authentication">
+          <h2>Authentication</h2>
+          <table>
+            <thead>
+              <tr><th>Key</th><th>Value</th><th>Written by</th><th>Lifetime</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>session:&lt;id&gt;</code></td><td>User id</td><td><code>POST /login</code></td><td>7 days from login, or until <code>POST /logout</code> deletes it.</td></tr>
+            </tbody>
+          </table>
+          <p>The id is 32 random bytes, base64url, and is the value of the <code>sid</code> cookie.</p>
+        </section>
+      </div>
+    </main>
+  </div>
+  <script src="assets/site.js?v=3"></script>
+</body>
+</html>

@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Code-Harness Schema</title>
+  <link rel="stylesheet" href="assets/site.css?v=3">
+</head>
+<body data-root="" data-page="schema">
+  <div class="layout">
+    <aside class="sidebar"></aside>
+    <main>
+      <div class="content">
+        <h1>Schema</h1>
+        <p class="lede">Postgres tables. The Drizzle migrations in <code>drizzle/</code> create them.</p>
+
+        <section class="doc-section" id="authentication">
+          <h2>Authentication</h2>
+
+          <h3>users</h3>
+          <table>
+            <thead>
+              <tr><th>Column</th><th>Type</th><th>Notes</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>id</code></td><td><code>uuid</code></td><td>Primary key, <code>gen_random_uuid()</code>.</td></tr>
+              <tr><td><code>email</code></td><td><code>text</code></td><td>Unique. Stored lowercased.</td></tr>
+              <tr><td><code>password_hash</code></td><td><code>text</code></td><td>argon2id, PHC string.</td></tr>
+              <tr><td><code>created_at</code></td><td><code>timestamptz</code></td><td><code>now()</code>.</td></tr>
+            </tbody>
+          </table>
+        </section>
+      </div>
+    </main>
+  </div>
+  <script src="assets/site.js?v=3"></script>
+</body>
+</html>
