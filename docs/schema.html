@@ -52,6 +52,28 @@
           </table>
           <p>Every user sees every token and can revoke any of them. Revoking deletes the row.</p>
         </section>
+
+        <section class="doc-section" id="workspaces">
+          <h2>Workspaces</h2>
+
+          <h3>workspaces</h3>
+          <table>
+            <thead>
+              <tr><th>Column</th><th>Type</th><th>Notes</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>id</code></td><td><code>uuid</code></td><td>Primary key, <code>gen_random_uuid()</code>.</td></tr>
+              <tr><td><code>name</code></td><td><code>text</code></td><td>Unique. 1–63 lowercase letters, digits and <code>-</code>, not starting or ending with <code>-</code>.</td></tr>
+              <tr><td><code>status</code></td><td><code>text</code></td><td>Whether its web server is <code>running</code> or <code>stopped</code>. Starts as <code>stopped</code>.</td></tr>
+              <tr><td><code>user_id</code></td><td><code>uuid</code></td><td>References <code>users.id</code>: who created it, shown as Created by. A user who created a workspace can't be deleted.</td></tr>
+              <tr><td><code>created_at</code></td><td><code>timestamptz</code></td><td><code>now()</code>.</td></tr>
+              <tr><td><code>updated_at</code></td><td><code>timestamptz</code></td><td><code>now()</code>. Set again by each zip upload.</td></tr>
+            </tbody>
+          </table>
+          <p>Only the app limits <code>status</code> to <code>running</code> and <code>stopped</code>; the database takes any text, so a new status needs no migration.</p>
+          <p>A workspace's files live in <code>&lt;WORKSPACES_DIR&gt;/&lt;id&gt;</code>, created empty with the row and deleted with it. A delete moves the directory to <code>&lt;WORKSPACES_DIR&gt;/.deleted</code> and removes it in the background. An uploaded zip waits in <code>&lt;WORKSPACES_DIR&gt;/.uploads</code> until it is extracted or refused. Anything left in either folder is removed when the app next starts. <code>WORKSPACES_DIR</code> defaults to <code>/workspaces</code>. The path is not stored.</p>
+          <p>Every user sees every workspace and can delete any of them.</p>
+        </section>
       </div>
     </main>
   </div>

@@ -3,6 +3,7 @@ import Fastify, { type FastifyServerOptions } from 'fastify'
 
 import type { Config } from './config.ts'
 import { db } from './plugins/db.ts'
+import { multipart } from './plugins/multipart.ts'
 import { redis } from './plugins/redis.ts'
 import { services } from './plugins/services.ts'
 import { api } from './routes/api/index.ts'
@@ -33,6 +34,7 @@ export const buildApp = async (config: Config) => {
   await app.register(db)
   await app.register(redis)
   await app.register(services)
+  await app.register(multipart)
 
   await app.register(api, { prefix: '/api/v1' })
   await app.register(mcp, { prefix: '/mcp' })

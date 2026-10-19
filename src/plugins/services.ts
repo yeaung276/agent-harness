@@ -2,9 +2,11 @@ import type { FastifyInstance } from 'fastify'
 import fp from 'fastify-plugin'
 
 import { createTokenService } from '../services/tokens/index.ts'
+import { createWorkspaceService } from '../services/workspaces/index.ts'
 
 const createServices = (app: FastifyInstance) => ({
   tokens: createTokenService({ db: app.db }),
+  workspaces: createWorkspaceService({ db: app.db, dir: app.config.WORKSPACES_DIR, log: app.log }),
 })
 
 declare module 'fastify' {
@@ -13,10 +15,13 @@ declare module 'fastify' {
   }
 }
 
-// builds every service once and puts them on app.services
 export const services = fp(
   async app => {
     app.decorate('services', createServices(app))
+
+    app.addHook('onReady', async () => {
+      void app.services.workspaces.removeLeftovers()
+    })
   },
   { name: 'services', dependencies: ['db', 'redis'] }
 )

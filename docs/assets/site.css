@@ -14,6 +14,8 @@
   --soon-bg: #ececea;
   --live-fg: #1d6b3a;
   --live-bg: #e1f3e7;
+  --danger-fg: #b42318;
+  --danger-bg: #fdecea;
   --c4-person: #08427b;
   --c4-system: #1168bd;
   --c4-container: #438dd5;
@@ -43,6 +45,8 @@
     --soon-bg: #24282d;
     --live-fg: #7fd39c;
     --live-bg: #16301f;
+    --danger-fg: #f29b92;
+    --danger-bg: #3a1714;
     --c4-person: #0d4f91;
     --c4-system: #1a6fc4;
     --c4-container: #3d7fc2;
@@ -68,6 +72,8 @@
   --soon-bg: #24282d;
   --live-fg: #7fd39c;
   --live-bg: #16301f;
+  --danger-fg: #f29b92;
+  --danger-bg: #3a1714;
   --c4-person: #0d4f91;
   --c4-system: #1a6fc4;
   --c4-container: #3d7fc2;
@@ -287,6 +293,7 @@ th { font-size: 12px; font-weight: 600; color: var(--muted); }
 .method.get { color: var(--accent); background: var(--accent-soft); }
 .method.post { color: var(--live-fg); background: var(--live-bg); }
 .method.put, .method.patch { color: var(--draft-fg); background: var(--draft-bg); }
+.method.delete { color: var(--danger-fg); background: var(--danger-bg); }
 .route-path { font-size: 13px; overflow-wrap: anywhere; }
 .route-summary { color: var(--muted); font-size: 13px; }
 .route-body { padding: 4px 14px 18px; border-top: 1px dashed var(--border); }

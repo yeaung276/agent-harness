@@ -21,6 +21,7 @@ export const ConfigSchema = Type.Object({
   PORT: Type.Integer({ minimum: 0, maximum: 65535, default: 3000 }),
   DATABASE_URL: Type.String({ minLength: 1 }),
   REDIS_URL: Type.String({ minLength: 1 }),
+  WORKSPACES_DIR: Type.String({ minLength: 1, default: '/workspaces' }),
 })
 
 export type Config = Static<typeof ConfigSchema>
