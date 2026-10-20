@@ -1,8 +1,8 @@
 import { afterAll, describe, expect, test } from 'bun:test'
 import { existsSync } from 'node:fs'
-import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 
 import { eq, inArray } from 'drizzle-orm'
 import { strToU8, zipSync } from 'fflate'
@@ -51,6 +51,17 @@ const createWorkspace = (cookies: { sid: string }, name: string, zip?: Uint8Arra
 }
 
 const uniqueName = () => `ws-${crypto.randomUUID().slice(0, 8)}`
+
+const workspaceWithFiles = async (cookies: { sid: string }, files: Record<string, string>) => {
+  const name = uniqueName()
+  await createWorkspace(cookies, name)
+  const [row] = await app.db.select({ id: workspaces.id }).from(workspaces).where(eq(workspaces.name, name))
+  for (const [path, content] of Object.entries(files)) {
+    await mkdir(dirname(join(dir, row!.id, path)), { recursive: true })
+    await writeFile(join(dir, row!.id, path), content)
+  }
+  return { id: row!.id, name }
+}
 
 describe('workspaces page', () => {
   test('a workspace created on the page shows up for everyone, with who created it', async () => {
@@ -122,5 +133,80 @@ describe('workspaces page', () => {
     expect(res.statusCode).toBe(400)
     expect(res.body).toContain('Use 1–63 lowercase letters')
     expect(res.body).toContain('value="My App"')
+  })
+})
+
+describe('workspace page', () => {
+  test('a workspace in the list links to its page', async () => {
+    const { cookies } = await signIn()
+    const { id, name } = await workspaceWithFiles(cookies, {})
+
+    const list = await app.inject({ url: '/workspaces', cookies })
+    expect(list.body).toContain(`href="/workspaces/${id}"`)
+
+    const page = await app.inject({ url: `/workspaces/${id}`, cookies })
+    expect(page.statusCode).toBe(200)
+    expect(page.body).toContain(name)
+  })
+
+  test('the tree lists one folder at a time, folders first', async () => {
+    const { cookies } = await signIn()
+    const { id } = await workspaceWithFiles(cookies, {
+      'index.html': '<h1>hi</h1>',
+      'src/app.ts': 'export {}',
+      'src/lib/util.ts': '',
+    })
+
+    const root = await app.inject({ url: `/workspaces/${id}/tree`, cookies })
+    expect(root.json()).toMatchObject([
+      { name: 'src', path: 'src/', type: 'directory' },
+      { name: 'index.html', path: 'index.html', type: 'file', size: 11 },
+    ])
+
+    const src = await app.inject({ url: `/workspaces/${id}/tree?path=src`, cookies })
+    expect(src.json()).toMatchObject([
+      { name: 'lib', path: 'src/lib/', type: 'directory' },
+      { name: 'app.ts', path: 'src/app.ts', type: 'file' },
+    ])
+  })
+
+  test('the tree leaves out ignored folders and .env files, but shows .env.example', async () => {
+    const { cookies } = await signIn()
+    const { id } = await workspaceWithFiles(cookies, {
+      'index.html': '',
+      '.env': 'SECRET=1',
+      '.env.local': 'SECRET=2',
+      '.env.example': 'SECRET=',
+      'node_modules/pkg/index.js': '',
+      '.git/HEAD': '',
+    })
+
+    const res = await app.inject({ url: `/workspaces/${id}/tree`, cookies })
+
+    expect(res.json().map((entry: { path: string }) => entry.path)).toEqual(['.env.example', 'index.html'])
+  })
+
+  test('a file comes back as it is, sandboxed', async () => {
+    const { cookies } = await signIn()
+    const { id } = await workspaceWithFiles(cookies, { 'src/app.ts': 'export {}' })
+
+    const res = await app.inject({ url: `/workspaces/${id}/files/src/app.ts`, cookies })
+
+    expect(res.statusCode).toBe(200)
+    expect(res.body).toBe('export {}')
+    expect(res.headers['content-security-policy']).toBe('sandbox')
+  })
+
+  test('nothing outside the workspace can be listed or read, even through a link', async () => {
+    const { cookies } = await signIn()
+    const { id } = await workspaceWithFiles(cookies, {})
+    await writeFile(join(dir, 'secret.txt'), 'secret')
+    await symlink(join(dir, 'secret.txt'), join(dir, id, 'secret.txt'))
+
+    const up = await app.inject({ url: `/workspaces/${id}/tree?path=..`, cookies })
+    const link = await app.inject({ url: `/workspaces/${id}/files/secret.txt`, cookies })
+
+    expect(up.statusCode).toBe(404)
+    expect(link.statusCode).toBe(404)
   })
 })

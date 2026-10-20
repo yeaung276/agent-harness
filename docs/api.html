@@ -248,6 +248,252 @@
 </details>
 </div>
         </section>
+
+        <section class="doc-section" id="files">
+          <h2>Files</h2>
+          <p>The files in a workspace, read and changed one at a time. A path is relative to the workspace root, like <code>src/app.ts</code>; in the URL it comes after <code>/files/</code>.</p>
+          <p>A path that leads outside the workspace, with <code>..</code> or through a link, is answered as if it doesn't exist. Every route here also answers <code>401</code> as described in <a href="#authentication">Authentication</a>.</p>
+
+          <h3>Ignored folders</h3>
+          <p>The tree never lists these folders, so a listing stays small: <code>node_modules</code>, <code>.git</code>, <code>dist</code>, <code>.next</code>, <code>.turbo</code>, <code>coverage</code>. Their files can still be read and changed by path.</p>
+
+          <h3>Text and binary</h3>
+          <p>Read and edit work on text. A file with a NUL byte in its first 8 KB is binary, and is refused with <code>400</code>.</p>
+
+          <h3>Sizes</h3>
+          <p>A read without <code>limit</code> is refused with <code>400</code> when the file is over 512 KB; read it in parts instead. A line over 2,000 characters is cut there and ends in <code>… [truncated]</code>. A write whose body is over 1 MB is refused with <code>413</code>.</p>
+
+          <h3>Endpoints</h3>
+<div class="routes">
+<details class="route">
+  <summary><span class="method get">GET</span><code class="route-path">/api/v1/workspaces/:id/tree</code><span class="route-summary">Every file and folder under a folder</span></summary>
+  <div class="route-body">
+<h4>Params</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;id&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;id&quot;: {
+      &quot;format&quot;: &quot;uuid&quot;,
+      &quot;type&quot;: &quot;string&quot;
+    }
+  }
+}</code></pre>
+<h4>Query</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;properties&quot;: {
+    &quot;path&quot;: {
+      &quot;default&quot;: &quot;&quot;,
+      &quot;type&quot;: &quot;string&quot;
+    }
+  }
+}</code></pre>
+<p><code>path</code> is the folder to list, like <code>src</code>. Defaults to the workspace root.</p>
+<h4>Response 200</h4>
+<p>Every file and folder under <code>path</code>, at any depth, relative to the workspace root and sorted. A folder ends in <code>/</code>, so an empty one still shows. Paths only: no sizes or dates. A link is listed but not followed.</p>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;paths&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;paths&quot;: {
+      &quot;type&quot;: &quot;array&quot;,
+      &quot;items&quot;: {
+        &quot;type&quot;: &quot;string&quot;
+      }
+    }
+  }
+}</code></pre>
+<p>For example <code>[&quot;.env&quot;, &quot;index.html&quot;, &quot;src/&quot;, &quot;src/app.ts&quot;]</code>.</p>
+<h4>Errors · 400</h4>
+<p><code>path</code> is a file.</p>
+<h4>Errors · 404</h4>
+<p>No workspace has this id, or <code>path</code> doesn't exist.</p>
+  </div>
+</details>
+<details class="route">
+  <summary><span class="method get">GET</span><code class="route-path">/api/v1/workspaces/:id/files/*</code><span class="route-summary">Read a file, or some of its lines</span></summary>
+  <div class="route-body">
+<h4>Params</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;id&quot;,
+    &quot;*&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;id&quot;: {
+      &quot;format&quot;: &quot;uuid&quot;,
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;*&quot;: {
+      &quot;type&quot;: &quot;string&quot;
+    }
+  }
+}</code></pre>
+<h4>Query</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;properties&quot;: {
+    &quot;offset&quot;: {
+      &quot;default&quot;: 0,
+      &quot;minimum&quot;: 0,
+      &quot;type&quot;: &quot;integer&quot;
+    },
+    &quot;limit&quot;: {
+      &quot;minimum&quot;: 1,
+      &quot;type&quot;: &quot;integer&quot;
+    }
+  }
+}</code></pre>
+<p><code>offset</code> is how many lines to skip; without it, reading starts at the first line. <code>limit</code> is how many lines to return; without it, reading goes to the end. <code>offset=10&amp;limit=5</code> returns lines 11 to 15.</p>
+<h4>Response 200</h4>
+<p>The lines asked for, joined by <code>\n</code>, and how many lines the file has. A final newline doesn't count as another line. An <code>offset</code> at or past the end gives empty <code>content</code>. A line over 2,000 characters is cut, as in <a href="#files">Sizes</a>.</p>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;content&quot;,
+    &quot;totalLines&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;content&quot;: {
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;totalLines&quot;: {
+      &quot;type&quot;: &quot;integer&quot;
+    }
+  }
+}</code></pre>
+<h4>Errors · 400</h4>
+<p>The path is a folder, the file is binary, or the file is over 512 KB and no <code>limit</code> is given.</p>
+<h4>Errors · 404</h4>
+<p>No workspace has this id, or no file is at the path.</p>
+  </div>
+</details>
+<details class="route">
+  <summary><span class="method put">PUT</span><code class="route-path">/api/v1/workspaces/:id/files/*</code><span class="route-summary">Create or replace a file</span></summary>
+  <div class="route-body">
+<h4>Params</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;id&quot;,
+    &quot;*&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;id&quot;: {
+      &quot;format&quot;: &quot;uuid&quot;,
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;*&quot;: {
+      &quot;type&quot;: &quot;string&quot;
+    }
+  }
+}</code></pre>
+<h4>Body</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;content&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;content&quot;: {
+      &quot;type&quot;: &quot;string&quot;
+    }
+  }
+}</code></pre>
+<h4>Response 204</h4>
+<p>No body. The file now holds <code>content</code>. Missing folders on the way are created.</p>
+<h4>Errors · 400</h4>
+<p>The path is a folder, or a folder on the way is a file.</p>
+<h4>Errors · 404</h4>
+<p>No workspace has this id, or the path leads outside the workspace.</p>
+<h4>Errors · 413</h4>
+<p>The body is over 1 MB. The file is left as it was.</p>
+  </div>
+</details>
+<details class="route">
+  <summary><span class="method patch">PATCH</span><code class="route-path">/api/v1/workspaces/:id/files/*</code><span class="route-summary">Replace one piece of text in a file</span></summary>
+  <div class="route-body">
+<h4>Params</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;id&quot;,
+    &quot;*&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;id&quot;: {
+      &quot;format&quot;: &quot;uuid&quot;,
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;*&quot;: {
+      &quot;type&quot;: &quot;string&quot;
+    }
+  }
+}</code></pre>
+<h4>Body</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;search&quot;,
+    &quot;replace&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;search&quot;: {
+      &quot;minLength&quot;: 1,
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;replace&quot;: {
+      &quot;type&quot;: &quot;string&quot;
+    }
+  }
+}</code></pre>
+<p><code>search</code> must be in the file exactly once, matching byte for byte, whitespace included. It is replaced by <code>replace</code>.</p>
+<h4>Response 204</h4>
+<p>No body.</p>
+<h4>Errors · 400</h4>
+<p>The path is a folder, the file is binary, or <code>search</code> isn't in the file.</p>
+<h4>Errors · 404</h4>
+<p>No workspace has this id, or no file is at the path.</p>
+<h4>Errors · 409</h4>
+<p><code>search</code> is in the file more than once; the message says how many times. Nothing is changed, so a longer <code>search</code> can pick out the one to replace.</p>
+  </div>
+</details>
+<details class="route">
+  <summary><span class="method delete">DELETE</span><code class="route-path">/api/v1/workspaces/:id/files/*</code><span class="route-summary">Delete a file</span></summary>
+  <div class="route-body">
+<h4>Params</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;id&quot;,
+    &quot;*&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;id&quot;: {
+      &quot;format&quot;: &quot;uuid&quot;,
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;*&quot;: {
+      &quot;type&quot;: &quot;string&quot;
+    }
+  }
+}</code></pre>
+<h4>Response 204</h4>
+<p>No body. Only files are deleted, never folders.</p>
+<h4>Errors · 400</h4>
+<p>The path is a folder.</p>
+<h4>Errors · 404</h4>
+<p>No workspace has this id, or no file is at the path.</p>
+  </div>
+</details>
+</div>
+        </section>
       </div>
     </main>
   </div>

@@ -1,0 +1,173 @@
+<% layout('./app') %>
+<% const stats = [
+  { label: 'resident', value: '—' },
+  { label: 'occupied', value: '—' },
+  { label: 'size', value: '—' },
+  { label: 'browsers', value: '— tabs' },
+] %>
+<div id="workspace" data-id="<%= it.workspace.id %>" class="flex h-screen flex-col">
+  <header class="shrink-0 border-b border-gray-200 px-4 py-2 text-sm">
+    <div id="stats" class="group relative cursor-default">
+      <div class="grid grid-cols-4 rounded-md border border-gray-200 bg-gray-50">
+        <% stats.forEach(stat => { %>
+        <div class="px-3 py-1.5 text-center">
+          <span class="text-gray-500"><%= stat.label %>:</span> <span class="font-medium"><%= stat.value %></span>
+        </div>
+        <% }) %>
+      </div>
+      <div class="invisible absolute inset-x-0 top-full z-10 pt-1 group-hover:visible group-data-pinned:visible">
+        <div class="rounded-md border border-gray-200 bg-white p-3 text-gray-500 shadow-lg">Empty</div>
+      </div>
+    </div>
+  </header>
+  <div class="flex min-h-0 flex-1">
+    <aside class="flex w-64 shrink-0 flex-col border-r border-gray-200">
+      <h1 class="truncate border-b border-gray-200 px-4 py-3 text-sm font-semibold"><%= it.workspace.name %></h1>
+      <ul id="tree" class="min-h-0 flex-1 overflow-y-auto p-2 text-sm"></ul>
+    </aside>
+    <section class="flex min-w-0 flex-1 flex-col">
+      <div id="tabs" role="tablist" class="flex shrink-0 overflow-x-auto border-b border-gray-200 bg-gray-50 empty:hidden"></div>
+      <div id="panels" class="min-h-0 flex-1 overflow-auto">
+        <p id="empty" class="p-6 text-sm text-gray-500">Pick a file to open it.</p>
+      </div>
+    </section>
+  </div>
+</div>
+
+<template id="folder">
+  <li>
+    <details>
+      <summary data-name class="cursor-pointer truncate rounded px-2 py-1 hover:bg-gray-100"></summary>
+      <ul class="pl-3"></ul>
+    </details>
+  </li>
+</template>
+<template id="file">
+  <li><button type="button" data-name class="block w-full truncate rounded py-1 pl-6 pr-2 text-left hover:bg-gray-100"></button></li>
+</template>
+<template id="tree-note">
+  <li class="px-2 py-1 text-gray-500"></li>
+</template>
+<template id="tab">
+  <div role="tab" aria-selected="false" class="flex shrink-0 cursor-pointer items-center gap-2 border-r border-gray-200 py-2 pl-3 pr-2 text-sm text-gray-500 hover:text-gray-900 aria-selected:bg-white aria-selected:text-gray-900">
+    <span data-name></span>
+    <button type="button" data-close aria-label="Close" class="rounded px-1 text-gray-400 hover:bg-gray-200 hover:text-gray-900">×</button>
+  </div>
+</template>
+<template id="text">
+  <pre class="p-4 font-mono text-xs leading-5"><code></code></pre>
+</template>
+<template id="image">
+  <div class="p-4"><img alt="" class="max-w-full"></div>
+</template>
+<template id="note">
+  <p class="p-6 text-sm text-gray-500"></p>
+</template>
+
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.2/styles/github.min.css" integrity="sha512-0aPQyyeZrWj9sCA46UlmWgKOP0mUipLQ6OZXu8l4IcAmD2u31EPEy9VcIMvl7SoAaKe8bLXZhYoMaE/in+gcgA==" crossorigin="anonymous" referrerpolicy="no-referrer">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.2/highlight.min.js" integrity="sha512-VSPLUv/n1Bmn+4zoxBNwpuFAO3//79I0Aax/qHDx24R47vylPcc9PrHDCqlePwHnh3joiM7/YTQhcXyQAAxvPQ==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script>
+  const base = `/workspaces/${document.getElementById('workspace').dataset.id}`
+  const tree = document.getElementById('tree')
+  const tabs = document.getElementById('tabs')
+  const panels = document.getElementById('panels')
+  const empty = document.getElementById('empty')
+  const opened = new Map()
+
+  const clone = id => document.getElementById(id).content.firstElementChild.cloneNode(true)
+
+  const list = async (path, into) => {
+    const res = await fetch(`${base}/tree?path=${encodeURIComponent(path)}`)
+    const body = await res.json()
+    if (!res.ok || !body.length) {
+      const note = clone('tree-note')
+      note.textContent = res.ok ? 'Empty folder' : body.message
+      into.append(note)
+      return
+    }
+
+    for (const entry of body) {
+      const item = clone(entry.type === 'directory' ? 'folder' : 'file')
+      item.querySelector('[data-name]').textContent = entry.name
+      if (entry.type === 'directory') {
+        const children = item.querySelector('ul')
+        item.querySelector('details').addEventListener('toggle', () => list(entry.path, children), { once: true })
+      } else {
+        Object.assign(item.querySelector('button').dataset, { path: entry.path, size: entry.size })
+      }
+      into.append(item)
+    }
+  }
+
+  const activate = path => {
+    for (const [key, { tab, panel }] of opened) {
+      tab.setAttribute('aria-selected', key === path)
+      panel.hidden = key !== path
+    }
+    empty.hidden = opened.size > 0
+  }
+
+  tree.addEventListener('click', async event => {
+    const button = event.target.closest('button[data-path]')
+    if (!button) return
+    const { path, size } = button.dataset
+    if (opened.has(path)) return activate(path)
+
+    const tab = clone('tab')
+    tab.dataset.path = path
+    tab.title = path
+    tab.querySelector('[data-name]').textContent = button.textContent
+    const panel = document.createElement('div')
+    tabs.append(tab)
+    panels.append(panel)
+    opened.set(path, { tab, panel })
+    activate(path)
+
+    const url = `${base}/files/${path.split('/').map(encodeURIComponent).join('/')}`
+    if (/\.(png|jpe?g|gif|webp|svg|ico|avif|bmp)$/i.test(path)) {
+      const image = clone('image')
+      image.querySelector('img').src = url
+      panel.append(image)
+      return
+    }
+
+    const note = clone('note')
+    if (Number(size) > 1024 * 1024) {
+      note.textContent = `Too large to show (${(size / 1024 / 1024).toFixed(1)} MB)`
+      return panel.append(note)
+    }
+    const res = await fetch(url)
+    if (!res.ok) {
+      note.textContent = (await res.json()).message
+      return panel.append(note)
+    }
+    const text = await res.text()
+    if (text.includes('\0') || text.includes('�')) {
+      note.textContent = 'Binary file, not shown'
+      return panel.append(note)
+    }
+    const pre = clone('text')
+    const language = path.split('.').pop()
+    if (window.hljs?.getLanguage(language)) pre.firstElementChild.innerHTML = hljs.highlight(text, { language }).value
+    else pre.firstElementChild.textContent = text
+    panel.append(pre)
+  })
+
+  tabs.addEventListener('click', event => {
+    const tab = event.target.closest('[role="tab"]')
+    if (!tab) return
+    if (!event.target.closest('[data-close]')) return activate(tab.dataset.path)
+
+    opened.get(tab.dataset.path).panel.remove()
+    opened.delete(tab.dataset.path)
+    tab.remove()
+    if (tab.getAttribute('aria-selected') === 'true') activate([...opened.keys()].at(-1))
+  })
+
+  document.addEventListener('click', event => {
+    const stats = document.getElementById('stats')
+    stats.toggleAttribute('data-pinned', stats.contains(event.target))
+  })
+
+  list('', tree)
+</script>

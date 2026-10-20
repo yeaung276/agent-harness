@@ -2,7 +2,7 @@ import type { FastifyPluginAsyncTypebox } from '@fastify/type-provider-typebox'
 
 import { readForm } from '../../plugins/multipart.ts'
 import { HttpError } from '../../services/http-error.ts'
-import { WorkspaceParams, WorkspacesQuery } from './schemas/workspaces.ts'
+import { FileParams, TreeQuery, WorkspaceParams, WorkspacesQuery } from './schemas/workspaces.ts'
 
 const PAGE_SIZE = 20
 
@@ -38,6 +38,12 @@ export const workspaces: FastifyPluginAsyncTypebox = async app => {
     reply.viewAsync('workspaces', await view(request.query.page))
   )
 
+  app.get('/workspaces/:id', { schema: { params: WorkspaceParams } }, async (request, reply) => {
+    const workspace = await app.services.workspaces.get(request.params.id)
+
+    return reply.viewAsync('workspace', { title: workspace.name, active: 'workspaces', workspace })
+  })
+
   app.post('/workspaces', async (request, reply) => {
     const { fields, file } = await readForm(request, app.services.workspaces.uploadsDir)
     const name = fields.name ?? ''
@@ -59,5 +65,24 @@ export const workspaces: FastifyPluginAsyncTypebox = async app => {
     })
 
     return reply.redirect('/workspaces')
+  })
+
+  app.get('/workspaces/:id/tree', { schema: { params: WorkspaceParams, querystring: TreeQuery } }, async request => {
+    const { id } = request.params
+    const paths = await app.services.workspaces.tree(id, request.query.path, { secrets: false, recursive: false })
+    const entries = await Promise.all(paths.map(path => app.services.workspaces.describeFile(id, path)))
+
+    return entries.sort((a, b) => (a.type === b.type ? a.name.localeCompare(b.name) : a.type === 'directory' ? -1 : 1))
+  })
+
+  app.get('/workspaces/:id/files/*', { schema: { params: FileParams } }, async (request, reply) => {
+    const path = request.params['*']
+    const bytes = await app.services.workspaces.readFile(request.params.id, path)
+
+    return reply
+      .header('content-security-policy', 'sandbox')
+      .header('x-content-type-options', 'nosniff')
+      .type(Bun.file(path).type)
+      .send(bytes)
   })
 }

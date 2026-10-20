@@ -1,5 +1,6 @@
-import { mkdir, readdir, rename, rm, stat } from 'node:fs/promises'
-import { isAbsolute, join, relative, resolve, sep } from 'node:path'
+import * as fs from 'node:fs/promises'
+import { mkdir, readdir, rename, rm, stat, unlink } from 'node:fs/promises'
+import { basename, dirname, join, relative, resolve } from 'node:path'
 
 import { desc, eq, sql } from 'drizzle-orm'
 import type { FastifyBaseLogger } from 'fastify'
@@ -7,6 +8,7 @@ import type { FastifyBaseLogger } from 'fastify'
 import { users, workspaces } from '../../db/schema.ts'
 import type { Db } from '../../db/type.ts'
 import { HttpError } from '../http-error.ts'
+import { ensureFile, ensureFolder, isBinary, isInside, walk } from './files.ts'
 import { checkZip, extractZip } from './zip.ts'
 
 // 1–63 lowercase letters, digits and -, not starting or ending with -
@@ -30,13 +32,23 @@ export const createWorkspaceService = ({ db, dir, log }: { db: Db; dir: string; 
       .from(workspaces)
       .innerJoin(users, eq(users.id, workspaces.userId))
 
-  const get = async (id: string) => {
+  const getOrThrow = async (id: string) => {
     const [workspace] = await select().where(eq(workspaces.id, id))
     if (!workspace) throw new HttpError(404, 'Workspace not found')
     return workspace
   }
 
+  const resolvePath = async (id: string, subpath: string) => {
+    await getOrThrow(id)
+    const target = resolve(path(id), subpath)
+    if (!(await isInside(path(id), target))) throw new HttpError(404, `${subpath} not found`)
+    return target
+  }
+
   return {
+    uploadsDir,
+
+    // Workspaces
     create: async (userId: string, name: string) => {
       if (!new RegExp(NAME_PATTERN).test(name))
         throw new HttpError(400, 'Use 1–63 lowercase letters, digits and -, not starting or ending with -')
@@ -52,10 +64,10 @@ export const createWorkspaceService = ({ db, dir, log }: { db: Db; dir: string; 
       })
       if (!created) throw new HttpError(409, 'A workspace already has this name')
 
-      return get(created.id)
+      return getOrThrow(created.id)
     },
 
-    get,
+    get: getOrThrow,
 
     delete: async (id: string) => {
       await db.transaction(async tx => {
@@ -73,8 +85,6 @@ export const createWorkspaceService = ({ db, dir, log }: { db: Db; dir: string; 
       )
     },
 
-    uploadsDir,
-
     extract: async (id: string, { zip, path: folder }: { zip: string; path: string }) => {
       const root = path(id)
       const target = resolve(root, folder.replace(/^\/+/, ''))
@@ -83,9 +93,8 @@ export const createWorkspaceService = ({ db, dir, log }: { db: Db; dir: string; 
       let accepted = false
       let files: number
       try {
-        await get(id)
-        if (relativePath === '..' || relativePath.startsWith(`..${sep}`) || isAbsolute(relativePath))
-          throw new HttpError(400, 'path leads outside the workspace')
+        await getOrThrow(id)
+        if (!(await isInside(root, target))) throw new HttpError(400, 'path leads outside the workspace')
         if ((await stat(target).catch(() => null))?.isFile()) throw new HttpError(400, `${relativePath} is a file`)
         files = await checkZip(zip)
         accepted = true
@@ -101,6 +110,66 @@ export const createWorkspaceService = ({ db, dir, log }: { db: Db; dir: string; 
         .catch(err => log.error({ err, zip }, 'failed to remove upload'))
 
       return { path: relativePath, files }
+    },
+
+    list: async ({ limit, offset }: { limit: number; offset: number }) => {
+      const [items, total] = await Promise.all([
+        select().orderBy(desc(workspaces.createdAt), desc(workspaces.id)).limit(limit).offset(offset),
+        db.$count(workspaces),
+      ])
+      return { items, total }
+    },
+
+    // Files
+    tree: async (id: string, path: string, options: { secrets: boolean; recursive: boolean }) => {
+      const dir = await resolvePath(id, path)
+      await ensureFolder(dir, path)
+      return (await walk(dir, path, options)).sort()
+    },
+
+    describeFile: async (id: string, path: string) => {
+      const info = await stat(await resolvePath(id, path)).catch(() => null)
+      if (!info) throw new HttpError(404, `${path} not found`)
+      return {
+        name: basename(path),
+        path,
+        type: info.isDirectory() ? ('directory' as const) : ('file' as const),
+        size: info.size,
+        updatedAt: info.mtime,
+      }
+    },
+
+    readFile: async (id: string, path: string) => {
+      const target = await resolvePath(id, path)
+      await ensureFile(target, path)
+      return fs.readFile(target)
+    },
+
+    writeFile: async (id: string, path: string, content: string) => {
+      const target = await resolvePath(id, path)
+      if ((await stat(target).catch(() => null))?.isDirectory()) throw new HttpError(400, `${path} is a folder`)
+      await mkdir(dirname(target), { recursive: true }).catch(err => {
+        if (err.code !== 'EEXIST' && err.code !== 'ENOTDIR') throw err
+        throw new HttpError(400, `A folder on the way to ${path} is a file`)
+      })
+      await fs.writeFile(target, content)
+    },
+
+    editFile: async (id: string, path: string, search: string, replace: string) => {
+      const target = await resolvePath(id, path)
+      await ensureFile(target, path)
+      const bytes = await fs.readFile(target)
+      if (isBinary(bytes)) throw new HttpError(400, `${path} is binary`)
+      const parts = bytes.toString().split(search)
+      if (parts.length === 1) throw new HttpError(400, `search is not in ${path}`)
+      if (parts.length > 2) throw new HttpError(409, `search is in ${path} ${parts.length - 1} times`)
+      await fs.writeFile(target, parts.join(replace))
+    },
+
+    deleteFile: async (id: string, path: string) => {
+      const target = await resolvePath(id, path)
+      await ensureFile(target, path)
+      await unlink(target)
     },
 
     removeLeftovers: async () => {
@@ -120,14 +189,6 @@ export const createWorkspaceService = ({ db, dir, log }: { db: Db; dir: string; 
           )
         )
       )
-    },
-
-    list: async ({ limit, offset }: { limit: number; offset: number }) => {
-      const [items, total] = await Promise.all([
-        select().orderBy(desc(workspaces.createdAt), desc(workspaces.id)).limit(limit).offset(offset),
-        db.$count(workspaces),
-      ])
-      return { items, total }
     },
   }
 }
