@@ -1,0 +1,1 @@
+ALTER TABLE "workspaces" ADD COLUMN "default_env" jsonb DEFAULT '{}'::jsonb NOT NULL;

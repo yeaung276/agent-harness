@@ -1,8 +1,17 @@
 import type { FastifyPluginAsyncTypebox } from '@fastify/type-provider-typebox'
+import { Value } from 'typebox/value'
 
 import { readForm } from '../../plugins/multipart.ts'
 import { HttpError } from '../../services/http-error.ts'
-import { FileParams, TreeQuery, WorkspaceParams, WorkspacesQuery } from './schemas/workspaces.ts'
+import {
+  DefaultEnv,
+  DefaultEnvChanges,
+  EnvForm,
+  FileParams,
+  TreeQuery,
+  WorkspaceParams,
+  WorkspacesQuery,
+} from './schemas/workspaces.ts'
 
 const PAGE_SIZE = 20
 
@@ -21,6 +30,7 @@ export const workspaces: FastifyPluginAsyncTypebox = async app => {
         id: item.id,
         name: item.name,
         status: item.status,
+        defaultEnvKeys: item.defaultEnvKeys,
         created: date.format(item.createdAt),
         createdBy: item.createdBy.email,
       })),
@@ -47,9 +57,11 @@ export const workspaces: FastifyPluginAsyncTypebox = async app => {
   app.post('/workspaces', async (request, reply) => {
     const { fields, file } = await readForm(request, app.services.workspaces.uploadsDir)
     const name = fields.name ?? ''
+    const defaultEnv = JSON.parse(fields.defaultEnv || '{}')
 
     try {
-      const workspace = await app.services.workspaces.create(request.userId, name)
+      if (!Value.Check(DefaultEnv, defaultEnv)) throw new HttpError(400, 'Environment variable values must be text')
+      const workspace = await app.services.workspaces.create(request.userId, name, defaultEnv)
       if (file) await app.services.workspaces.extract(workspace.id, { zip: file, path: '' })
     } catch (err) {
       if (!(err instanceof HttpError)) throw err
@@ -63,6 +75,15 @@ export const workspaces: FastifyPluginAsyncTypebox = async app => {
     await app.services.workspaces.delete(request.params.id).catch(err => {
       if (!(err instanceof HttpError) || err.status !== 404) throw err
     })
+
+    return reply.redirect('/workspaces')
+  })
+
+  app.post('/workspaces/:id/env', { schema: { params: WorkspaceParams, body: EnvForm } }, async (request, reply) => {
+    const defaultEnv = JSON.parse(request.body.defaultEnv)
+    if (!Value.Check(DefaultEnvChanges, defaultEnv))
+      throw new HttpError(400, 'Environment variable values must be text or null')
+    await app.services.workspaces.update(request.params.id, { defaultEnv })
 
     return reply.redirect('/workspaces')
   })

@@ -8,7 +8,7 @@
     <button type="button" onclick="document.getElementById('create-workspace').showModal()" class="rounded-md bg-gray-900 px-3 py-2 text-sm font-medium text-white hover:bg-gray-700">Create workspace</button>
   </div>
 
-  <dialog id="create-workspace" class="m-auto w-full max-w-sm rounded-lg border border-gray-200 p-6 shadow-lg backdrop:bg-black/30">
+  <dialog id="create-workspace" class="m-auto w-full max-w-lg rounded-lg border border-gray-200 p-6 shadow-lg backdrop:bg-black/30">
     <h2 class="text-base font-semibold">Create workspace</h2>
     <form method="post" action="/workspaces" enctype="multipart/form-data" class="mt-4">
       <label class="block">
@@ -24,6 +24,7 @@
         <span class="text-sm font-medium">Zip <span class="font-normal text-gray-500">(optional)</span></span>
         <input type="file" name="file" accept=".zip" class="mt-1 block w-full text-sm">
       </label>
+      <%~ include('./env-picker') %>
       <div class="mt-6 flex justify-end gap-2">
         <button type="submit" formmethod="dialog" formnovalidate class="rounded-md border border-gray-300 px-3 py-2 text-sm font-medium hover:bg-gray-50">Cancel</button>
         <button type="submit" class="rounded-md bg-gray-900 px-3 py-2 text-sm font-medium text-white hover:bg-gray-700">Create</button>
@@ -33,6 +34,36 @@
   <% if (it.form) { /* a refused name comes back with the modal open */ %>
   <script>document.getElementById('create-workspace').showModal()</script>
   <% } %>
+
+  <dialog id="edit-workspace" class="m-auto w-full max-w-lg rounded-lg border border-gray-200 p-6 shadow-lg backdrop:bg-black/30">
+    <h2 class="text-base font-semibold">Edit <span data-workspace></span></h2>
+    <p class="mt-1 text-sm text-gray-500">Values are encrypted and not shown. To change one, remove it and add it again.</p>
+    <form method="post">
+      <%~ include('./env-picker') %>
+      <div class="mt-6 flex justify-end gap-2">
+        <button type="submit" formmethod="dialog" formnovalidate class="rounded-md border border-gray-300 px-3 py-2 text-sm font-medium hover:bg-gray-50">Cancel</button>
+        <button type="submit" class="rounded-md bg-gray-900 px-3 py-2 text-sm font-medium text-white hover:bg-gray-700">Save</button>
+      </div>
+    </form>
+  </dialog>
+  <script>
+    document.addEventListener('click', event => {
+      const button = event.target.closest('[data-edit]')
+      if (!button) return
+      const dialog = document.getElementById('edit-workspace')
+      dialog.querySelector('form').action = `/workspaces/${button.dataset.edit}/env`
+      dialog.querySelector('[data-workspace]').textContent = button.dataset.name
+      const template = dialog.querySelector('template[data-existing]')
+      dialog.querySelector('[data-rows]').replaceChildren(
+        ...JSON.parse(button.dataset.keys).map(key => {
+          const row = template.content.firstElementChild.cloneNode(true)
+          row.querySelector('[data-key]').value = key
+          return row
+        })
+      )
+      dialog.showModal()
+    })
+  </script>
 
   <div class="mt-6 overflow-x-auto rounded-lg border border-gray-200">
     <table class="w-full text-left text-sm">
@@ -62,6 +93,7 @@
           <td class="px-4 py-2.5 text-gray-600"><%= workspace.createdBy %></td>
           <td class="px-4 py-2.5 text-right">
             <a href="/workspaces/<%= workspace.id %>" class="mr-3 text-sm text-gray-600 hover:text-gray-900">View</a>
+            <button type="button" data-edit="<%= workspace.id %>" data-name="<%= workspace.name %>" data-keys="<%= JSON.stringify(workspace.defaultEnvKeys) %>" class="mr-3 text-sm text-gray-600 hover:text-gray-900">Edit</button>
             <form method="post" action="/workspaces/<%= workspace.id %>/delete" onsubmit="return confirm('Delete this workspace and all its files?')" class="inline">
               <button type="submit" class="text-sm text-red-600 hover:text-red-800">Delete</button>
             </form>

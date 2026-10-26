@@ -8,13 +8,24 @@ import type { FastifyBaseLogger } from 'fastify'
 import { users, workspaces } from '../../db/schema.ts'
 import type { Db } from '../../db/type.ts'
 import { HttpError } from '../http-error.ts'
+import { decrypt, encrypt } from './crypto.ts'
 import { ensureFile, ensureFolder, isBinary, isInside, walk } from './files.ts'
 import { checkZip, extractZip } from './zip.ts'
 
 // 1–63 lowercase letters, digits and -, not starting or ending with -
 export const NAME_PATTERN = '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$'
 
-export const createWorkspaceService = ({ db, dir, log }: { db: Db; dir: string; log: FastifyBaseLogger }) => {
+export const createWorkspaceService = ({
+  db,
+  dir,
+  dataEncryptionKey,
+  log,
+}: {
+  db: Db
+  dir: string
+  dataEncryptionKey: string
+  log: FastifyBaseLogger
+}) => {
   const path = (id: string) => join(resolve(dir), id)
   const trash = (id: string) => join(resolve(dir), '.deleted', id)
   const uploadsDir = join(resolve(dir), '.uploads')
@@ -25,6 +36,7 @@ export const createWorkspaceService = ({ db, dir, log }: { db: Db; dir: string; 
         id: workspaces.id,
         name: workspaces.name,
         status: workspaces.status,
+        defaultEnvKeys: sql<string[]>`array(select jsonb_object_keys(${workspaces.defaultEnv}) order by 1)`,
         createdBy: { id: users.id, email: users.email },
         createdAt: workspaces.createdAt,
         updatedAt: workspaces.updatedAt,
@@ -45,18 +57,30 @@ export const createWorkspaceService = ({ db, dir, log }: { db: Db; dir: string; 
     return target
   }
 
+  const encryptEnv = (newEnv: Record<string, string | null>, existingEnv: Record<string, string> = {}) => {
+    const merged = { ...existingEnv }
+    for (const [key, value] of Object.entries(newEnv)) {
+      if (value === null) delete merged[key]
+      else merged[key] = encrypt(dataEncryptionKey, value)
+    }
+    return merged
+  }
+
+  const decryptEnv = (existingEnv: Record<string, string>) =>
+    Object.fromEntries(Object.entries(existingEnv).map(([key, value]) => [key, decrypt(dataEncryptionKey, value)]))
+
   return {
     uploadsDir,
 
     // Workspaces
-    create: async (userId: string, name: string) => {
+    create: async (userId: string, name: string, defaultEnv: Record<string, string> = {}) => {
       if (!new RegExp(NAME_PATTERN).test(name))
         throw new HttpError(400, 'Use 1–63 lowercase letters, digits and -, not starting or ending with -')
 
       const created = await db.transaction(async tx => {
         const [row] = await tx
           .insert(workspaces)
-          .values({ userId, name })
+          .values({ userId, name, defaultEnv: encryptEnv(defaultEnv) })
           .onConflictDoNothing({ target: workspaces.name })
           .returning({ id: workspaces.id })
         if (row) await mkdir(path(row.id), { recursive: true })
@@ -68,6 +92,30 @@ export const createWorkspaceService = ({ db, dir, log }: { db: Db; dir: string; 
     },
 
     get: getOrThrow,
+
+    list: async ({ limit, offset }: { limit: number; offset: number }) => {
+      const [items, total] = await Promise.all([
+        select().orderBy(desc(workspaces.createdAt), desc(workspaces.id)).limit(limit).offset(offset),
+        db.$count(workspaces),
+      ])
+      return { items, total }
+    },
+
+    update: async (id: string, { defaultEnv = {} }: { defaultEnv?: Record<string, string | null> }) => {
+      await db.transaction(async tx => {
+        const [row] = await tx
+          .select({ defaultEnv: workspaces.defaultEnv })
+          .from(workspaces)
+          .where(eq(workspaces.id, id))
+          .for('update')
+        if (!row) throw new HttpError(404, 'Workspace not found')
+
+        await tx
+          .update(workspaces)
+          .set({ defaultEnv: encryptEnv(defaultEnv, row.defaultEnv), updatedAt: sql`now()` })
+          .where(eq(workspaces.id, id))
+      })
+    },
 
     delete: async (id: string) => {
       await db.transaction(async tx => {
@@ -110,14 +158,6 @@ export const createWorkspaceService = ({ db, dir, log }: { db: Db; dir: string; 
         .catch(err => log.error({ err, zip }, 'failed to remove upload'))
 
       return { path: relativePath, files }
-    },
-
-    list: async ({ limit, offset }: { limit: number; offset: number }) => {
-      const [items, total] = await Promise.all([
-        select().orderBy(desc(workspaces.createdAt), desc(workspaces.id)).limit(limit).offset(offset),
-        db.$count(workspaces),
-      ])
-      return { items, total }
     },
 
     // Files

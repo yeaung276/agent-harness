@@ -10,6 +10,7 @@ import { strToU8, zipSync } from 'fflate'
 import { buildApp } from '../../../src/app.ts'
 import { loadConfig } from '../../../src/config.ts'
 import { users, workspaces } from '../../../src/db/schema.ts'
+import { decrypt } from '../../../src/services/workspaces/crypto.ts'
 
 const dir = await mkdtemp(join(tmpdir(), 'workspaces-'))
 const app = await buildApp(
@@ -33,10 +34,21 @@ afterAll(async () => {
 const headers = { authorization: `Bearer ${token}` }
 const uniqueName = () => `ws-${crypto.randomUUID().slice(0, 8)}`
 
-const createWorkspace = (name: string) =>
-  app.inject({ method: 'POST', url: '/api/v1/workspaces', headers, payload: { name } })
+const createWorkspace = (name: string, defaultEnv?: Record<string, string>) =>
+  app.inject({ method: 'POST', url: '/api/v1/workspaces', headers, payload: { name, defaultEnv } })
 
 const getWorkspace = (id: string) => app.inject({ url: `/api/v1/workspaces/${id}`, headers })
+
+const updateWorkspace = (id: string, payload: { defaultEnv: Record<string, string | null> }) =>
+  app.inject({ method: 'PATCH', url: `/api/v1/workspaces/${id}`, headers, payload })
+
+const storedEnv = async (id: string) => {
+  const [row] = await app.db
+    .select({ defaultEnv: workspaces.defaultEnv })
+    .from(workspaces)
+    .where(eq(workspaces.id, id))
+  return row!.defaultEnv
+}
 
 const deleteWorkspace = (id: string) => app.inject({ method: 'DELETE', url: `/api/v1/workspaces/${id}`, headers })
 
@@ -44,7 +56,7 @@ const upload = (id: string, zip: Uint8Array, path?: string) => {
   const payload = new FormData()
   payload.append('file', new File([zip as Uint8Array<ArrayBuffer>], 'site.zip'))
   if (path !== undefined) payload.append('path', path)
-  return app.inject({ method: 'POST', url: `/api/v1/workspaces/${id}/upload`, headers, payload })
+  return app.inject({ method: 'PUT', url: `/api/v1/workspaces/${id}/upload`, headers, payload })
 }
 
 const waitFor = async (file: string) => {
@@ -111,6 +123,34 @@ describe('workspaces on the API', () => {
     const res = await app.inject({ method: 'POST', url: '/api/v1/workspaces', payload: { name: uniqueName() } })
 
     expect(res.statusCode).toBe(401)
+  })
+
+  test('the default env is stored encrypted and never returned', async () => {
+    const created = await createWorkspace(uniqueName(), { API_KEY: 'secret-value' })
+    expect(created.statusCode).toBe(201)
+    expect(created.json()).not.toHaveProperty('defaultEnv')
+    expect(created.json().defaultEnvKeys).toEqual(['API_KEY'])
+
+    const stored = await storedEnv(created.json().id)
+    expect(stored.API_KEY).not.toBe('secret-value')
+    expect(decrypt(app.config.DATA_ENCRYPTION_KEY, stored.API_KEY!)).toBe('secret-value')
+  })
+
+  test('I can set and remove default env values', async () => {
+    const { id } = (await createWorkspace(uniqueName(), { KEEP: 'a', REMOVE: 'b' })).json()
+
+    const res = await updateWorkspace(id, { defaultEnv: { REMOVE: null, ADD: 'c' } })
+
+    expect(res.statusCode).toBe(204)
+    const stored = await storedEnv(id)
+    expect(Object.keys(stored).sort()).toEqual(['ADD', 'KEEP'])
+    expect((await getWorkspace(id)).json().defaultEnvKeys).toEqual(['ADD', 'KEEP'])
+    expect(decrypt(app.config.DATA_ENCRYPTION_KEY, stored.KEEP!)).toBe('a')
+    expect(decrypt(app.config.DATA_ENCRYPTION_KEY, stored.ADD!)).toBe('c')
+  })
+
+  test('updating an unknown workspace is not found', async () => {
+    expect((await updateWorkspace(crypto.randomUUID(), { defaultEnv: {} })).statusCode).toBe(404)
   })
 })
 

@@ -22,6 +22,8 @@ export const ConfigSchema = Type.Object({
   DATABASE_URL: Type.String({ minLength: 1 }),
   REDIS_URL: Type.String({ minLength: 1 }),
   WORKSPACES_DIR: Type.String({ minLength: 1, default: '/workspaces' }),
+
+  DATA_ENCRYPTION_KEY: Type.String({ pattern: '^[0-9a-f]{64}$' }),
 })
 
 export type Config = Static<typeof ConfigSchema>

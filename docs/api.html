@@ -72,6 +72,7 @@
     &quot;id&quot;,
     &quot;name&quot;,
     &quot;status&quot;,
+    &quot;defaultEnvKeys&quot;,
     &quot;createdBy&quot;,
     &quot;createdAt&quot;,
     &quot;updatedAt&quot;
@@ -89,6 +90,12 @@
         &quot;running&quot;,
         &quot;stopped&quot;
       ]
+    },
+    &quot;defaultEnvKeys&quot;: {
+      &quot;type&quot;: &quot;array&quot;,
+      &quot;items&quot;: {
+        &quot;type&quot;: &quot;string&quot;
+      }
     },
     &quot;createdBy&quot;: {
       &quot;type&quot;: &quot;object&quot;,
@@ -116,6 +123,7 @@
     }
   }
 }</code></pre>
+          <p><code>defaultEnvKeys</code> is the names in the workspace's default env, sorted. Their values are never returned.</p>
 
           <h3>Endpoints</h3>
 <div class="routes">
@@ -132,13 +140,22 @@
     &quot;name&quot;: {
       &quot;pattern&quot;: &quot;^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$&quot;,
       &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;defaultEnv&quot;: {
+      &quot;type&quot;: &quot;object&quot;,
+      &quot;patternProperties&quot;: {
+        &quot;^.*$&quot;: {
+          &quot;type&quot;: &quot;string&quot;
+        }
+      }
     }
   }
 }</code></pre>
+<p><code>defaultEnv</code> is the environment every command in the workspace runs with, as names and values. The values are encrypted at rest.</p>
 <h4>Response 201</h4>
 <p>The workspace object, with <code>status</code> <code>stopped</code>.</p>
 <h4>Errors · 400</h4>
-<p>The name doesn't match the pattern. Fastify's validation body: <code>statusCode</code>, <code>code</code>, <code>error</code>, <code>message</code>.</p>
+<p>The name doesn't match the pattern, or a value in <code>defaultEnv</code> isn't a string. Fastify's validation body: <code>statusCode</code>, <code>code</code>, <code>error</code>, <code>message</code>.</p>
 <h4>Errors · 409</h4>
 <p>A workspace already has this name.</p>
   </div>
@@ -166,6 +183,48 @@
   </div>
 </details>
 <details class="route">
+  <summary><span class="method patch">PATCH</span><code class="route-path">/api/v1/workspaces/:id</code><span class="route-summary">Set or remove default env values</span></summary>
+  <div class="route-body">
+<h4>Params</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;id&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;id&quot;: {
+      &quot;format&quot;: &quot;uuid&quot;,
+      &quot;type&quot;: &quot;string&quot;
+    }
+  }
+}</code></pre>
+<h4>Body</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;properties&quot;: {
+    &quot;defaultEnv&quot;: {
+      &quot;type&quot;: &quot;object&quot;,
+      &quot;patternProperties&quot;: {
+        &quot;^.*$&quot;: {
+          &quot;type&quot;: [
+            &quot;string&quot;,
+            &quot;null&quot;
+          ]
+        }
+      }
+    }
+  }
+}</code></pre>
+<p>Each name in <code>defaultEnv</code> is set to its value, and a name set to <code>null</code> is removed. Names not in <code>defaultEnv</code> stay as they were.</p>
+<h4>Response 204</h4>
+<p>No body. The next exec or launch runs with the new env; a background process already running keeps the env it started with.</p>
+<h4>Errors · 400</h4>
+<p>A value in <code>defaultEnv</code> isn't a string or <code>null</code>. Fastify's validation body: <code>statusCode</code>, <code>code</code>, <code>error</code>, <code>message</code>.</p>
+<h4>Errors · 404</h4>
+<p>No workspace has this id.</p>
+  </div>
+</details>
+<details class="route">
   <summary><span class="method delete">DELETE</span><code class="route-path">/api/v1/workspaces/:id</code><span class="route-summary">Delete a workspace and its directory</span></summary>
   <div class="route-body">
 <h4>Params</h4>
@@ -188,7 +247,7 @@
   </div>
 </details>
 <details class="route">
-  <summary><span class="method post">POST</span><code class="route-path">/api/v1/workspaces/:id/upload</code><span class="route-summary">Upload a zip and extract it into the workspace</span></summary>
+  <summary><span class="method put">PUT</span><code class="route-path">/api/v1/workspaces/:id/upload</code><span class="route-summary">Upload a zip and extract it into the workspace</span></summary>
   <div class="route-body">
 <h4>Params</h4>
 <pre class="schema"><code>{
@@ -490,6 +549,270 @@
 <p>The path is a folder.</p>
 <h4>Errors · 404</h4>
 <p>No workspace has this id, or no file is at the path.</p>
+  </div>
+</details>
+</div>
+        </section>
+
+        <section class="doc-section" id="sandbox">
+          <h2>Sandbox</h2>
+          <p>Commands that run inside a workspace, on its files. Exec runs a command to the end and returns its output. Launch starts a long-running process in the background and exposes one of its ports at a public URL. A workspace runs one background process at a time, and its <code>status</code> is <code>running</code> while it does; exec can run alongside it.</p>
+          <p>A command is run with <code>sh -c</code> from the workspace root. Every route here also answers <code>401</code> as described in <a href="#authentication">Authentication</a>.</p>
+
+          <h3>Network</h3>
+          <p>By default a command can reach every public host. <code>network</code> changes that with two lists: <code>deny</code> blocks hosts, and <code>allow</code> opens hosts again that <code>deny</code> blocked. A host is a name, like <code>registry.npmjs.org</code>, or a pattern: <code>*.npmjs.org</code> matches any name ending in <code>.npmjs.org</code>, and <code>*</code> matches every host. So <code>{&quot;deny&quot;: [&quot;*&quot;], &quot;allow&quot;: [&quot;registry.npmjs.org&quot;]}</code> reaches only the npm registry.</p>
+
+          <h3>Endpoints</h3>
+<div class="routes">
+<details class="route">
+  <summary><span class="method post">POST</span><code class="route-path">/api/v1/workspaces/:id/sandbox/launch</code><span class="route-summary">Start the background process and expose its port</span></summary>
+  <div class="route-body">
+<h4>Params</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;id&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;id&quot;: {
+      &quot;format&quot;: &quot;uuid&quot;,
+      &quot;type&quot;: &quot;string&quot;
+    }
+  }
+}</code></pre>
+<h4>Body</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;command&quot;,
+    &quot;port&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;command&quot;: {
+      &quot;minLength&quot;: 1,
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;port&quot;: {
+      &quot;minimum&quot;: 1,
+      &quot;maximum&quot;: 65535,
+      &quot;type&quot;: &quot;integer&quot;
+    },
+    &quot;env&quot;: {
+      &quot;type&quot;: &quot;object&quot;,
+      &quot;patternProperties&quot;: {
+        &quot;^.*$&quot;: {
+          &quot;type&quot;: &quot;string&quot;
+        }
+      }
+    },
+    &quot;network&quot;: {
+      &quot;type&quot;: &quot;object&quot;,
+      &quot;properties&quot;: {
+        &quot;allow&quot;: {
+          &quot;type&quot;: &quot;array&quot;,
+          &quot;items&quot;: {
+            &quot;type&quot;: &quot;string&quot;
+          }
+        },
+        &quot;deny&quot;: {
+          &quot;type&quot;: &quot;array&quot;,
+          &quot;items&quot;: {
+            &quot;type&quot;: &quot;string&quot;
+          }
+        }
+      }
+    }
+  }
+}</code></pre>
+<p><code>port</code> is the port the process listens on. <code>env</code> is added to the workspace's env, and wins where a name is in both. <code>network</code> is described in <a href="#sandbox">Network</a>.</p>
+<h4>Response 201</h4>
+<p>The public URL that reaches <code>port</code>.</p>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;url&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;url&quot;: {
+      &quot;type&quot;: &quot;string&quot;
+    }
+  }
+}</code></pre>
+<h4>Errors · 400</h4>
+<p>The body doesn't match the schema. Fastify's validation body: <code>statusCode</code>, <code>code</code>, <code>error</code>, <code>message</code>.</p>
+<h4>Errors · 404</h4>
+<p>No workspace has this id.</p>
+<h4>Errors · 409</h4>
+<p>A background process is already running in this workspace. Stop it first.</p>
+  </div>
+</details>
+<details class="route">
+  <summary><span class="method post">POST</span><code class="route-path">/api/v1/workspaces/:id/sandbox/exec</code><span class="route-summary">Run a command to the end and return its output</span></summary>
+  <div class="route-body">
+<h4>Params</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;id&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;id&quot;: {
+      &quot;format&quot;: &quot;uuid&quot;,
+      &quot;type&quot;: &quot;string&quot;
+    }
+  }
+}</code></pre>
+<h4>Body</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;command&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;command&quot;: {
+      &quot;minLength&quot;: 1,
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;timeoutMs&quot;: {
+      &quot;default&quot;: 120000,
+      &quot;minimum&quot;: 1,
+      &quot;maximum&quot;: 240000,
+      &quot;type&quot;: &quot;integer&quot;
+    },
+    &quot;env&quot;: {
+      &quot;type&quot;: &quot;object&quot;,
+      &quot;patternProperties&quot;: {
+        &quot;^.*$&quot;: {
+          &quot;type&quot;: &quot;string&quot;
+        }
+      }
+    },
+    &quot;network&quot;: {
+      &quot;type&quot;: &quot;object&quot;,
+      &quot;properties&quot;: {
+        &quot;allow&quot;: {
+          &quot;type&quot;: &quot;array&quot;,
+          &quot;items&quot;: {
+            &quot;type&quot;: &quot;string&quot;
+          }
+        },
+        &quot;deny&quot;: {
+          &quot;type&quot;: &quot;array&quot;,
+          &quot;items&quot;: {
+            &quot;type&quot;: &quot;string&quot;
+          }
+        }
+      }
+    }
+  }
+}</code></pre>
+<p><code>timeoutMs</code> is how long the command may run: 2 minutes by default, 4 at most. <code>env</code> is added to the workspace's env, and wins where a name is in both. <code>network</code> is described in <a href="#sandbox">Network</a>.</p>
+<h4>Response 200</h4>
+<p>A command that fails still answers <code>200</code>; check <code>exitCode</code>. A command still running at <code>timeoutMs</code> is killed, <code>timedOut</code> is <code>true</code> and <code>exitCode</code> is <code>null</code>.</p>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;exitCode&quot;,
+    &quot;stdout&quot;,
+    &quot;stderr&quot;,
+    &quot;timedOut&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;exitCode&quot;: {
+      &quot;anyOf&quot;: [
+        {
+          &quot;type&quot;: &quot;integer&quot;
+        },
+        {
+          &quot;type&quot;: &quot;null&quot;
+        }
+      ]
+    },
+    &quot;stdout&quot;: {
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;stderr&quot;: {
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;timedOut&quot;: {
+      &quot;type&quot;: &quot;boolean&quot;
+    }
+  }
+}</code></pre>
+<h4>Errors · 400</h4>
+<p>The body doesn't match the schema. Fastify's validation body: <code>statusCode</code>, <code>code</code>, <code>error</code>, <code>message</code>.</p>
+<h4>Errors · 404</h4>
+<p>No workspace has this id.</p>
+  </div>
+</details>
+<details class="route">
+  <summary><span class="method post">POST</span><code class="route-path">/api/v1/workspaces/:id/sandbox/stop</code><span class="route-summary">Stop the background process</span></summary>
+  <div class="route-body">
+<h4>Params</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;id&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;id&quot;: {
+      &quot;format&quot;: &quot;uuid&quot;,
+      &quot;type&quot;: &quot;string&quot;
+    }
+  }
+}</code></pre>
+<h4>Response 204</h4>
+<p>No body. The background process is stopped, its URL stops answering, and the workspace's <code>status</code> is <code>stopped</code>. Also <code>204</code> when nothing is running.</p>
+<h4>Errors · 404</h4>
+<p>No workspace has this id.</p>
+  </div>
+</details>
+<details class="route">
+  <summary><span class="method get">GET</span><code class="route-path">/api/v1/workspaces/:id/sandbox/logs</code><span class="route-summary">The last lines the background process wrote</span></summary>
+  <div class="route-body">
+<h4>Params</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;id&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;id&quot;: {
+      &quot;format&quot;: &quot;uuid&quot;,
+      &quot;type&quot;: &quot;string&quot;
+    }
+  }
+}</code></pre>
+<h4>Query</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;properties&quot;: {
+    &quot;tail&quot;: {
+      &quot;default&quot;: 200,
+      &quot;minimum&quot;: 1,
+      &quot;type&quot;: &quot;integer&quot;
+    }
+  }
+}</code></pre>
+<p><code>tail</code> is how many of the last lines to return.</p>
+<h4>Response 200</h4>
+<p>stdout and stderr together, in the order they were written. Once the process stops, its lines stay until the next launch. Before any launch, <code>lines</code> is empty.</p>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;lines&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;lines&quot;: {
+      &quot;type&quot;: &quot;array&quot;,
+      &quot;items&quot;: {
+        &quot;type&quot;: &quot;string&quot;
+      }
+    }
+  }
+}</code></pre>
+<h4>Errors · 404</h4>
+<p>No workspace has this id.</p>
   </div>
 </details>
 </div>

@@ -1,0 +1,44 @@
+<div class="mt-4">
+  <span class="text-sm font-medium">Environment variables <span class="font-normal text-gray-500">(optional)</span></span>
+  <div data-rows class="mt-1 space-y-2"></div>
+  <button type="button" data-add class="mt-2 text-sm font-medium text-gray-600 hover:text-gray-900">+ Add variable</button>
+  <input type="hidden" name="defaultEnv">
+  <template data-new>
+    <div class="flex items-center gap-2">
+      <input data-name required placeholder="NAME" class="w-2/5 rounded-md border border-gray-300 px-3 py-2 font-mono text-sm">
+      <input data-value placeholder="value" class="min-w-0 flex-1 rounded-md border border-gray-300 px-3 py-2 font-mono text-sm">
+      <button type="button" data-remove aria-label="Remove" class="rounded px-1 text-gray-400 hover:bg-gray-100 hover:text-gray-900">×</button>
+    </div>
+  </template>
+  <template data-existing>
+    <div class="flex items-center gap-2">
+      <input data-key disabled class="w-2/5 rounded-md border border-gray-200 bg-gray-50 px-3 py-2 font-mono text-sm text-gray-600">
+      <input value="Encrypted" disabled class="min-w-0 flex-1 rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-400">
+      <button type="button" data-remove aria-label="Remove" class="rounded px-1 text-gray-400 hover:bg-gray-100 hover:text-gray-900">×</button>
+    </div>
+  </template>
+</div>
+<script>
+  {
+    const picker = document.currentScript.previousElementSibling
+    const rows = picker.querySelector('[data-rows]')
+
+    picker.querySelector('[data-add]').addEventListener('click', () =>
+      rows.append(picker.querySelector('template[data-new]').content.firstElementChild.cloneNode(true))
+    )
+    rows.addEventListener('click', event => {
+      const row = event.target.closest('[data-remove]')?.parentElement
+      if (row?.querySelector('[data-key]')) row.hidden = true
+      else row?.remove()
+    })
+    picker.closest('form').addEventListener('submit', () => {
+      const env = {}
+      for (const row of rows.children) {
+        const key = row.querySelector('[data-key]')
+        if (!key) env[row.querySelector('[data-name]').value.trim()] = row.querySelector('[data-value]').value
+        else if (row.hidden) env[key.value] = null
+      }
+      picker.querySelector('[name="defaultEnv"]').value = JSON.stringify(env)
+    })
+  }
+</script>

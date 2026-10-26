@@ -10,6 +10,7 @@ import { strToU8, zipSync } from 'fflate'
 import { buildApp } from '../../../src/app.ts'
 import { loadConfig } from '../../../src/config.ts'
 import { users, workspaces } from '../../../src/db/schema.ts'
+import { decrypt } from '../../../src/services/workspaces/crypto.ts'
 
 const dir = await mkdtemp(join(tmpdir(), 'workspaces-'))
 const app = await buildApp(
@@ -43,11 +44,27 @@ const signIn = async () => {
   return { email, cookies: { sid: res.cookies.find(cookie => cookie.name === 'sid')!.value } }
 }
 
-const createWorkspace = (cookies: { sid: string }, name: string, zip?: Uint8Array) => {
+const createWorkspace = (
+  cookies: { sid: string },
+  name: string,
+  zip?: Uint8Array,
+  defaultEnv?: Record<string, string>
+) => {
   const payload = new FormData()
   payload.append('name', name)
   if (zip) payload.append('file', new File([zip as Uint8Array<ArrayBuffer>], 'site.zip'))
+  if (defaultEnv) payload.append('defaultEnv', JSON.stringify(defaultEnv))
   return app.inject({ method: 'POST', url: '/workspaces', cookies, payload })
+}
+
+const storedEnv = async (name: string) => {
+  const [row] = await app.db
+    .select({ defaultEnv: workspaces.defaultEnv })
+    .from(workspaces)
+    .where(eq(workspaces.name, name))
+  return Object.fromEntries(
+    Object.entries(row!.defaultEnv).map(([key, value]) => [key, decrypt(app.config.DATA_ENCRYPTION_KEY, value)])
+  )
 }
 
 const uniqueName = () => `ws-${crypto.randomUUID().slice(0, 8)}`
@@ -133,6 +150,34 @@ describe('workspaces page', () => {
     expect(res.statusCode).toBe(400)
     expect(res.body).toContain('Use 1–63 lowercase letters')
     expect(res.body).toContain('value="My App"')
+  })
+
+  test('a workspace created with environment variables stores them', async () => {
+    const { cookies } = await signIn()
+    const name = uniqueName()
+
+    const res = await createWorkspace(cookies, name, undefined, { API_KEY: 'secret-value' })
+
+    expect(res.statusCode).toBe(302)
+    expect(await storedEnv(name)).toEqual({ API_KEY: 'secret-value' })
+  })
+
+  test('editing adds, replaces and removes environment variables, and keeps the rest', async () => {
+    const { cookies } = await signIn()
+    const name = uniqueName()
+    await createWorkspace(cookies, name, undefined, { KEEP: 'a', REPLACE: 'b', REMOVE: 'x' })
+    const [row] = await app.db.select({ id: workspaces.id }).from(workspaces).where(eq(workspaces.name, name))
+
+    const res = await app.inject({
+      method: 'POST',
+      url: `/workspaces/${row!.id}/env`,
+      cookies,
+      headers: form,
+      payload: new URLSearchParams({ defaultEnv: JSON.stringify({ REPLACE: 'c', ADD: 'd', REMOVE: null }) }).toString(),
+    })
+
+    expect(res.statusCode).toBe(302)
+    expect(await storedEnv(name)).toEqual({ KEEP: 'a', REPLACE: 'c', ADD: 'd' })
   })
 })
 

@@ -6,7 +6,12 @@ import { createWorkspaceService } from '../services/workspaces/index.ts'
 
 const createServices = (app: FastifyInstance) => ({
   tokens: createTokenService({ db: app.db }),
-  workspaces: createWorkspaceService({ db: app.db, dir: app.config.WORKSPACES_DIR, log: app.log }),
+  workspaces: createWorkspaceService({
+    db: app.db,
+    dir: app.config.WORKSPACES_DIR,
+    dataEncryptionKey: app.config.DATA_ENCRYPTION_KEY,
+    log: app.log,
+  }),
 })
 
 declare module 'fastify' {

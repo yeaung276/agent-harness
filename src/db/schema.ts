@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core'
+import { jsonb, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core'
 
 export const users = pgTable('users', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -27,6 +27,7 @@ export const workspaces = pgTable('workspaces', {
   status: text('status', { enum: ['running', 'stopped'] })
     .notNull()
     .default('stopped'),
+  defaultEnv: jsonb('default_env').$type<Record<string, string>>().notNull().default({}),
   userId: uuid('user_id')
     .notNull()
     .references(() => users.id, { onDelete: 'restrict' }),

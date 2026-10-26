@@ -9,6 +9,7 @@ const app = await buildApp(
     LOG_LEVEL: 'silent',
     DATABASE_URL: 'postgres://127.0.0.1:1/none',
     REDIS_URL: 'redis://127.0.0.1:1',
+    DATA_ENCRYPTION_KEY: '0'.repeat(64),
   })
 )
 
