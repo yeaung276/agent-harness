@@ -1,3 +1,4 @@
+import type { createActivityService } from '../activities/index.ts'
 import { HttpError } from '../http-error.ts'
 import type { createWorkspaceService } from '../workspaces/index.ts'
 import { depsCache } from './deps-cache.ts'
@@ -13,6 +14,7 @@ export type ExecOptions = { command: string; timeoutMs: number; env: Record<stri
 
 export const createSandboxManager = ({
   workspaces,
+  activities,
   mode,
   memoryMaxMb,
   cpuMax,
@@ -23,6 +25,7 @@ export const createSandboxManager = ({
   depsRoot,
 }: {
   workspaces: ReturnType<typeof createWorkspaceService>
+  activities: ReturnType<typeof createActivityService>
   mode: 'bwrap' | 'none'
   memoryMaxMb: number
   cpuMax: number
@@ -54,12 +57,28 @@ export const createSandboxManager = ({
     ...(await workspaces.getDefaultEnv(workspaceId)),
   })
 
+  const settle = async (
+    activityId: string,
+    sandbox: ReturnType<typeof createSandbox>,
+    status: 'succeeded' | 'failed',
+    exitCode: number | null
+  ) => {
+    const output = (await sandbox.logs(5000)).join('\n').slice(-16 * 1024)
+    await activities.update(activityId, { status, exitCode, output })
+    return output
+  }
+
   const start = async (workspaceId: string, { command, port, env, network }: LaunchOptions) => {
     const dir = workspaces.getWorkspaceRoot(workspaceId)
     const { mounts, env: depsEnv } = await deps.mounts(workspaceId, dir)
 
+    const activityId = await activities.create(workspaceId, 'launch', command)
+
     const hostPort = ports.take()
-    if (hostPort === null) return null
+    if (hostPort === null) {
+      await activities.update(activityId, { status: 'failed', exitCode: null, output: 'No free port on this worker' })
+      return null
+    }
 
     const launched = createSandbox(workspaceId, {
       dir,
@@ -78,8 +97,11 @@ export const createSandboxManager = ({
     sandboxes.set(workspaceId, launched)
 
     void launched.ready().then(
-      () => workspaces.setStatus(workspaceId, 'running'),
-      () => {}
+      async () => {
+        await workspaces.setStatus(workspaceId, 'running')
+        await settle(activityId, launched, 'succeeded', null)
+      },
+      async () => settle(activityId, launched, 'failed', await launched.exited())
     )
     void launched.exited().then(async () => {
       ports.release(hostPort)
@@ -110,6 +132,8 @@ export const createSandboxManager = ({
 
       const dir = workspaces.getWorkspaceRoot(workspaceId)
       const { mounts, env: depsEnv } = await deps.mounts(workspaceId, dir)
+      const childEnv = { ...depsEnv, ...(await getDefaultEnv(workspaceId, server?.port ?? null)), ...env }
+      const activityId = await activities.create(workspaceId, 'exec', command)
 
       const child = createSandbox(workspaceId, {
         dir,
@@ -119,7 +143,7 @@ export const createSandboxManager = ({
         cpuMax,
         pidsMax,
         command,
-        env: { ...depsEnv, ...(await getDefaultEnv(workspaceId, server?.port ?? null)), ...env },
+        env: childEnv,
         joinPid: server?.pid,
       })
 
@@ -131,11 +155,12 @@ export const createSandboxManager = ({
       }, timeoutMs)
 
       try {
-        const exitCode = await child.exited()
+        const exited = await child.exited()
         clearTimeout(timer)
-        const output = (await child.logs(5000)).join('\n').slice(-16 * 1024)
+        const exitCode = timedOut ? null : exited
+        const output = await settle(activityId, child, exitCode === 0 ? 'succeeded' : 'failed', exitCode)
 
-        return { exitCode: timedOut ? null : exitCode, output, timedOut }
+        return { exitCode, output, timedOut }
       } finally {
         release?.()
         await child.deleteLogs()

@@ -1,10 +1,12 @@
 import type { FastifyInstance } from 'fastify'
 import fp from 'fastify-plugin'
 
+import { createActivityService } from '../services/activities/index.ts'
 import { createTokenService } from '../services/tokens/index.ts'
 import { createWorkspaceService } from '../services/workspaces/index.ts'
 
 const createServices = (app: FastifyInstance) => ({
+  activities: createActivityService({ db: app.db }),
   tokens: createTokenService({ db: app.db }),
   workspaces: createWorkspaceService({
     db: app.db,

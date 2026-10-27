@@ -163,9 +163,36 @@ const fakeWorkspaces = () => {
   }
 }
 
+type Activity = {
+  workspaceId: string
+  kind: 'launch' | 'exec'
+  command: string
+  status: 'running' | 'succeeded' | 'failed'
+  exitCode: number | null
+  output: string
+}
+
+const fakeActivities = () => {
+  const rows: Activity[] = []
+
+  return {
+    rows,
+    create: async (workspaceId: string, kind: 'launch' | 'exec', command: string) => {
+      await lag()
+      rows.push({ workspaceId, kind, command, status: 'running', exitCode: null, output: '' })
+      return String(rows.length - 1)
+    },
+    update: async (id: string, fields: Pick<Activity, 'status' | 'exitCode' | 'output'>) => {
+      await lag()
+      Object.assign(rows[Number(id)]!, fields)
+    },
+  }
+}
+
 const devServer: LaunchOptions = { command: 'npm run dev', port: 3000, env: {}, network: {} }
 
 let workspaces: ReturnType<typeof fakeWorkspaces>
+let activities: ReturnType<typeof fakeActivities>
 let manager: ReturnType<typeof createSandboxManager>
 
 const launchesOf = (id: string) => fakes.filter(fake => fake.workspaceId === id && fake.options.ports)
@@ -199,8 +226,10 @@ beforeEach(() => {
   calls = []
   dirs = join(root, crypto.randomUUID())
   workspaces = fakeWorkspaces()
+  activities = fakeActivities()
   manager = createSandboxManager({
     workspaces: workspaces as unknown as Parameters<typeof createSandboxManager>[0]['workspaces'],
+    activities: activities as unknown as Parameters<typeof createSandboxManager>[0]['activities'],
     mode: 'none',
     memoryMaxMb: 512,
     cpuMax: 1,
@@ -974,5 +1003,90 @@ describe('stopAll', () => {
 
     expect(calls.slice(before)).not.toContain('status ws-1 stopped')
     expect(workspaces.statuses.get('ws-1')).toBe('running')
+  })
+})
+
+describe('activity', () => {
+  test('records an exec as running, then succeeded with its exit code and output', async () => {
+    const { pending, child } = await startExec('ws-1', 'npm test')
+    expect(activities.rows).toEqual([
+      { workspaceId: 'ws-1', kind: 'exec', command: 'npm test', status: 'running', exitCode: null, output: '' },
+    ])
+
+    child.lines.push('12 passed')
+    child.finish(0)
+    await pending
+
+    expect(activities.rows[0]).toMatchObject({ status: 'succeeded', exitCode: 0, output: '12 passed' })
+  })
+
+  test('records a failing exec, and one that timed out, as failed', async () => {
+    const failing = await startExec('ws-1', 'npm test')
+    failing.child.lines.push('1 failed')
+    failing.child.finish(1)
+    await failing.pending
+    const slow = await startExec('ws-2', 'sleep 600', 20)
+    await slow.pending
+
+    expect(activities.rows[0]).toMatchObject({ status: 'failed', exitCode: 1, output: '1 failed' })
+    expect(activities.rows[1]).toMatchObject({ status: 'failed', exitCode: null })
+  })
+
+  test('records a launch as running, then succeeded once it listens, with its output so far', async () => {
+    await manager.launch('ws-1', devServer)
+    expect(activities.rows).toEqual([
+      { workspaceId: 'ws-1', kind: 'launch', command: 'npm run dev', status: 'running', exitCode: null, output: '' },
+    ])
+
+    latestLaunch('ws-1').lines.push('ready on 3000')
+    latestLaunch('ws-1').listen()
+
+    await until(() => activities.rows[0]!.status === 'succeeded', 'succeeded')
+    expect(activities.rows[0]).toMatchObject({ exitCode: null, output: 'ready on 3000' })
+  })
+
+  test('records a launch that ends before it listens as failed, with its exit code and last lines', async () => {
+    await manager.launch('ws-1', devServer)
+    latestLaunch('ws-1').lines.push('Error: Cannot find module express')
+    latestLaunch('ws-1').crash()
+
+    await until(() => activities.rows[0]!.status === 'failed', 'failed')
+    expect(activities.rows[0]).toMatchObject({ exitCode: 1, output: 'Error: Cannot find module express' })
+  })
+
+  test('records a launch with no free pool port as failed, saying so', async () => {
+    await manager.launch('ws-1', devServer)
+    await manager.launch('ws-2', devServer)
+
+    await expect(manager.launch('ws-3', devServer)).rejects.toMatchObject({ status: 503 })
+
+    expect(activities.rows.find(row => row.workspaceId === 'ws-3')).toMatchObject({
+      kind: 'launch',
+      status: 'failed',
+      output: 'No free port on this worker',
+    })
+  })
+
+  test('records a launch woken by a request as another launch', async () => {
+    const swept = await bringUp('ws-1')
+    swept.idle = true
+    await manager.stopIdle()
+
+    const woken = manager.wake('ws-1')
+    await until(() => launchesOf('ws-1').length === 2, 'relaunch')
+    latestLaunch('ws-1').listen()
+    await woken
+
+    await until(() => activities.rows.filter(row => row.status === 'succeeded').length === 2, 'both succeeded')
+    expect(activities.rows.map(row => row.kind)).toEqual(['launch', 'launch'])
+  })
+
+  test('records nothing for a workspace that is not there', async () => {
+    await expect(manager.exec('missing', { command: 'ls', timeoutMs: 1000, env: {} })).rejects.toMatchObject({
+      status: 404,
+    })
+    await expect(manager.launch('missing', devServer)).rejects.toMatchObject({ status: 404 })
+
+    expect(activities.rows).toEqual([])
   })
 })

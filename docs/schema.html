@@ -75,6 +75,29 @@
           <p>A workspace's files live in <code>&lt;WORKSPACES_DIR&gt;/&lt;id&gt;</code>, created empty with the row and deleted with it. A delete moves the directory to <code>&lt;WORKSPACES_DIR&gt;/.deleted</code> and removes it in the background. An uploaded zip waits in <code>&lt;WORKSPACES_DIR&gt;/.uploads</code> until it is extracted or refused. Anything left in either folder is removed when the app next starts. <code>WORKSPACES_DIR</code> defaults to <code>/workspaces</code>. The path is not stored.</p>
           <p>Every user sees every workspace and can delete any of them.</p>
         </section>
+
+        <section class="doc-section" id="sandbox-activities">
+          <h2>Sandbox activity</h2>
+
+          <h3>sandbox_activities</h3>
+          <table>
+            <thead>
+              <tr><th>Column</th><th>Type</th><th>Notes</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>id</code></td><td><code>uuid</code></td><td>Primary key, <code>gen_random_uuid()</code>.</td></tr>
+              <tr><td><code>workspace_id</code></td><td><code>uuid</code></td><td>References <code>workspaces.id</code>. Deleted with the workspace.</td></tr>
+              <tr><td><code>kind</code></td><td><code>text</code></td><td><code>launch</code> or <code>exec</code>. A relaunch woken by a request is another <code>launch</code>.</td></tr>
+              <tr><td><code>command</code></td><td><code>text</code></td><td>The command as given.</td></tr>
+              <tr><td><code>status</code></td><td><code>text</code></td><td><code>running</code> until it settles. An exec: <code>succeeded</code> on exit code 0, <code>failed</code> on any other or on timeout. A launch: <code>succeeded</code> once it answers on its port, <code>failed</code> if it exits, times out or finds no free pool port first.</td></tr>
+              <tr><td><code>exit_code</code></td><td><code>integer</code></td><td>Null while running, for a timed-out exec, and for a launch that succeeded.</td></tr>
+              <tr><td><code>output</code></td><td><code>text</code></td><td>stdout and stderr together, the last 16 KB: an exec's whole run, a launch's log up to the moment it settled. Empty while running.</td></tr>
+              <tr><td><code>created_at</code></td><td><code>timestamptz</code></td><td><code>now()</code>. Indexed with <code>workspace_id</code> for the newest-first list.</td></tr>
+              <tr><td><code>finished_at</code></td><td><code>timestamptz</code></td><td>When it settled. Null while running.</td></tr>
+            </tbody>
+          </table>
+          <p>The worker running the sandbox writes each row; the web app reads them for a workspace's Sandbox activity tab, 20 to a page. Like <code>status</code> on <code>workspaces</code>, <code>kind</code> and <code>status</code> are limited only by the app.</p>
+        </section>
       </div>
     </main>
   </div>

@@ -4,10 +4,12 @@ import { Value } from 'typebox/value'
 import { readForm } from '../../plugins/multipart.ts'
 import { HttpError } from '../../services/http-error.ts'
 import {
+  ActivitiesQuery,
   DefaultEnv,
   DefaultEnvChanges,
   EnvForm,
   FileParams,
+  LogsQuery,
   TreeQuery,
   WorkspaceParams,
   WorkspacesQuery,
@@ -94,6 +96,34 @@ export const workspaces: FastifyPluginAsyncTypebox = async app => {
     const entries = await Promise.all(paths.map(path => app.services.workspaces.describeFile(id, path)))
 
     return entries.sort((a, b) => (a.type === b.type ? a.name.localeCompare(b.name) : a.type === 'directory' ? -1 : 1))
+  })
+
+  app.get(
+    '/workspaces/:id/activities',
+    { schema: { params: WorkspaceParams, querystring: ActivitiesQuery } },
+    async request => {
+      const { id } = request.params
+      await app.services.workspaces.get(id)
+      const offset = (request.query.page - 1) * PAGE_SIZE
+      const { items, total } = await app.services.activities.list(id, { limit: PAGE_SIZE, offset })
+
+      return {
+        items,
+        pagination: {
+          from: offset + 1,
+          to: offset + items.length,
+          total,
+          prev: request.query.page > 1 ? request.query.page - 1 : null,
+          next: offset + items.length < total ? request.query.page + 1 : null,
+        },
+      }
+    }
+  )
+
+  app.get('/workspaces/:id/logs',{ schema: { params: WorkspaceParams, querystring: LogsQuery } }, async request => {
+    await app.services.workspaces.get(request.params.id)
+
+    return { lines: [] as string[] }
   })
 
   app.get('/workspaces/:id/files/*', { schema: { params: FileParams } }, async (request, reply) => {

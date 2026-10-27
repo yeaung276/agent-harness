@@ -8,7 +8,7 @@ import { eq } from 'drizzle-orm'
 import { strToU8, zipSync } from 'fflate'
 
 import { loadConfig } from '../../../src/config.ts'
-import { users, workspaces } from '../../../src/db/schema.ts'
+import { sandboxActivities, users, workspaces } from '../../../src/db/schema.ts'
 import { decrypt } from '../../../src/services/workspaces/crypto.ts'
 import { buildTestApp } from '../../test-app.ts'
 
@@ -260,5 +260,65 @@ describe('workspace page', () => {
 
     expect(up.statusCode).toBe(404)
     expect(link.statusCode).toBe(404)
+  })
+
+  test('the page has files, logs, sandbox activity and browsers tabs, with files open', async () => {
+    const { cookies } = await signIn()
+    const { id } = await workspaceWithFiles(cookies, {})
+
+    const page = await app.inject({ url: `/workspaces/${id}`, cookies })
+
+    for (const view of ['files', 'logs', 'activity', 'browsers']) expect(page.body).toContain(`data-view="${view}"`)
+    expect(page.body).toContain('Sandbox activity')
+    expect(page.body).toContain('data-view="files" aria-selected="true"')
+    for (const panel of ['logs', 'activity', 'browsers']) expect(page.body).toContain(`data-panel="${panel}" hidden`)
+  })
+
+  test('sandbox activity lists launches and execs newest first, 20 to a page, and goes with the workspace', async () => {
+    const { cookies } = await signIn()
+    const { id } = await workspaceWithFiles(cookies, {})
+    await app.db.insert(sandboxActivities).values(
+      Array.from({ length: 25 }, (_, index) => ({
+        workspaceId: id,
+        kind: index % 2 ? ('launch' as const) : ('exec' as const),
+        command: `command ${index + 1}`,
+        status: 'succeeded' as const,
+        exitCode: 0,
+        output: `output ${index + 1}`,
+        createdAt: new Date(Date.UTC(2026, 0, 1, 0, 0, index)),
+      }))
+    )
+
+    const first = (await app.inject({ url: `/workspaces/${id}/activities`, cookies })).json()
+    const second = (await app.inject({ url: `/workspaces/${id}/activities?page=2`, cookies })).json()
+
+    expect(first.items).toHaveLength(20)
+    expect(first.items[0]).toMatchObject({ kind: 'exec', command: 'command 25', status: 'succeeded', exitCode: 0, output: 'output 25' })
+    expect(first.pagination).toEqual({ from: 1, to: 20, total: 25, prev: null, next: 2 })
+    expect(second.items.map((item: { command: string }) => item.command)).toEqual([
+      'command 5',
+      'command 4',
+      'command 3',
+      'command 2',
+      'command 1',
+    ])
+    expect(second.pagination).toEqual({ from: 21, to: 25, total: 25, prev: 1, next: null })
+
+    await app.inject({ method: 'POST', url: `/workspaces/${id}/delete`, cookies })
+    expect(await app.db.$count(sandboxActivities, eq(sandboxActivities.workspaceId, id))).toBe(0)
+    expect((await app.inject({ url: `/workspaces/${id}/activities`, cookies })).statusCode).toBe(404)
+  })
+
+  test('logs are empty for now, and an unknown workspace or a bad tail is refused', async () => {
+    const { cookies } = await signIn()
+    const { id } = await workspaceWithFiles(cookies, {})
+
+    const logs = await app.inject({ url: `/workspaces/${id}/logs`, cookies })
+    const unknown = await app.inject({ url: `/workspaces/${crypto.randomUUID()}/logs`, cookies })
+    const badTail = await app.inject({ url: `/workspaces/${id}/logs?tail=0`, cookies })
+
+    expect(logs.json()).toEqual({ lines: [] })
+    expect(unknown.statusCode).toBe(404)
+    expect(badTail.statusCode).toBe(400)
   })
 })

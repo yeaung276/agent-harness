@@ -1,4 +1,4 @@
-import { jsonb, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core'
+import { index, integer, jsonb, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core'
 
 export const users = pgTable('users', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -40,3 +40,23 @@ export const workspaces = pgTable('workspaces', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 })
+
+export const sandboxActivities = pgTable(
+  'sandbox_activities',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    workspaceId: uuid('workspace_id')
+      .notNull()
+      .references(() => workspaces.id, { onDelete: 'cascade' }),
+    kind: text('kind', { enum: ['launch', 'exec'] }).notNull(),
+    command: text('command').notNull(),
+    status: text('status', { enum: ['running', 'succeeded', 'failed'] })
+      .notNull()
+      .default('running'),
+    exitCode: integer('exit_code'),
+    output: text('output').notNull().default(''),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    finishedAt: timestamp('finished_at', { withTimezone: true }),
+  },
+  table => [index('sandbox_activities_workspace_created_idx').on(table.workspaceId, table.createdAt)]
+)

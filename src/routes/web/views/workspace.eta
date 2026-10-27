@@ -20,7 +20,12 @@
       </div>
     </div>
   </header>
-  <div class="flex min-h-0 flex-1">
+  <nav id="views" role="tablist" class="flex shrink-0 gap-1 border-b border-gray-200 px-4 text-sm">
+    <% [['files', 'Files'], ['activity', 'Sandbox activity'], ['logs', 'Launch logs'], ['browsers', 'Browsers']].forEach(([view, label], index) => { %>
+    <button type="button" role="tab" data-view="<%= view %>" aria-selected="<%= index === 0 %>" class="-mb-px border-b-2 border-transparent px-3 py-2 text-gray-500 hover:text-gray-900 aria-selected:border-gray-900 aria-selected:text-gray-900"><%= label %></button>
+    <% }) %>
+  </nav>
+  <div data-panel="files" class="flex min-h-0 flex-1">
     <aside class="flex w-64 shrink-0 flex-col border-r border-gray-200">
       <h1 class="truncate border-b border-gray-200 px-4 py-3 text-sm font-semibold"><%= it.workspace.name %></h1>
       <ul id="tree" class="min-h-0 flex-1 overflow-y-auto p-2 text-sm"></ul>
@@ -31,6 +36,18 @@
         <p id="empty" class="p-6 text-sm text-gray-500">Pick a file to open it.</p>
       </div>
     </section>
+  </div>
+  <div data-panel="logs" hidden class="min-h-0 flex-1 overflow-auto">
+    <pre id="logs" class="p-4 font-mono text-xs leading-5 whitespace-pre-wrap empty:hidden"></pre>
+    <p id="logs-empty" class="p-6 text-sm text-gray-500">No logs. Nothing is running in this workspace.</p>
+  </div>
+  <div data-panel="activity" hidden class="min-h-0 flex-1 overflow-auto">
+    <ul id="activities" class="divide-y divide-gray-200 text-sm"></ul>
+    <p id="activities-empty" class="p-6 text-sm text-gray-500">No launches or execs yet.</p>
+    <nav id="activities-pages" class="flex items-center justify-between border-t border-gray-200 px-4 py-2 text-sm text-gray-500 empty:hidden"></nav>
+  </div>
+  <div data-panel="browsers" hidden class="min-h-0 flex-1">
+    <p class="p-6 text-sm text-gray-500">No browser sessions.</p>
   </div>
 </div>
 
@@ -62,6 +79,28 @@
 </template>
 <template id="note">
   <p class="p-6 text-sm text-gray-500"></p>
+</template>
+<template id="activity">
+  <li>
+    <details>
+      <summary class="flex cursor-pointer items-center gap-3 px-4 py-2 hover:bg-gray-50">
+        <span data-kind class="w-12 shrink-0 text-xs uppercase text-gray-500"></span>
+        <code data-command class="min-w-0 flex-1 truncate font-mono text-xs"></code>
+        <span data-status class="shrink-0 rounded px-2 py-0.5 text-xs"></span>
+        <time data-time class="shrink-0 text-xs text-gray-500"></time>
+      </summary>
+      <pre data-output class="mx-4 mb-3 max-h-80 overflow-auto rounded border border-gray-200 bg-gray-50 p-3 font-mono text-xs leading-5 whitespace-pre-wrap"></pre>
+    </details>
+  </li>
+</template>
+<template id="activity-pages">
+  <div class="contents">
+    <span data-range></span>
+    <div class="flex gap-2">
+      <button type="button" data-prev class="rounded border border-gray-200 px-2 py-1 hover:bg-gray-50 disabled:opacity-50">Previous</button>
+      <button type="button" data-next class="rounded border border-gray-200 px-2 py-1 hover:bg-gray-50 disabled:opacity-50">Next</button>
+    </div>
+  </div>
 </template>
 
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.11.2/styles/github.min.css" integrity="sha512-0aPQyyeZrWj9sCA46UlmWgKOP0mUipLQ6OZXu8l4IcAmD2u31EPEy9VcIMvl7SoAaKe8bLXZhYoMaE/in+gcgA==" crossorigin="anonymous" referrerpolicy="no-referrer">
@@ -167,6 +206,77 @@
   document.addEventListener('click', event => {
     const stats = document.getElementById('stats')
     stats.toggleAttribute('data-pinned', stats.contains(event.target))
+  })
+
+  const views = document.getElementById('views')
+  const logs = document.getElementById('logs')
+  const logsEmpty = document.getElementById('logs-empty')
+  let polling = null
+
+  const pollLogs = async () => {
+    const res = await fetch(`${base}/logs?tail=200`).catch(() => null)
+    if (!res?.ok) return
+    const { lines } = await res.json()
+    const scroller = logs.parentElement
+    const following = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 20
+    logs.textContent = lines.join('\n')
+    logsEmpty.hidden = lines.length > 0
+    if (following) scroller.scrollTop = scroller.scrollHeight
+  }
+
+  const activityList = document.getElementById('activities')
+  const activityEmpty = document.getElementById('activities-empty')
+  const activityPages = document.getElementById('activities-pages')
+  const statusColors = {
+    succeeded: 'bg-green-50 text-green-700',
+    failed: 'bg-red-50 text-red-700',
+    running: 'bg-gray-100 text-gray-600',
+  }
+
+  const showActivities = async page => {
+    const res = await fetch(`${base}/activities?page=${page}`)
+    if (!res.ok) return
+    const { items, pagination } = await res.json()
+
+    activityList.replaceChildren(
+      ...items.map(item => {
+        const row = clone('activity')
+        row.querySelector('[data-kind]').textContent = item.kind
+        row.querySelector('[data-command]').textContent = item.command
+        const status = row.querySelector('[data-status]')
+        status.textContent = item.exitCode === null ? item.status : `${item.status} · exit ${item.exitCode}`
+        status.classList.add(...statusColors[item.status].split(' '))
+        row.querySelector('[data-time]').textContent = new Date(item.createdAt).toLocaleString()
+        row.querySelector('[data-output]').textContent = item.output || 'No output'
+        return row
+      })
+    )
+    activityEmpty.hidden = items.length > 0
+
+    activityPages.replaceChildren()
+    if (pagination.prev === null && pagination.next === null) return
+    const pages = clone('activity-pages')
+    pages.querySelector('[data-range]').textContent = `${pagination.from}–${pagination.to} of ${pagination.total}`
+    for (const [key, target] of [['prev', pagination.prev], ['next', pagination.next]]) {
+      const button = pages.querySelector(`[data-${key}]`)
+      button.disabled = target === null
+      button.addEventListener('click', () => showActivities(target))
+    }
+    activityPages.append(pages)
+  }
+
+  views.addEventListener('click', event => {
+    const tab = event.target.closest('[data-view]')
+    if (!tab) return
+    for (const view of views.querySelectorAll('[data-view]')) view.setAttribute('aria-selected', view === tab)
+    for (const panel of document.querySelectorAll('[data-panel]')) panel.hidden = panel.dataset.panel !== tab.dataset.view
+
+    clearInterval(polling)
+    polling = null
+    if (tab.dataset.view === 'activity') void showActivities(1)
+    if (tab.dataset.view !== 'logs') return
+    void pollLogs()
+    polling = setInterval(() => document.hidden || pollLogs(), 3000)
   })
 
   list('', tree)

@@ -36,6 +36,13 @@
       "when": 1793034754229,
       "tag": "0004_workspace_launch_options",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1793091768185,
+      "tag": "0005_sandbox_activities",
+      "breakpoints": true
     }
   ]
 }
