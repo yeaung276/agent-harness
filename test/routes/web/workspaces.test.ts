@@ -13,13 +13,21 @@ import { decrypt } from '../../../src/services/workspaces/crypto.ts'
 import { buildTestApp } from '../../test-app.ts'
 
 const dir = await mkdtemp(join(tmpdir(), 'workspaces-'))
+const depsDir = await mkdtemp(join(tmpdir(), 'deps-'))
 const app = await buildTestApp(
-  loadConfig({ ...process.env, NODE_ENV: 'test', LOG_LEVEL: 'silent', WORKSPACES_DIR: dir })
+  loadConfig({
+    ...process.env,
+    NODE_ENV: 'test',
+    LOG_LEVEL: 'silent',
+    WORKSPACES_DIR: dir,
+    SANDBOX_DEPS_ROOT: depsDir,
+  })
 )
 
 afterAll(async () => {
   await app.close()
   await rm(dir, { recursive: true })
+  await rm(depsDir, { recursive: true })
 })
 
 const form = { 'content-type': 'application/x-www-form-urlencoded' }
@@ -90,12 +98,13 @@ describe('workspaces page', () => {
     expect(list.body).toContain(alice.email)
   })
 
-  test("anyone can delete anyone's workspace, and its folder goes", async () => {
+  test("anyone can delete anyone's workspace, and its folder and installed deps go", async () => {
     const alice = await signIn()
     const bob = await signIn()
     const name = uniqueName()
     await createWorkspace(alice.cookies, name)
     const [row] = await app.db.select({ id: workspaces.id }).from(workspaces).where(eq(workspaces.name, name))
+    await mkdir(join(depsDir, row!.id, 'node_modules', 'react'), { recursive: true })
 
     const res = await app.inject({ method: 'POST', url: `/workspaces/${row!.id}/delete`, cookies: bob.cookies })
     expect(res.statusCode).toBe(302)
@@ -103,6 +112,8 @@ describe('workspaces page', () => {
     const list = await app.inject({ url: '/workspaces', cookies: bob.cookies })
     expect(list.body).not.toContain(name)
     expect(existsSync(join(dir, row!.id))).toBe(false)
+    for (let i = 0; i < 100 && existsSync(join(depsDir, row!.id)); i++) await Bun.sleep(10)
+    expect(existsSync(join(depsDir, row!.id))).toBe(false)
   })
 
   test('deleting a workspace that is already gone just reloads the list', async () => {

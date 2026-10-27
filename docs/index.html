@@ -1105,10 +1105,11 @@
         <section class="doc-section" id="sandbox">
           <h2>Application sandboxes</h2>
           <p>Each worker pod runs the sandboxes of the workspaces placed on it, one per workspace. The <code>core/sandbox</code> plugin owns them in memory. The <code>workspaces</code> row records each workspace's status, and only the worker running its sandbox writes it.</p>
+          <p>The internal API and the port forwarder share one port, 4002. A request carrying <code>x-workspace-app: &lt;workspaceId&gt;</code> is app traffic, whatever its path: the forwarder takes it over before routing and sends it to the workspace, so an app's own <code>/internal/…</code> routes reach the app. Any other request is an internal API call. A WebSocket upgrade with the header is forwarded the same way; one without it is refused.</p>
 
           <figure>
             <div class="diagram">
-              <svg class="c4" viewBox="0 0 1000 720" role="img" aria-label="A sandbox on a worker pod. Calls come from the server pod's sandbox API to the worker's internal API: launch, exec, stop or logs with a workspaceId. App traffic comes from the preview proxy to the worker's port forwarder on port 4002. The internal API, at /internal/sandbox, drives the core/sandbox plugin, workspace.sandbox. Its sandbox manager maps a workspaceId to its sandbox in memory, runs one launch at a time per workspace, and writes status and the saved launch to the workspace's row in Postgres. It takes a port from the pod's pool, 4100 to 4149, and spawns the sandbox under bubblewrap. The sweeper stops sandboxes idle for 15 minutes. The port forwarder sends a workspace's traffic to 127.0.0.1 on its port, and when the workspace has no running sandbox it wakes it through the manager. Each sandbox has its own network namespace and holds the workspace's launch server, for example npm run dev, with PORT 3000 inside mapped to 127.0.0.1 on the pool port; and exec, sh -c with a 2 minute default and 4 minute maximum, returning the exit code and the last 16 KB of output. A sandbox mounts the workspace's folder from the shared workspace volume at /workspace, and node_modules from the pod-local deps cache. Its only egress is the internet, including the npm registry, through the network controller, which applies each command's allow and deny lists. Other workspaces get one sandbox each on the same pod.">
+              <svg class="c4" viewBox="0 0 1000 720" role="img" aria-label="A sandbox on a worker pod. Calls come from the server pod's sandbox API to the worker's internal API: launch, exec, stop or logs with a workspaceId. App traffic comes from the preview proxy to the worker's port forwarder on port 4002, the same port as the internal API: a request with the x-workspace-app header is taken over before routing and forwarded, and any other request is an internal API call. The internal API, at /internal/sandbox, drives the core/sandbox plugin, workspace.sandbox. Its sandbox manager maps a workspaceId to its sandbox in memory, runs one launch at a time per workspace, and writes status and the saved launch to the workspace's row in Postgres. It takes a port from the pod's pool, 4100 to 4149, and spawns the sandbox under bubblewrap. The sweeper stops sandboxes idle for 15 minutes. The port forwarder sends a workspace's traffic to 127.0.0.1 on its port, and when the workspace has no running sandbox it wakes it through the manager. Each sandbox has its own network namespace and holds the workspace's launch server, for example npm run dev, with PORT 3000 inside mapped to 127.0.0.1 on the pool port; and exec, sh -c with a 2 minute default and 4 minute maximum, returning the exit code and the last 16 KB of output. A sandbox mounts the workspace's folder from the shared workspace volume at /workspace, and its deps folders, such as node_modules, vendor or .venv, from the deps cache at SANDBOX_DEPS_ROOT. Its only egress is the internet, including the npm registry, through the network controller, which applies each command's allow and deny lists. Other workspaces get one sandbox each on the same pod.">
                 <defs>
                   <marker id="sb-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
                     <path d="M0 0L10 5L0 10z" class="arrowhead"/>
@@ -1121,7 +1122,7 @@
 
                 <rect class="component" x="100" y="120" width="580" height="44" rx="6"/>
                 <text class="on-light name" x="390" y="139" text-anchor="middle">internal API</text>
-                <text class="on-light type" x="390" y="155" text-anchor="middle">[/internal/sandbox/* · drives workspace.sandbox]</text>
+                <text class="on-light type" x="390" y="155" text-anchor="middle">[:4002, no x-workspace-app · /internal/sandbox/*]</text>
 
                 <rect class="group" x="100" y="184" width="580" height="492" rx="8"/>
                 <text class="label name" x="668" y="668" text-anchor="end">core/sandbox plugin · app.sandbox</text>
@@ -1168,7 +1169,7 @@
 
                 <rect class="component" x="116" y="616" width="240" height="44" rx="6"/>
                 <text class="on-light name" x="236" y="635" text-anchor="middle">deps cache</text>
-                <text class="on-light type" x="236" y="651" text-anchor="middle">[pod-local disk · /app/node_modules]</text>
+                <text class="on-light type" x="236" y="651" text-anchor="middle">[node_modules · vendor · .venv]</text>
 
                 <rect class="external" x="720" y="214" width="260" height="62" rx="8"/>
                 <text class="on-dark name" x="850" y="235" text-anchor="middle">Postgres</text>
@@ -1184,14 +1185,21 @@
                 <text class="on-dark name" x="850" y="497" text-anchor="middle">Internet</text>
                 <text class="on-dark type" x="850" y="514" text-anchor="middle">[npm registry · public APIs]</text>
 
-                <line class="edge" x1="58" y1="16" x2="58" y2="118" marker-end="url(#sb-arrow)"/>
-                <text class="edge-label" x="66" y="46">app traffic, HTTP + WS</text>
-                <text class="note" x="66" y="60">from the preview proxy, to :4002</text>
-                <text class="note" x="66" y="74">header x-workspace-app: &lt;workspaceId&gt;</text>
+                <line class="edge" x1="224" y1="2" x2="224" y2="28" marker-end="url(#sb-arrow)"/>
+                <text class="edge-label" x="232" y="19">into the worker, HTTP + WS</text>
 
-                <line class="edge" x1="390" y1="16" x2="390" y2="118" marker-end="url(#sb-arrow)"/>
-                <text class="edge-label" x="398" y="46">launch · exec · stop · logs</text>
-                <text class="note" x="398" y="60">from the server pod's sandbox API</text>
+                <rect class="component" x="184" y="30" width="80" height="22" rx="6"/>
+                <text class="on-light name" x="224" y="45" text-anchor="middle">:4002</text>
+
+                <polyline class="edge" points="184,41 58,41 58,118" marker-end="url(#sb-arrow)"/>
+                <text class="edge-label" x="66" y="70">app traffic, HTTP + WS</text>
+                <text class="note" x="66" y="84">from the preview proxy, taken before routing</text>
+                <text class="note" x="66" y="98">header x-workspace-app: &lt;workspaceId&gt;</text>
+
+                <polyline class="edge" points="264,41 390,41 390,118" marker-end="url(#sb-arrow)"/>
+                <text class="edge-label" x="398" y="70">launch · exec · stop · logs</text>
+                <text class="note" x="398" y="84">from the server pod's sandbox API</text>
+                <text class="note" x="398" y="98">no header</text>
 
                 <line class="edge" x1="390" y1="164" x2="390" y2="198" marker-end="url(#sb-arrow)"/>
 
@@ -1421,14 +1429,14 @@
             <tbody>
               <tr><td>Any status change</td><td>The row's <code>status</code> is <code>running</code> while the background process runs, <code>stopped</code> otherwise.</td></tr>
               <tr><td>Launch</td><td>Already <code>starting</code> or <code>running</code> → <code>409</code>. No free pool port → <code>503</code>. Otherwise its env is <code>PORT</code> = <code>port</code>, then the workspace's env, then <code>env</code>, each winning over the one before. Take the port, start it, save it with that env to the row's <code>launch_options</code> and return at once. In the background: run <code>command</code> with its <code>port</code> mapped to <code>127.0.0.1:&lt;pool port&gt;</code> → <code>running</code> once it listens. No listener within 90 s → <code>failed</code>.</td></tr>
-              <tr><td>Request, <code>running</code></td><td>The port forwarder sends it to <code>127.0.0.1:&lt;port&gt;</code>. Requests and open WebSockets count as use.</td></tr>
+              <tr><td>Request, <code>running</code></td><td>The port forwarder sends it to <code>127.0.0.1:&lt;port&gt;</code>. Requests, open WebSockets and running execs joined to it count as use.</td></tr>
               <tr><td>Request, <code>stopped</code></td><td>The port forwarder wakes it through the manager: the row has <code>launch_options</code> → start it again exactly as launched and hold the request until <code>running</code>, up to 90 s. Still starting after that → <code>503</code> with <code>Retry-After</code>. No <code>launch_options</code> → <code>503</code>.</td></tr>
               <tr><td>Request, <code>failed</code></td><td><code>502</code>. Traffic doesn't relaunch it; launch does.</td></tr>
               <tr><td>Exec</td><td><code>sh -c</code> in the workspace's confinement, with the workspace's env and <code>env</code> on top. While the background process runs, it joins that process's network namespace: <code>localhost:&lt;port&gt;</code> reaches it, it gets <code>PORT</code> = that <code>port</code>, and the launch's <code>network</code> applies. With nothing running, its own namespace with open egress and no <code>PORT</code>. Its stdout and stderr go together to its own log, and <code>output</code> is the last 16 KB of it; the log is deleted once read. At <code>timeoutMs</code> (2 min default, 4 min max) the process tree is killed, <code>timedOut</code> is <code>true</code> and <code>exitCode</code> is <code>null</code>.</td></tr>
               <tr><td>Stop</td><td>Clear the row's <code>launch_options</code> first, so requests no longer wake it → kill the process tree → free the port → <code>stopped</code>. Nothing running → already <code>stopped</code>.</td></tr>
               <tr><td>Logs</td><td>The last <code>tail</code> lines of stdout and stderr together, in the order written, with blank lines and terminal colour codes left out. Each process writes to its own file in the pod's temp folder. After a stop or a crash they stay until the next launch. The idle sweep and a pod shutdown delete them, and so does a pod restart.</td></tr>
               <tr><td>Background process exits on its own</td><td>Free the port → <code>failed</code>.</td></tr>
-              <tr><td>Idle, 15 min with no traffic or open WebSocket</td><td>The sweeper stops it, deletes its logs and keeps the row's <code>launch_options</code>. The next request wakes it. Logs calls don't count as use.</td></tr>
+              <tr><td>Idle, 15 min with no traffic, open WebSocket or running exec</td><td>The sweeper stops it, deletes its logs and keeps the row's <code>launch_options</code>. The next request wakes it. Logs calls don't count as use.</td></tr>
               <tr><td>A worker pod dies</td><td>Placement moves the workspace. The next request wakes it on the new worker from the row's <code>launch_options</code>.</td></tr>
               <tr><td>A worker pod shuts down</td><td>Stop every process and delete its logs → their rows <code>stopped</code>. Their <code>launch_options</code> stay, so the next request wakes them.</td></tr>
             </tbody>
@@ -1441,7 +1449,7 @@
             </thead>
             <tbody>
               <tr><td>Namespaces</td><td>Its own user, pid, ipc, uts, cgroup and network namespaces.</td></tr>
-              <tr><td>Files</td><td><code>/workspace</code> is <code>WORKSPACES_DIR/&lt;workspaceId&gt;</code> on the shared volume, read-write. <code>/workspace/node_modules</code> comes from the pod-local deps cache. System paths read-only. <code>/tmp</code> empty; <code>HOME=/tmp</code>.</td></tr>
+              <tr><td>Files</td><td><code>/workspace</code> is <code>WORKSPACES_DIR/&lt;workspaceId&gt;</code> on the shared volume, read-write. Deps folders come from the deps cache at <code>SANDBOX_DEPS_ROOT/&lt;workspaceId&gt;</code>, picked by the manifests the workspace has, at its root and up to 3 folders down: <code>package.json</code> → <code>node_modules</code>, <code>composer.json</code> → <code>vendor</code>, <code>pyproject.toml</code> or <code>requirements.txt</code> → <code>.venv</code>, <code>Gemfile</code> → <code>vendor/bundle</code> with <code>BUNDLE_PATH</code> set under the workspace's env. A launch and every exec get the same ones, so an install in an exec is what the launch uses. Deleting the workspace deletes its deps. System paths read-only. <code>/tmp</code> empty; <code>HOME=/tmp</code>.</td></tr>
               <tr><td>Network</td><td>One namespace per workspace through pasta, made by launch; an exec joins it while the background process runs, else gets its own. Inbound: only the launch's <code>port</code>, mapped to the pod's <code>127.0.0.1:&lt;port&gt;</code>. Outbound: only loopback leaves the namespace. The internet is reached through the network controller, an HTTP proxy at <code>127.0.0.1:3128</code> inside every namespace, mapped by pasta to the controller's own port on the pod. It applies the launch's <code>allow</code> and <code>deny</code> lists to each host name and refuses private addresses; an exec's own namespace reaches every public host. Tools that ignore the proxy settings can't reach the internet. Nothing on the pod or cluster: not other sandboxes, not Chromium, not the internal API on 4002.</td></tr>
               <tr><td>Limits</td><td>One cgroup per workspace, shared by its launch and every exec, caps memory, CPU and process count, so one workspace can't starve the pod.</td></tr>
               <tr><td>Environment</td><td><code>PORT</code> = the launch's <code>port</code>, the workspace's env over it, the command's <code>env</code> on top, plus <code>PATH</code>, <code>LANG</code>, <code>LC_ALL</code>, <code>TZ</code>. Under them, the proxy settings that point at the network controller: <code>HTTP_PROXY</code>, <code>HTTPS_PROXY</code> and their lowercase forms, <code>NO_PROXY</code> for <code>localhost</code>, and <code>NODE_USE_ENV_PROXY</code>. Nothing else from the runner.</td></tr>

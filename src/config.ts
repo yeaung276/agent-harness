@@ -17,6 +17,7 @@ export const ConfigSchema = Type.Object({
     ],
     { default: 'info' }
   ),
+  APP_MODE: Type.Union([Type.Literal('server'), Type.Literal('worker')], { default: 'server' }),
   HOST: Type.String({ default: '127.0.0.1' }),
   PORT: Type.Integer({ minimum: 0, maximum: 65535, default: 3000 }),
   DATABASE_URL: Type.String({ minLength: 1 }),

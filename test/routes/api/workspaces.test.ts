@@ -1,6 +1,6 @@
 import { afterAll, describe, expect, test } from 'bun:test'
 import { existsSync } from 'node:fs'
-import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -13,8 +13,15 @@ import { decrypt } from '../../../src/services/workspaces/crypto.ts'
 import { buildTestApp } from '../../test-app.ts'
 
 const dir = await mkdtemp(join(tmpdir(), 'workspaces-'))
+const depsDir = await mkdtemp(join(tmpdir(), 'deps-'))
 const app = await buildTestApp(
-  loadConfig({ ...process.env, NODE_ENV: 'test', LOG_LEVEL: 'silent', WORKSPACES_DIR: dir })
+  loadConfig({
+    ...process.env,
+    NODE_ENV: 'test',
+    LOG_LEVEL: 'silent',
+    WORKSPACES_DIR: dir,
+    SANDBOX_DEPS_ROOT: depsDir,
+  })
 )
 const email = `${crypto.randomUUID()}@example.com`
 
@@ -27,6 +34,7 @@ const token = await app.services.tokens.create(user!.id, { name: 'ci', expiresIn
 afterAll(async () => {
   await app.close()
   await rm(dir, { recursive: true })
+  await rm(depsDir, { recursive: true })
 })
 
 const headers = { authorization: `Bearer ${token}` }
@@ -102,15 +110,18 @@ describe('workspaces on the API', () => {
     expect(res.json().message).toBe('Workspace not found')
   })
 
-  test('deleting a workspace removes it and its files', async () => {
+  test('deleting a workspace removes it, its files and its installed deps', async () => {
     const { id } = (await createWorkspace(uniqueName())).json()
     await writeFile(join(dir, id, 'index.html'), '<h1>hi</h1>')
+    await mkdir(join(depsDir, id, 'node_modules', 'react'), { recursive: true })
 
     const res = await deleteWorkspace(id)
 
     expect(res.statusCode).toBe(204)
     expect((await getWorkspace(id)).statusCode).toBe(404)
     expect(existsSync(join(dir, id))).toBe(false)
+    for (let i = 0; i < 100 && existsSync(join(depsDir, id)); i++) await Bun.sleep(10)
+    expect(existsSync(join(depsDir, id))).toBe(false)
   })
 
   test('deleting an unknown workspace is not found', async () => {

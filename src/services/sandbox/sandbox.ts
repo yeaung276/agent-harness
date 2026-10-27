@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import type { Config } from '../../config.ts'
+import type { Mount } from './deps-cache.ts'
 import { createLog } from './log.ts'
 import { createNetworkController, type NetworkRules, PROXY_ENV, PROXY_PORT } from './network-controller.ts'
 
@@ -13,6 +14,7 @@ const CGROUP_CONTROLLERS = ['memory', 'cpu', 'pids']
 
 export type SandboxOptions = {
   dir: string
+  mounts: Mount[]
   mode: 'bwrap' | 'none'
   memoryMaxMb: number
   cpuMax: number
@@ -29,7 +31,7 @@ export type SandboxStatus = 'starting' | 'running' | 'failed' | 'stopped'
 
 export const createSandbox = (
   workspaceId: string,
-  { dir, mode, memoryMaxMb, cpuMax, pidsMax, command, env, network, ports, readyTimeoutMs, joinPid }: SandboxOptions
+  { dir, mounts, mode, memoryMaxMb, cpuMax, pidsMax, command, env, network, ports, readyTimeoutMs, joinPid }: SandboxOptions
 ) => {
   let inUse = 0
   let lastUsedAt = Date.now()
@@ -60,10 +62,11 @@ export const createSandbox = (
           '--mount',
           '--propagation',
           'private',
-          'sh',
+          'bash',
           '-c',
-          'set -e; mount -t proc proc /proc; printf "%s" "$1" | nft -f -; shift; exec "$@"',
-          'sh',
+          'set -e; mount -t proc proc /proc; printf "%s" "$1" | nft -f -; shift; ' +
+            'for fd in /proc/$$/fd/*; do fd=${fd##*/}; if [ "$fd" -gt 2 ]; then exec {fd}>&-; fi; done; exec "$@"',
+          'bash',
           'table inet sandbox { chain output { type filter hook output priority 0; policy drop; oifname "lo" accept; }; }',
         ]
       : [
@@ -102,6 +105,7 @@ export const createSandbox = (
     '--bind',
     dir,
     '/workspace',
+    ...mounts.flatMap(({ source, target }) => ['--bind', source, join('/workspace', target)]),
     '--chdir',
     '/workspace',
     ...[
@@ -262,7 +266,7 @@ export const assertSandboxUsable = (config: Config) => {
 
   if (process.platform !== 'linux') throw new Error(`SANDBOX_MODE=bwrap needs Linux (got '${process.platform}').`)
 
-  const missing = ['bwrap', 'pasta', 'nft', 'unshare', 'nsenter'].filter(tool => !Bun.which(tool))
+  const missing = ['bwrap', 'pasta', 'nft', 'unshare', 'nsenter', 'bash'].filter(tool => !Bun.which(tool))
   if (missing.length > 0) throw new Error(`SANDBOX_MODE=bwrap needs ${missing.join(', ')} on PATH.`)
 
   let controllers: string[] = []

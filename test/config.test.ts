@@ -13,9 +13,18 @@ describe('loadConfig', () => {
     expect(loadConfig({ ...required, PORT: '8080', UNRELATED: 'x' })).toEqual({
       NODE_ENV: 'development',
       LOG_LEVEL: 'info',
+      APP_MODE: 'server',
       HOST: '127.0.0.1',
       PORT: 8080,
       WORKSPACES_DIR: '/workspaces',
+      SANDBOX_MODE: 'none',
+      SANDBOX_DEPS_ROOT: '/tmp/workspace-deps',
+      SANDBOX_IDLE_MS: 900_000,
+      SANDBOX_MEMORY_MAX_MB: 2048,
+      SANDBOX_CPU_MAX: 2,
+      SANDBOX_PIDS_MAX: 512,
+      SANDBOX_PORT_MIN: 4100,
+      SANDBOX_PORT_MAX: 4149,
       ...required,
     })
   })

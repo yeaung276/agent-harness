@@ -6,6 +6,7 @@ import { networkInterfaces, tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { loadConfig } from '../../../src/config.ts'
+import { depsCache } from '../../../src/services/sandbox/deps-cache.ts'
 import {
   assertSandboxUsable,
   createSandbox,
@@ -41,7 +42,7 @@ const workspace = async (files: Record<string, string> = {}): Promise<Workspace>
 }
 
 const start = ({ id, dir }: Workspace, options: Partial<SandboxOptions> & { command: string }) => {
-  const sandbox = createSandbox(id, { dir, mode, memoryMaxMb: 256, cpuMax: 1, pidsMax: 128, env: {}, ...options })
+  const sandbox = createSandbox(id, { dir, mounts: [], mode, memoryMaxMb: 256, cpuMax: 1, pidsMax: 128, env: {}, ...options })
   sandboxes.push(sandbox)
   return sandbox
 }
@@ -480,4 +481,25 @@ describe.if(linux)('network', () => {
       await launched.kill()
     }
   }, 120_000)
+})
+
+describe.if(linux)('deps', () => {
+  test('an install in one exec is used by the launch and by later execs, and stays out of the workspace folder', async () => {
+    const ws = await workspace({ 'package.json': '{ "name": "probe" }' })
+    const { mounts } = await depsCache(join(root, 'deps')).mounts(ws.id, ws.dir)
+
+    const install = await run(ws, 'bun add left-pad@1.3.0', { mounts })
+    expect(install.exitCode).toBe(0)
+
+    const launched = launch(ws, {
+      mounts,
+      command: `bun -e "const pad = require('left-pad'); Bun.serve({ port: Number(process.env.PORT), fetch: () => new Response(pad('ok', 4)) })"`,
+    })
+    await launched.ready()
+    expect(await get('127.0.0.1', launched.hostPort!)).toBe('  ok')
+
+    expect((await run(ws, 'ls node_modules', { mounts })).output).toContain('left-pad')
+    expect(await readdir(mounts[0]!.source)).toContain('left-pad')
+    expect(await readdir(join(ws.dir, 'node_modules'))).toEqual([])
+  }, 60_000)
 })

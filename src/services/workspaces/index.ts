@@ -8,6 +8,7 @@ import type { FastifyBaseLogger } from 'fastify'
 import { users, workspaces } from '../../db/schema.ts'
 import type { Db } from '../../db/type.ts'
 import { HttpError } from '../http-error.ts'
+import { depsCache } from '../sandbox/deps-cache.ts'
 import { decrypt, encrypt } from './crypto.ts'
 import { ensureFile, ensureFolder, isBinary, isInside, walk } from './files.ts'
 import { checkZip, extractZip } from './zip.ts'
@@ -18,17 +19,20 @@ export const NAME_PATTERN = '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$'
 export const createWorkspaceService = ({
   db,
   dir,
+  depsRoot,
   dataEncryptionKey,
   log,
 }: {
   db: Db
   dir: string
+  depsRoot: string
   dataEncryptionKey: string
   log: FastifyBaseLogger
 }) => {
   const path = (id: string) => join(resolve(dir), id)
   const trash = (id: string) => join(resolve(dir), '.deleted', id)
   const uploadsDir = join(resolve(dir), '.uploads')
+  const deps = depsCache(depsRoot)
 
   const select = () =>
     db
@@ -131,6 +135,7 @@ export const createWorkspaceService = ({
       rm(trash(id), { recursive: true, force: true }).catch(err =>
         log.error({ err, id }, 'failed to remove deleted workspace files')
       )
+      deps.remove(id).catch(err => log.error({ err, id }, 'failed to remove deleted workspace deps'))
     },
 
     extract: async (id: string, { zip, path: folder }: { zip: string; path: string }) => {

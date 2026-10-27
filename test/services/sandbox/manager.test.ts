@@ -1,4 +1,7 @@
-import { beforeEach, describe, expect, mock, test } from 'bun:test'
+import { afterAll, beforeEach, describe, expect, mock, test } from 'bun:test'
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { dirname, join } from 'node:path'
 
 import { HttpError } from '../../../src/services/http-error.ts'
 import type { SandboxOptions, SandboxStatus } from '../../../src/services/sandbox/sandbox.ts'
@@ -32,6 +35,8 @@ const fakeSandbox = (workspaceId: string, options: SandboxOptions) => {
     unreadable: false,
     logsDeleted: false,
     idle: false,
+    slowToDie: false,
+    inUse: 0,
     kills: 0,
     idleChecks: [] as number[],
 
@@ -52,12 +57,21 @@ const fakeSandbox = (workspaceId: string, options: SandboxOptions) => {
       if (status !== 'starting' && status !== 'running') return
       status = 'stopped'
       listening.reject(new Error('killed'))
-      exit.resolve(143)
+      if (!fake.slowToDie) exit.resolve(143)
+      await exit.promise
     },
-    use: () => () => {},
+    use: () => {
+      fake.inUse++
+      let released = false
+      return () => {
+        if (released) return
+        released = true
+        fake.inUse--
+      }
+    },
     isIdle: (idleMs: number) => {
       fake.idleChecks.push(idleMs)
-      return fake.idle
+      return fake.idle && fake.inUse === 0
     },
 
     listen: () => {
@@ -72,6 +86,13 @@ const fakeSandbox = (workspaceId: string, options: SandboxOptions) => {
     finish: (exitCode: number) => {
       status = 'stopped'
       exit.resolve(exitCode)
+    },
+    timeOut: () => {
+      status = 'failed'
+    },
+    die: () => {
+      listening.reject(new Error('killed'))
+      exit.resolve(143)
     },
   }
 
@@ -94,6 +115,20 @@ type LaunchOptions = Parameters<ReturnType<typeof createSandboxManager>['launch'
 
 const lag = () => Bun.sleep(Math.random() * 3)
 
+const root = await mkdtemp(join(tmpdir(), 'manager-'))
+let dirs = ''
+
+afterAll(() => rm(root, { recursive: true, force: true }))
+
+const workspaceDir = (id: string) => join(dirs, 'workspaces', id)
+
+const addFiles = async (id: string, files: Record<string, string>) => {
+  for (const [path, content] of Object.entries(files)) {
+    await mkdir(dirname(join(workspaceDir(id), path)), { recursive: true })
+    await writeFile(join(workspaceDir(id), path), content)
+  }
+}
+
 const fakeWorkspaces = () => {
   const known = new Set(['ws-1', 'ws-2', 'ws-3'])
   const defaultEnvs = new Map<string, Record<string, string>>()
@@ -104,7 +139,7 @@ const fakeWorkspaces = () => {
     defaultEnvs,
     statuses,
     saved,
-    getWorkspaceRoot: (id: string) => `/workspaces/${id}`,
+    getWorkspaceRoot: workspaceDir,
     getDefaultEnv: async (id: string) => {
       await lag()
       if (!known.has(id)) throw new HttpError(404, 'Workspace not found')
@@ -162,6 +197,7 @@ const startExec = async (id: string, command = 'ls', timeoutMs = 1000) => {
 beforeEach(() => {
   fakes.length = 0
   calls = []
+  dirs = join(root, crypto.randomUUID())
   workspaces = fakeWorkspaces()
   manager = createSandboxManager({
     workspaces: workspaces as unknown as Parameters<typeof createSandboxManager>[0]['workspaces'],
@@ -172,6 +208,7 @@ beforeEach(() => {
     portMin: 4100,
     portMax: 4101,
     idleMs: 60_000,
+    depsRoot: join(dirs, 'deps'),
   })
 })
 
@@ -181,7 +218,7 @@ describe('launch', () => {
 
     expect(launchesOf('ws-1')).toHaveLength(1)
     expect(latestLaunch('ws-1').options).toMatchObject({
-      dir: '/workspaces/ws-1',
+      dir: workspaceDir('ws-1'),
       command: 'npm run dev',
       ports: { inside: 3000, host: 4100 },
     })
@@ -245,6 +282,31 @@ describe('launch', () => {
       network: { deny: ['*'] },
       env: { PORT: '3000', NODE_ENV: 'production', DEBUG: '1' },
     })
+  })
+
+  test("mounts the workspace's deps from its cache and sets their env, without saving that env", async () => {
+    await addFiles('ws-1', { 'package.json': '{}', 'api/Gemfile': '' })
+
+    await manager.launch('ws-1', devServer)
+
+    expect(latestLaunch('ws-1').options.mounts).toEqual([
+      { source: join(dirs, 'deps', 'ws-1', 'node_modules'), target: 'node_modules' },
+      { source: join(dirs, 'deps', 'ws-1', 'api', 'vendor/bundle'), target: 'api/vendor/bundle' },
+    ])
+    expect(latestLaunch('ws-1').options.env.BUNDLE_PATH).toBe('vendor/bundle')
+    expect(workspaces.saved.get('ws-1')?.env.BUNDLE_PATH).toBeUndefined()
+  })
+
+  test("lets the workspace's env and the launch's env win over the deps env", async () => {
+    await addFiles('ws-1', { Gemfile: '' })
+    await addFiles('ws-2', { Gemfile: '' })
+    workspaces.defaultEnvs.set('ws-1', { BUNDLE_PATH: '/gems' })
+
+    await manager.launch('ws-1', devServer)
+    await manager.launch('ws-2', { ...devServer, env: { BUNDLE_PATH: '/other' } })
+
+    expect(latestLaunch('ws-1').options.env.BUNDLE_PATH).toBe('/gems')
+    expect(latestLaunch('ws-2').options.env.BUNDLE_PATH).toBe('/other')
   })
 
   test('is a 409 while the last launch is starting or running, and starts nothing more', async () => {
@@ -349,6 +411,21 @@ describe('a launch ending on its own', () => {
     expect(workspaces.saved.get('ws-1')).toMatchObject({ command: 'npm run dev' })
     expect(await manager.logs('ws-1', 10)).toEqual(['Error: listen EADDRINUSE'])
   })
+
+  test('leaves the status alone when it ends after a newer launch took its place', async () => {
+    await manager.launch('ws-1', devServer)
+    const timedOut = latestLaunch('ws-1')
+    timedOut.timeOut()
+    await bringUp('ws-1')
+    const before = calls.length
+
+    timedOut.die()
+    await timedOut.exited()
+    await Bun.sleep(20)
+
+    expect(calls.slice(before)).not.toContain('status ws-1 stopped')
+    expect(workspaces.statuses.get('ws-1')).toBe('running')
+  })
 })
 
 describe('exec', () => {
@@ -361,7 +438,36 @@ describe('exec', () => {
     execsOf('ws-1')[0]!.finish(0)
 
     expect(await pending).toEqual({ exitCode: 0, output: 'package.json\nsrc', timedOut: false })
-    expect(execsOf('ws-1')[0]!.options).toMatchObject({ dir: '/workspaces/ws-1', command: 'ls', env: { A: '1', B: '2' } })
+    expect(execsOf('ws-1')[0]!.options).toMatchObject({ dir: workspaceDir('ws-1'), command: 'ls', env: { A: '1', B: '2' } })
+  })
+
+  test('mounts the same deps as the launch, with their env', async () => {
+    await addFiles('ws-1', { 'package.json': '{}', Gemfile: '' })
+    await manager.launch('ws-1', devServer)
+
+    const { pending, child } = await startExec('ws-1', 'npm install')
+    child.finish(0)
+    await pending
+
+    expect(child.options.mounts).toEqual(latestLaunch('ws-1').options.mounts)
+    expect(child.options.env.BUNDLE_PATH).toBe('vendor/bundle')
+  })
+
+  test("lets the workspace's env and its own win over the deps env", async () => {
+    await addFiles('ws-1', { Gemfile: '' })
+    await addFiles('ws-2', { Gemfile: '' })
+    workspaces.defaultEnvs.set('ws-1', { BUNDLE_PATH: '/gems' })
+
+    const fromWorkspace = await startExec('ws-1')
+    fromWorkspace.child.finish(0)
+    await fromWorkspace.pending
+    const pending = manager.exec('ws-2', { command: 'ls', timeoutMs: 1000, env: { BUNDLE_PATH: '/other' } })
+    await until(() => execsOf('ws-2').length === 1, 'exec')
+    execsOf('ws-2')[0]!.finish(0)
+    await pending
+
+    expect(fromWorkspace.child.options.env.BUNDLE_PATH).toBe('/gems')
+    expect(execsOf('ws-2')[0]!.options.env.BUNDLE_PATH).toBe('/other')
   })
 
   test('answers a failing command with its exit code and output', async () => {
@@ -562,6 +668,38 @@ describe('stop', () => {
     expect(await manager.logs('ws-1', 10)).toEqual([])
     expect(launched.logsDeleted).toBe(true)
   })
+
+  test('holds a launch sent while it is still killing until it is done, and the launch then runs', async () => {
+    const first = await bringUp('ws-1')
+    first.slowToDie = true
+
+    const stopping = manager.stop('ws-1')
+    await until(() => first.kills === 1, 'kill')
+    const launching = manager.launch('ws-1', devServer)
+    await Bun.sleep(20)
+    expect(launchesOf('ws-1')).toHaveLength(1)
+
+    first.die()
+    await Promise.all([stopping, launching])
+    latestLaunch('ws-1').listen()
+
+    await until(() => workspaces.statuses.get('ws-1') === 'running', 'running')
+    expect(workspaces.saved.get('ws-1')).toMatchObject({ command: 'npm run dev' })
+  })
+
+  test('sent together with a launch, ends the way the later one asked', async () => {
+    for (let round = 0; round < 10; round++) {
+      await Promise.all([manager.launch('ws-1', devServer), manager.stop('ws-1')])
+      expect(latestLaunch('ws-1').status()).toBe('stopped')
+      expect(workspaces.saved.get('ws-1')).toBeNull()
+
+      await Promise.all([manager.stop('ws-1'), manager.launch('ws-1', devServer)])
+      expect(latestLaunch('ws-1').status()).toBe('starting')
+      expect(workspaces.saved.get('ws-1')).toMatchObject({ command: 'npm run dev' })
+
+      await manager.stop('ws-1')
+    }
+  })
 })
 
 describe('logs', () => {
@@ -646,6 +784,21 @@ describe('wake', () => {
     expect(first.logsDeleted).toBe(true)
   })
 
+  test('mounts the deps of the files the workspace has now, not those it had at launch', async () => {
+    const first = await bringUp('ws-1')
+    first.idle = true
+    await manager.stopIdle()
+    await addFiles('ws-1', { 'package.json': '{}' })
+
+    const woken = manager.wake('ws-1')
+    await until(() => launchesOf('ws-1').length === 2, 'relaunch')
+    latestLaunch('ws-1').listen()
+    await woken
+
+    expect(first.options.mounts).toEqual([])
+    expect(latestLaunch('ws-1').options.mounts.map(mount => mount.target)).toEqual(['node_modules'])
+  })
+
   test('starts a workspace this pod never ran from its saved launch', async () => {
     workspaces.saved.set('ws-1', { command: 'npm start', port: 8080, env: { PORT: '8080' }, network: {} })
 
@@ -691,6 +844,19 @@ describe('wake', () => {
     expect(await manager.wake('ws-1')).toBeNull()
     expect(launchesOf('ws-1')).toHaveLength(0)
   })
+
+  test('never brings back a workspace stopped at the same time', async () => {
+    for (let round = 0; round < 10; round++) {
+      const swept = await bringUp('ws-1')
+      swept.idle = true
+      await manager.stopIdle()
+
+      const [, woken] = await Promise.all([manager.stop('ws-1'), manager.wake('ws-1')])
+
+      expect(woken).toBeNull()
+      expect(latestLaunch('ws-1')).toBe(swept)
+    }
+  })
 })
 
 describe('stopIdle', () => {
@@ -727,6 +893,40 @@ describe('stopIdle', () => {
     expect(latestLaunch('ws-1').kills).toBe(0)
     expect(latestLaunch('ws-1').status()).toBe('starting')
   })
+
+  test('leaves a launch alone while an exec joined to it runs, and stops it once the exec ends', async () => {
+    const launched = await bringUp('ws-1')
+    launched.idle = true
+    const { pending, child } = await startExec('ws-1', 'npm test')
+
+    await manager.stopIdle()
+    expect(launched.kills).toBe(0)
+
+    child.finish(0)
+    await pending
+    await manager.stopIdle()
+    expect(launched.kills).toBe(1)
+  })
+
+  test('leaves a workspace that a request woke while its idle launch was still dying recorded running', async () => {
+    const idle = await bringUp('ws-1')
+    idle.idle = true
+    idle.slowToDie = true
+    const before = calls.length
+
+    const sweeping = manager.stopIdle()
+    const woken = manager.wake('ws-1')
+    await until(() => launchesOf('ws-1').length === 2, 'relaunch')
+    latestLaunch('ws-1').listen()
+    await woken
+    await until(() => calls.slice(before).includes('status ws-1 running'), 'running')
+
+    idle.die()
+    await sweeping
+
+    expect(calls.slice(before)).not.toContain('status ws-1 stopped')
+    expect(workspaces.statuses.get('ws-1')).toBe('running')
+  })
 })
 
 describe('stopAll', () => {
@@ -755,5 +955,24 @@ describe('stopAll', () => {
 
     expect(calls.slice(before)).toEqual([])
     expect(launched.kills).toBe(0)
+  })
+
+  test("doesn't record stopped over a launch a request started while it was still killing the old one", async () => {
+    const old = await bringUp('ws-1')
+    old.slowToDie = true
+    const before = calls.length
+
+    const stopping = manager.stopAll()
+    const woken = manager.wake('ws-1')
+    await until(() => launchesOf('ws-1').length === 2, 'relaunch')
+    latestLaunch('ws-1').listen()
+    await woken
+    await until(() => calls.slice(before).includes('status ws-1 running'), 'running')
+
+    old.die()
+    await stopping
+
+    expect(calls.slice(before)).not.toContain('status ws-1 stopped')
+    expect(workspaces.statuses.get('ws-1')).toBe('running')
   })
 })

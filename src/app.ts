@@ -5,6 +5,7 @@ import type { Config } from './config.ts'
 import { db } from './plugins/db.ts'
 import { multipart } from './plugins/multipart.ts'
 import { redis } from './plugins/redis.ts'
+import { sandbox } from './plugins/sandbox.ts'
 import { services } from './plugins/services.ts'
 import { api } from './routes/api/index.ts'
 import { mcp } from './routes/mcp/index.ts'
@@ -34,6 +35,12 @@ export const buildApp = async (config: Config) => {
   await app.register(db)
   await app.register(redis)
   await app.register(services)
+
+  if (config.APP_MODE === 'worker') {
+    await app.register(sandbox)
+    return app
+  }
+
   await app.register(multipart)
 
   await app.register(api, { prefix: '/api/v1' })

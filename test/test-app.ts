@@ -12,6 +12,7 @@ import type { Config } from '../src/config.ts'
 import * as schema from '../src/db/schema.ts'
 import type { Db } from '../src/db/type.ts'
 import { multipart } from '../src/plugins/multipart.ts'
+import { sandbox } from '../src/plugins/sandbox.ts'
 import { services } from '../src/plugins/services.ts'
 import { api } from '../src/routes/api/index.ts'
 import { mcp } from '../src/routes/mcp/index.ts'
@@ -27,6 +28,7 @@ export const buildTestApp = async (config: Config) => {
     fp(
       async app => {
         app.decorate('db', database as unknown as Db)
+        app.addHook('onClose', () => database.$client.close())
       },
       { name: 'db' }
     )
@@ -40,11 +42,16 @@ export const buildTestApp = async (config: Config) => {
     )
   )
   await app.register(services)
+
+  if (config.APP_MODE === 'worker') {
+    await app.register(sandbox)
+    return app
+  }
+
   await app.register(multipart)
   await app.register(api, { prefix: '/api/v1' })
   await app.register(mcp, { prefix: '/mcp' })
   await app.register(web)
-  app.addHook('onClose', () => database.$client.close())
 
   return app
 }
