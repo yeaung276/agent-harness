@@ -212,6 +212,7 @@ export const createWorkspaceService = ({
       await unlink(target)
     },
 
+    // Utilities
     removeLeftovers: async () => {
       const leftovers = await Promise.all(
         [join(resolve(dir), '.deleted'), uploadsDir].map(async folder => {
@@ -229,6 +230,34 @@ export const createWorkspaceService = ({
           )
         )
       )
+    },
+
+    getWorkspaceRoot: path,
+
+    getDefaultEnv: async (id: string) => {
+      const [row] = await db.select({ defaultEnv: workspaces.defaultEnv }).from(workspaces).where(eq(workspaces.id, id))
+      if (!row) throw new HttpError(404, 'Workspace not found')
+      return decryptEnv(row.defaultEnv)
+    },
+
+    setStatus: async (id: string, status: 'running' | 'stopped') => {
+      await db.update(workspaces).set({ status }).where(eq(workspaces.id, id))
+    },
+
+    setLaunchOptions: async (id: string, options: typeof workspaces.$inferSelect.launchOptions) => {
+      await db
+        .update(workspaces)
+        .set({ launchOptions: options && { ...options, env: encryptEnv(options.env) } })
+        .where(eq(workspaces.id, id))
+    },
+
+    getLaunchOptions: async (id: string) => {
+      const [row] = await db
+        .select({ launchOptions: workspaces.launchOptions })
+        .from(workspaces)
+        .where(eq(workspaces.id, id))
+      if (!row?.launchOptions) return null
+      return { ...row.launchOptions, env: decryptEnv(row.launchOptions.env) }
     },
   }
 }

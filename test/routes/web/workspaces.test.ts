@@ -4,23 +4,20 @@ import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promis
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
-import { eq, inArray } from 'drizzle-orm'
+import { eq } from 'drizzle-orm'
 import { strToU8, zipSync } from 'fflate'
 
-import { buildApp } from '../../../src/app.ts'
 import { loadConfig } from '../../../src/config.ts'
 import { users, workspaces } from '../../../src/db/schema.ts'
 import { decrypt } from '../../../src/services/workspaces/crypto.ts'
+import { buildTestApp } from '../../test-app.ts'
 
 const dir = await mkdtemp(join(tmpdir(), 'workspaces-'))
-const app = await buildApp(
+const app = await buildTestApp(
   loadConfig({ ...process.env, NODE_ENV: 'test', LOG_LEVEL: 'silent', WORKSPACES_DIR: dir })
 )
-const userIds: string[] = []
 
 afterAll(async () => {
-  await app.db.delete(workspaces).where(inArray(workspaces.userId, userIds))
-  await app.db.delete(users).where(inArray(users.id, userIds))
   await app.close()
   await rm(dir, { recursive: true })
 })
@@ -34,7 +31,6 @@ const signIn = async () => {
     .insert(users)
     .values({ email, passwordHash: await Bun.password.hash('secret-password', 'argon2id') })
     .returning({ id: users.id })
-  userIds.push(user!.id)
   const res = await app.inject({
     method: 'POST',
     url: '/login',

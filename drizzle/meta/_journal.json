@@ -29,6 +29,13 @@
       "when": 1793024647799,
       "tag": "0003_workspace_default_env",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1793034754229,
+      "tag": "0004_workspace_launch_options",
+      "breakpoints": true
     }
   ]
 }

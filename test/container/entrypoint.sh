@@ -9,4 +9,4 @@ ip addr add 10.250.0.1/32 dev eth0
 
 cd /usr/src/app
 exec setpriv --reuid bun --regid bun --init-groups \
-  env HOME=/home/bun TEST_DB_HOST=10.250.0.1 bun test "$@"
+  env HOME=/home/bun TEST_DB_HOST=10.250.0.1 bun test --isolate "$@"

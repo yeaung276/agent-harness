@@ -7,13 +7,13 @@ import { join } from 'node:path'
 import { eq } from 'drizzle-orm'
 import { strToU8, zipSync } from 'fflate'
 
-import { buildApp } from '../../../src/app.ts'
 import { loadConfig } from '../../../src/config.ts'
 import { users, workspaces } from '../../../src/db/schema.ts'
 import { decrypt } from '../../../src/services/workspaces/crypto.ts'
+import { buildTestApp } from '../../test-app.ts'
 
 const dir = await mkdtemp(join(tmpdir(), 'workspaces-'))
-const app = await buildApp(
+const app = await buildTestApp(
   loadConfig({ ...process.env, NODE_ENV: 'test', LOG_LEVEL: 'silent', WORKSPACES_DIR: dir })
 )
 const email = `${crypto.randomUUID()}@example.com`
@@ -25,8 +25,6 @@ const [user] = await app.db
 const token = await app.services.tokens.create(user!.id, { name: 'ci', expiresInDays: null })
 
 afterAll(async () => {
-  await app.db.delete(workspaces).where(eq(workspaces.userId, user!.id))
-  await app.db.delete(users).where(eq(users.id, user!.id))
   await app.close()
   await rm(dir, { recursive: true })
 })

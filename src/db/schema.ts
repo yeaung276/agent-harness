@@ -28,6 +28,12 @@ export const workspaces = pgTable('workspaces', {
     .notNull()
     .default('stopped'),
   defaultEnv: jsonb('default_env').$type<Record<string, string>>().notNull().default({}),
+  launchOptions: jsonb('launch_options').$type<{
+    command: string
+    port: number
+    env: Record<string, string>
+    network: { allow?: string[]; deny?: string[] }
+  }>(),
   userId: uuid('user_id')
     .notNull()
     .references(() => users.id, { onDelete: 'restrict' }),

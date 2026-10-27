@@ -24,6 +24,15 @@ export const ConfigSchema = Type.Object({
   WORKSPACES_DIR: Type.String({ minLength: 1, default: '/workspaces' }),
 
   DATA_ENCRYPTION_KEY: Type.String({ pattern: '^[0-9a-f]{64}$' }),
+
+  SANDBOX_MODE: Type.Union([Type.Literal('bwrap'), Type.Literal('none')], { default: 'none' }),
+  SANDBOX_DEPS_ROOT: Type.String({ default: '/tmp/workspace-deps' }),
+  SANDBOX_IDLE_MS: Type.Number({ default: 15 * 60 * 1000 }),
+  SANDBOX_MEMORY_MAX_MB: Type.Number({ default: 2048 }),
+  SANDBOX_CPU_MAX: Type.Number({ default: 2 }),
+  SANDBOX_PIDS_MAX: Type.Number({ default: 512 }),
+  SANDBOX_PORT_MIN: Type.Number({ default: 4100 }),
+  SANDBOX_PORT_MAX: Type.Number({ default: 4149 }),
 })
 
 export type Config = Static<typeof ConfigSchema>

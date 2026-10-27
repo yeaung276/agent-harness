@@ -556,11 +556,12 @@
 
         <section class="doc-section" id="sandbox">
           <h2>Sandbox</h2>
-          <p>Commands that run inside a workspace, on its files. Exec runs a command to the end and returns its output. Launch starts a long-running process in the background and exposes one of its ports at a public URL. A workspace runs one background process at a time, and its <code>status</code> is <code>running</code> while it does; exec can run alongside it.</p>
+          <p>Commands that run inside a workspace, on its files. Exec runs a command to the end and returns its output. Launch starts a long-running process in the background and exposes one of its ports at a public URL. A workspace runs one background process at a time, and its <code>status</code> is <code>running</code> while it does; exec can run alongside it. A background process with no traffic for 15 minutes is stopped, and the next request to its URL starts it again with the same launch. Stop ends that: the URL stops answering until the next launch.</p>
           <p>A command is run with <code>sh -c</code> from the workspace root. Every route here also answers <code>401</code> as described in <a href="#authentication">Authentication</a>.</p>
 
           <h3>Network</h3>
-          <p>By default a command can reach every public host. <code>network</code> changes that with two lists: <code>deny</code> blocks hosts, and <code>allow</code> opens hosts again that <code>deny</code> blocked. A host is a name, like <code>registry.npmjs.org</code>, or a pattern: <code>*.npmjs.org</code> matches any name ending in <code>.npmjs.org</code>, and <code>*</code> matches every host. So <code>{&quot;deny&quot;: [&quot;*&quot;], &quot;allow&quot;: [&quot;registry.npmjs.org&quot;]}</code> reaches only the npm registry.</p>
+          <p>By default a command can reach every public host. Launch's <code>network</code> changes that for the background process and every exec that runs alongside it, with two lists: <code>deny</code> blocks hosts, and <code>allow</code> opens hosts again that <code>deny</code> blocked. A host is a name, like <code>registry.npmjs.org</code>, or a pattern: <code>*.npmjs.org</code> matches any name ending in <code>.npmjs.org</code>, and <code>*</code> matches every host. So <code>{&quot;deny&quot;: [&quot;*&quot;], &quot;allow&quot;: [&quot;registry.npmjs.org&quot;]}</code> reaches only the npm registry.</p>
+          <p>Commands reach the internet through a proxy at <code>127.0.0.1:3128</code>, set in <code>HTTP_PROXY</code>, <code>HTTPS_PROXY</code> and their lowercase forms. npm, curl, git, pip, Bun and Node with <code>NODE_USE_ENV_PROXY</code> (also set) all use it. A tool that ignores these settings can't reach the internet. Private addresses are never reachable, whatever the lists say.</p>
 
           <h3>Endpoints</h3>
 <div class="routes">
@@ -624,7 +625,7 @@
     }
   }
 }</code></pre>
-<p><code>port</code> is the port the process listens on. <code>env</code> is added to the workspace's env, and wins where a name is in both. <code>network</code> is described in <a href="#sandbox">Network</a>.</p>
+<p><code>port</code> is the port the process listens on, and <code>PORT</code> is set to it unless the workspace's env or <code>env</code> sets it. It can't be <code>3128</code>, which the proxy holds; a process listening there fails to start. <code>env</code> is added to the workspace's env, and wins where a name is in both. <code>network</code> is described in <a href="#sandbox">Network</a>.</p>
 <h4>Response 201</h4>
 <p>The public URL that reaches <code>port</code>.</p>
 <pre class="schema"><code>{
@@ -686,35 +687,18 @@
           &quot;type&quot;: &quot;string&quot;
         }
       }
-    },
-    &quot;network&quot;: {
-      &quot;type&quot;: &quot;object&quot;,
-      &quot;properties&quot;: {
-        &quot;allow&quot;: {
-          &quot;type&quot;: &quot;array&quot;,
-          &quot;items&quot;: {
-            &quot;type&quot;: &quot;string&quot;
-          }
-        },
-        &quot;deny&quot;: {
-          &quot;type&quot;: &quot;array&quot;,
-          &quot;items&quot;: {
-            &quot;type&quot;: &quot;string&quot;
-          }
-        }
-      }
     }
   }
 }</code></pre>
-<p><code>timeoutMs</code> is how long the command may run: 2 minutes by default, 4 at most. <code>env</code> is added to the workspace's env, and wins where a name is in both. <code>network</code> is described in <a href="#sandbox">Network</a>.</p>
+<p><code>timeoutMs</code> is how long the command may run: 2 minutes by default, 4 at most. <code>env</code> is added to the workspace's env, and wins where a name is in both.</p>
+<p>While the background process runs, the command shares its network: it reaches the process on <code>localhost:&lt;port&gt;</code>, <code>PORT</code> is set to that port the same way, and the launch's <code>network</code> applies. With nothing running, it can reach every public host.</p>
 <h4>Response 200</h4>
-<p>A command that fails still answers <code>200</code>; check <code>exitCode</code>. A command still running at <code>timeoutMs</code> is killed, <code>timedOut</code> is <code>true</code> and <code>exitCode</code> is <code>null</code>.</p>
+<p>A command that fails still answers <code>200</code>; check <code>exitCode</code>. A command still running at <code>timeoutMs</code> is killed, <code>timedOut</code> is <code>true</code> and <code>exitCode</code> is <code>null</code>. <code>output</code> is stdout and stderr together, in the order they were written, cut to the last 16 KB.</p>
 <pre class="schema"><code>{
   &quot;type&quot;: &quot;object&quot;,
   &quot;required&quot;: [
     &quot;exitCode&quot;,
-    &quot;stdout&quot;,
-    &quot;stderr&quot;,
+    &quot;output&quot;,
     &quot;timedOut&quot;
   ],
   &quot;properties&quot;: {
@@ -728,10 +712,7 @@
         }
       ]
     },
-    &quot;stdout&quot;: {
-      &quot;type&quot;: &quot;string&quot;
-    },
-    &quot;stderr&quot;: {
+    &quot;output&quot;: {
       &quot;type&quot;: &quot;string&quot;
     },
     &quot;timedOut&quot;: {
@@ -790,13 +771,14 @@
     &quot;tail&quot;: {
       &quot;default&quot;: 200,
       &quot;minimum&quot;: 1,
+      &quot;maximum&quot;: 5000,
       &quot;type&quot;: &quot;integer&quot;
     }
   }
 }</code></pre>
-<p><code>tail</code> is how many of the last lines to return.</p>
+<p><code>tail</code> is how many of the last lines to return, 5,000 at most.</p>
 <h4>Response 200</h4>
-<p>stdout and stderr together, in the order they were written. Once the process stops, its lines stay until the next launch. Before any launch, <code>lines</code> is empty.</p>
+<p>stdout and stderr together, in the order they were written. After a stop or a crash, its lines stay until the next launch. Stopping it for being idle deletes them. Before any launch, <code>lines</code> is empty.</p>
 <pre class="schema"><code>{
   &quot;type&quot;: &quot;object&quot;,
   &quot;required&quot;: [

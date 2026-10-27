@@ -6,7 +6,7 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /usr/src/app
-COPY package.json bun.lock ./
+COPY package.json bun.lock bunfig.toml ./
 RUN bun install --frozen-lockfile && chown -R bun:bun /usr/src/app
 
 COPY test/container/entrypoint.sh /usr/local/bin/container-test

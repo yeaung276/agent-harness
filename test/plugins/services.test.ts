@@ -4,11 +4,11 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { buildApp } from '../../src/app.ts'
 import { loadConfig } from '../../src/config.ts'
+import { buildTestApp } from '../test-app.ts'
 
 const dir = await mkdtemp(join(tmpdir(), 'workspaces-'))
-const app = await buildApp(
+const app = await buildTestApp(
   loadConfig({ ...process.env, NODE_ENV: 'test', LOG_LEVEL: 'silent', WORKSPACES_DIR: dir })
 )
 

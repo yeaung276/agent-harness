@@ -1,11 +1,10 @@
 import { afterAll, describe, expect, test } from 'bun:test'
-import { eq } from 'drizzle-orm'
 
-import { buildApp } from '../../../src/app.ts'
 import { loadConfig } from '../../../src/config.ts'
 import { users } from '../../../src/db/schema.ts'
+import { buildTestApp } from '../../test-app.ts'
 
-const app = await buildApp(loadConfig({ ...process.env, NODE_ENV: 'test', LOG_LEVEL: 'silent' }))
+const app = await buildTestApp(loadConfig({ ...process.env, NODE_ENV: 'test', LOG_LEVEL: 'silent' }))
 const email = `${crypto.randomUUID()}@example.com`
 
 const [user] = await app.db
@@ -14,7 +13,6 @@ const [user] = await app.db
   .returning({ id: users.id })
 
 afterAll(async () => {
-  await app.db.delete(users).where(eq(users.email, email))
   await app.close()
 })
 

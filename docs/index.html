@@ -1104,11 +1104,11 @@
 
         <section class="doc-section" id="sandbox">
           <h2>Application sandboxes</h2>
-          <p>Each worker pod runs the sandboxes of the apps placed on it, one per app. The <code>core/sandbox</code> plugin owns them in memory. The <code>previews</code> row records each app's status and which worker runs it, and only that worker writes it.</p>
+          <p>Each worker pod runs the sandboxes of the workspaces placed on it, one per workspace. The <code>core/sandbox</code> plugin owns them in memory. The <code>workspaces</code> row records each workspace's status, and only the worker running its sandbox writes it.</p>
 
           <figure>
             <div class="diagram">
-              <svg class="c4" viewBox="0 0 1000 720" role="img" aria-label="A sandbox on a worker pod. Calls come from the server pod's preview API to the worker's internal API: start, status, stop, restart or exec with an appId. App traffic comes from the preview proxy to the worker's port forwarder on port 4002. The internal API drives the core/sandbox plugin, app.sandbox. Its sandbox manager maps an appId to its sandbox in memory, runs one start at a time per app, writes status to the previews row in Postgres only where host is this pod, publishes app.updated to Redis on each change, and on startup marks this pod's rows stopped. It takes a port from the pod's pool, 4100 to 4149, and spawns the sandbox under bubblewrap. The sweeper stops sandboxes idle for 15 minutes. The port forwarder sends an app's traffic to 127.0.0.1 on its port, and when the app has no running sandbox it wakes it through the manager. Each sandbox has its own network namespace and holds the app's dev server, npm run dev with PORT 3000 inside mapped to 127.0.0.1 on the pool port and watching files by polling; install, which runs npm ci, prisma generate and prisma db push when the lockfile changed; and exec, sh -c with a 2 minute default and 4 minute maximum, returning the exit code and the last 16 KB of output. A sandbox mounts the app's folder from the shared workspace volume at /app, and node_modules from the pod-local deps cache. Its only egress is the app's database and the internet, including the npm registry. Other apps get one sandbox each on the same pod.">
+              <svg class="c4" viewBox="0 0 1000 720" role="img" aria-label="A sandbox on a worker pod. Calls come from the server pod's sandbox API to the worker's internal API: launch, exec, stop or logs with a workspaceId. App traffic comes from the preview proxy to the worker's port forwarder on port 4002. The internal API, at /internal/sandbox, drives the core/sandbox plugin, workspace.sandbox. Its sandbox manager maps a workspaceId to its sandbox in memory, runs one launch at a time per workspace, and writes status and the saved launch to the workspace's row in Postgres. It takes a port from the pod's pool, 4100 to 4149, and spawns the sandbox under bubblewrap. The sweeper stops sandboxes idle for 15 minutes. The port forwarder sends a workspace's traffic to 127.0.0.1 on its port, and when the workspace has no running sandbox it wakes it through the manager. Each sandbox has its own network namespace and holds the workspace's launch server, for example npm run dev, with PORT 3000 inside mapped to 127.0.0.1 on the pool port; and exec, sh -c with a 2 minute default and 4 minute maximum, returning the exit code and the last 16 KB of output. A sandbox mounts the workspace's folder from the shared workspace volume at /workspace, and node_modules from the pod-local deps cache. Its only egress is the internet, including the npm registry, through the network controller, which applies each command's allow and deny lists. Other workspaces get one sandbox each on the same pod.">
                 <defs>
                   <marker id="sb-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
                     <path d="M0 0L10 5L0 10z" class="arrowhead"/>
@@ -1117,22 +1117,20 @@
 
                 <rect class="component" x="36" y="120" width="44" height="540" rx="6"/>
                 <text class="on-light name" x="58" y="388" text-anchor="middle" transform="rotate(-90 58 390)">port forwarder</text>
-                <text class="on-light type" x="58" y="402" text-anchor="middle" transform="rotate(-90 58 390)">[:4002 · &lt;appId&gt; → 127.0.0.1:&lt;port&gt;]</text>
+                <text class="on-light type" x="58" y="402" text-anchor="middle" transform="rotate(-90 58 390)">[:4002 · &lt;workspaceId&gt; → 127.0.0.1:&lt;port&gt;]</text>
 
                 <rect class="component" x="100" y="120" width="580" height="44" rx="6"/>
                 <text class="on-light name" x="390" y="139" text-anchor="middle">internal API</text>
-                <text class="on-light type" x="390" y="155" text-anchor="middle">[/internal/preview/* · drives app.sandbox]</text>
+                <text class="on-light type" x="390" y="155" text-anchor="middle">[/internal/sandbox/* · drives workspace.sandbox]</text>
 
                 <rect class="group" x="100" y="184" width="580" height="492" rx="8"/>
                 <text class="label name" x="668" y="668" text-anchor="end">core/sandbox plugin · app.sandbox</text>
 
                 <rect class="component" x="116" y="200" width="548" height="90" rx="8"/>
                 <text class="on-light name" x="390" y="222" text-anchor="middle">sandbox manager</text>
-                <text class="on-light type" x="390" y="239" text-anchor="middle">[appId → sandbox · in memory]</text>
-                <text class="on-light type" x="132" y="262">one start at a time per app</text>
-                <text class="on-light type" x="132" y="279">writes the row only WHERE host = me</text>
-                <text class="on-light type" x="400" y="262">each change → app.updated</text>
-                <text class="on-light type" x="400" y="279">pod starts → its rows → stopped</text>
+                <text class="on-light type" x="390" y="239" text-anchor="middle">[workspaceId → sandbox · in memory]</text>
+                <text class="on-light type" x="390" y="262" text-anchor="middle">one launch at a time per workspace</text>
+                <text class="on-light type" x="390" y="279" text-anchor="middle">writes status and the saved launch to the row</text>
 
                 <rect class="component" x="116" y="306" width="240" height="44" rx="6"/>
                 <text class="on-light name" x="236" y="325" text-anchor="middle">port pool</text>
@@ -1145,75 +1143,63 @@
                 <rect class="group" x="116" y="366" width="548" height="236" rx="8"/>
                 <text class="label name" x="128" y="596">sandboxes · bwrap · own network namespace</text>
 
-                <rect class="group" x="132" y="382" width="516" height="160" rx="8"/>
-                <text class="label name" x="144" y="534">sandbox · app A</text>
+                <rect class="group" x="132" y="382" width="456" height="160" rx="8"/>
+                <text class="label name" x="144" y="534">sandbox · workspace A</text>
 
-                <rect class="component" x="148" y="398" width="150" height="120" rx="6"/>
-                <text class="on-light name" x="223" y="420" text-anchor="middle">dev server</text>
-                <text class="on-light type" x="223" y="437" text-anchor="middle">[npm run dev]</text>
-                <text class="on-light type" x="223" y="460" text-anchor="middle">PORT=3000 inside</text>
-                <text class="on-light type" x="223" y="477" text-anchor="middle">→ 127.0.0.1:&lt;port&gt;</text>
-                <text class="on-light type" x="223" y="494" text-anchor="middle">watches by polling</text>
+                <rect class="component" x="148" y="398" width="204" height="120" rx="6"/>
+                <text class="on-light name" x="250" y="420" text-anchor="middle">launch server</text>
+                <text class="on-light type" x="250" y="437" text-anchor="middle">[e.g. npm run dev]</text>
+                <text class="on-light type" x="250" y="460" text-anchor="middle">PORT=3000 inside</text>
+                <text class="on-light type" x="250" y="477" text-anchor="middle">→ 127.0.0.1:&lt;port&gt;</text>
 
-                <rect class="component" x="314" y="398" width="160" height="120" rx="6"/>
-                <text class="on-light name" x="394" y="420" text-anchor="middle">install</text>
-                <text class="on-light type" x="394" y="437" text-anchor="middle">[when the lockfile changed]</text>
-                <text class="on-light type" x="394" y="460" text-anchor="middle">npm ci</text>
-                <text class="on-light type" x="394" y="477" text-anchor="middle">prisma generate</text>
-                <text class="on-light type" x="394" y="494" text-anchor="middle">prisma db push</text>
+                <rect class="component" x="368" y="398" width="204" height="120" rx="6"/>
+                <text class="on-light name" x="470" y="420" text-anchor="middle">exec</text>
+                <text class="on-light type" x="470" y="437" text-anchor="middle">[sh -c]</text>
+                <text class="on-light type" x="470" y="460" text-anchor="middle">2 min default</text>
+                <text class="on-light type" x="470" y="477" text-anchor="middle">4 min max</text>
+                <text class="on-light type" x="470" y="494" text-anchor="middle">exit + last 16 KB</text>
 
-                <rect class="component" x="490" y="398" width="142" height="120" rx="6"/>
-                <text class="on-light name" x="561" y="420" text-anchor="middle">exec</text>
-                <text class="on-light type" x="561" y="437" text-anchor="middle">[sh -c]</text>
-                <text class="on-light type" x="561" y="460" text-anchor="middle">2 min default</text>
-                <text class="on-light type" x="561" y="477" text-anchor="middle">4 min max</text>
-                <text class="on-light type" x="561" y="494" text-anchor="middle">exit + last 16 KB</text>
+                <rect class="tbd" x="132" y="550" width="456" height="30" rx="6"/>
+                <text class="note" x="360" y="570" text-anchor="middle">workspace B, workspace C … one sandbox per workspace on this pod</text>
 
-                <rect class="tbd" x="132" y="550" width="516" height="30" rx="6"/>
-                <text class="note" x="390" y="570" text-anchor="middle">app B, app C … one sandbox per app on this pod</text>
+                <rect class="component" x="604" y="422" width="44" height="158" rx="6"/>
+                <text class="on-light name" x="626" y="499" text-anchor="middle" transform="rotate(-90 626 501)">network controller</text>
+                <text class="on-light type" x="626" y="513" text-anchor="middle" transform="rotate(-90 626 501)">[allow · deny]</text>
 
                 <rect class="component" x="116" y="616" width="240" height="44" rx="6"/>
                 <text class="on-light name" x="236" y="635" text-anchor="middle">deps cache</text>
                 <text class="on-light type" x="236" y="651" text-anchor="middle">[pod-local disk · /app/node_modules]</text>
 
-                <rect class="external" x="720" y="180" width="260" height="62" rx="8"/>
-                <text class="on-dark name" x="850" y="201" text-anchor="middle">Postgres</text>
-                <text class="on-dark type" x="850" y="218" text-anchor="middle">previews: one row per app</text>
-                <text class="on-dark type" x="850" y="233" text-anchor="middle">status · host · port · error</text>
-
-                <rect class="external" x="720" y="252" width="260" height="46" rx="8"/>
-                <text class="on-dark name" x="850" y="271" text-anchor="middle">Redis</text>
-                <text class="on-dark type" x="850" y="288" text-anchor="middle">[app.updated]</text>
+                <rect class="external" x="720" y="214" width="260" height="62" rx="8"/>
+                <text class="on-dark name" x="850" y="235" text-anchor="middle">Postgres</text>
+                <text class="on-dark type" x="850" y="252" text-anchor="middle">workspaces: one row per workspace</text>
+                <text class="on-dark type" x="850" y="267" text-anchor="middle">status · launch_options</text>
 
                 <rect class="external" x="720" y="382" width="260" height="64" rx="8"/>
                 <text class="on-dark name" x="850" y="404" text-anchor="middle">Workspace volume</text>
                 <text class="on-dark type" x="850" y="421" text-anchor="middle">[shared · RWX]</text>
                 <text class="on-dark type" x="850" y="437" text-anchor="middle">WORKSPACE_ROOT/&lt;appId&gt;</text>
 
-                <rect class="external" x="720" y="458" width="260" height="46" rx="8"/>
-                <text class="on-dark name" x="850" y="477" text-anchor="middle">App database</text>
-                <text class="on-dark type" x="850" y="494" text-anchor="middle">[its own Postgres role]</text>
-
-                <rect class="external" x="720" y="516" width="260" height="46" rx="8"/>
-                <text class="on-dark name" x="850" y="535" text-anchor="middle">Internet</text>
-                <text class="on-dark type" x="850" y="552" text-anchor="middle">[npm registry · public APIs]</text>
+                <rect class="external" x="720" y="478" width="260" height="46" rx="8"/>
+                <text class="on-dark name" x="850" y="497" text-anchor="middle">Internet</text>
+                <text class="on-dark type" x="850" y="514" text-anchor="middle">[npm registry · public APIs]</text>
 
                 <line class="edge" x1="58" y1="16" x2="58" y2="118" marker-end="url(#sb-arrow)"/>
                 <text class="edge-label" x="66" y="46">app traffic, HTTP + WS</text>
                 <text class="note" x="66" y="60">from the preview proxy, to :4002</text>
+                <text class="note" x="66" y="74">header x-workspace-app: &lt;workspaceId&gt;</text>
 
                 <line class="edge" x1="390" y1="16" x2="390" y2="118" marker-end="url(#sb-arrow)"/>
-                <text class="edge-label" x="398" y="46">start · status · stop · restart · exec</text>
-                <text class="note" x="398" y="60">from the server pod's preview API</text>
+                <text class="edge-label" x="398" y="46">launch · exec · stop · logs</text>
+                <text class="note" x="398" y="60">from the server pod's sandbox API</text>
 
                 <line class="edge" x1="390" y1="164" x2="390" y2="198" marker-end="url(#sb-arrow)"/>
 
                 <line class="edge" x1="80" y1="245" x2="114" y2="245" marker-end="url(#sb-arrow)"/>
                 <text class="edge-label halo" x="97" y="238" text-anchor="middle">wake</text>
 
-                <line class="edge" x1="664" y1="212" x2="718" y2="212" marker-end="url(#sb-arrow)"/>
-                <text class="edge-label halo" x="691" y="204" text-anchor="middle">status</text>
-                <line class="edge" x1="664" y1="272" x2="718" y2="272" marker-end="url(#sb-arrow)"/>
+                <line class="edge" x1="664" y1="245" x2="718" y2="245" marker-end="url(#sb-arrow)"/>
+                <text class="edge-label halo" x="691" y="237" text-anchor="middle">status</text>
 
                 <line class="edge" x1="236" y1="290" x2="236" y2="304" marker-end="url(#sb-arrow)"/>
                 <line class="edge" x1="390" y1="290" x2="390" y2="364" marker-end="url(#sb-arrow)"/>
@@ -1222,16 +1208,15 @@
                 <line class="edge" x1="544" y1="350" x2="544" y2="364" marker-end="url(#sb-arrow)"/>
 
                 <line class="edge" x1="80" y1="458" x2="146" y2="458" marker-end="url(#sb-arrow)"/>
-                <line class="edge" x1="314" y1="458" x2="300" y2="458" marker-end="url(#sb-arrow)"/>
+                <text class="edge-label halo" x="113" y="451" text-anchor="middle">ingress</text>
 
                 <line class="edge" x1="236" y1="616" x2="236" y2="604" marker-end="url(#sb-arrow)"/>
 
-                <line class="edge" x1="648" y1="410" x2="718" y2="410" marker-end="url(#sb-arrow)"/>
-                <text class="edge-label halo" x="683" y="402" text-anchor="middle">/app</text>
-                <line class="edge" x1="648" y1="476" x2="718" y2="476" marker-end="url(#sb-arrow)"/>
-                <text class="edge-label halo" x="683" y="468" text-anchor="middle">egress</text>
-                <line class="edge" x1="648" y1="532" x2="718" y2="532" marker-end="url(#sb-arrow)"/>
-                <text class="edge-label halo" x="683" y="524" text-anchor="middle">egress</text>
+                <line class="edge" x1="588" y1="410" x2="718" y2="410" marker-end="url(#sb-arrow)"/>
+                <line class="edge" x1="588" y1="476" x2="602" y2="476" marker-end="url(#sb-arrow)"/>
+                <text class="edge-label halo" x="683" y="402" text-anchor="middle">/workspace</text>
+                <line class="edge" x1="648" y1="501" x2="718" y2="501" marker-end="url(#sb-arrow)"/>
+                <text class="edge-label halo" x="683" y="493" text-anchor="middle">egress</text>
               </svg>
             </div>
             <figcaption>C4 component diagram: a sandbox on a worker pod. Solid arrows are calls. Grey boxes are outside preview-runner.</figcaption>
@@ -1240,295 +1225,95 @@
           <h3>Endpoints</h3>
 <div class="routes">
 <details class="route">
-  <summary><span class="method post">POST</span><code class="route-path">/internal/preview/start</code><span class="route-summary">Start the app&#x27;s sandbox; returns at once</span></summary>
+  <summary><span class="method post">POST</span><code class="route-path">/internal/sandbox/launch</code><span class="route-summary">Start the workspace&#x27;s background process; returns at once</span></summary>
   <div class="route-body">
 <h4>Request body</h4>
 <pre class="schema"><code>{
   &quot;type&quot;: &quot;object&quot;,
   &quot;required&quot;: [
-    &quot;appId&quot;
+    &quot;workspaceId&quot;,
+    &quot;command&quot;,
+    &quot;port&quot;
   ],
   &quot;properties&quot;: {
-    &quot;appId&quot;: {
-      &quot;minLength&quot;: 1,
-      &quot;maxLength&quot;: 64,
-      &quot;type&quot;: &quot;string&quot;
-    }
-  }
-}</code></pre>
-<h4>Response 200</h4>
-<pre class="schema"><code>{
-  &quot;type&quot;: &quot;object&quot;,
-  &quot;required&quot;: [
-    &quot;appId&quot;,
-    &quot;status&quot;,
-    &quot;port&quot;,
-    &quot;error&quot;
-  ],
-  &quot;properties&quot;: {
-    &quot;appId&quot;: {
+    &quot;workspaceId&quot;: {
+      &quot;format&quot;: &quot;uuid&quot;,
       &quot;type&quot;: &quot;string&quot;
     },
-    &quot;status&quot;: {
-      &quot;type&quot;: &quot;string&quot;,
-      &quot;enum&quot;: [
-        &quot;stopped&quot;,
-        &quot;installing&quot;,
-        &quot;starting&quot;,
-        &quot;running&quot;,
-        &quot;failed&quot;
-      ]
+    &quot;command&quot;: {
+      &quot;minLength&quot;: 1,
+      &quot;type&quot;: &quot;string&quot;
     },
     &quot;port&quot;: {
-      &quot;anyOf&quot;: [
-        {
-          &quot;type&quot;: &quot;integer&quot;
-        },
-        {
-          &quot;type&quot;: &quot;null&quot;
-        }
-      ]
+      &quot;minimum&quot;: 1,
+      &quot;maximum&quot;: 65535,
+      &quot;type&quot;: &quot;integer&quot;
     },
-    &quot;error&quot;: {
-      &quot;anyOf&quot;: [
-        {
+    &quot;env&quot;: {
+      &quot;type&quot;: &quot;object&quot;,
+      &quot;patternProperties&quot;: {
+        &quot;^.*$&quot;: {
           &quot;type&quot;: &quot;string&quot;
-        },
-        {
-          &quot;type&quot;: &quot;null&quot;
         }
-      ]
+      }
+    },
+    &quot;network&quot;: {
+      &quot;type&quot;: &quot;object&quot;,
+      &quot;properties&quot;: {
+        &quot;allow&quot;: {
+          &quot;type&quot;: &quot;array&quot;,
+          &quot;items&quot;: {
+            &quot;type&quot;: &quot;string&quot;
+          }
+        },
+        &quot;deny&quot;: {
+          &quot;type&quot;: &quot;array&quot;,
+          &quot;items&quot;: {
+            &quot;type&quot;: &quot;string&quot;
+          }
+        }
+      }
     }
   }
 }</code></pre>
-<h4>Errors · 400, 404, 503</h4>
+<h4>Response 204</h4>
+<p>No body. The process is starting; it runs once it listens on <code>port</code>.</p>
+<h4>Errors · 400, 409, 503</h4>
 <pre class="schema"><code>{&quot;type&quot;:&quot;object&quot;,&quot;required&quot;:[&quot;error&quot;],&quot;properties&quot;:{&quot;error&quot;:{&quot;type&quot;:&quot;string&quot;}}}</code></pre>
   </div>
 </details>
 <details class="route">
-  <summary><span class="method post">POST</span><code class="route-path">/internal/preview/status</code><span class="route-summary">Get the sandbox&#x27;s status</span></summary>
+  <summary><span class="method post">POST</span><code class="route-path">/internal/sandbox/exec</code><span class="route-summary">Run a command in the workspace&#x27;s sandbox to the end</span></summary>
   <div class="route-body">
 <h4>Request body</h4>
 <pre class="schema"><code>{
   &quot;type&quot;: &quot;object&quot;,
   &quot;required&quot;: [
-    &quot;appId&quot;
-  ],
-  &quot;properties&quot;: {
-    &quot;appId&quot;: {
-      &quot;minLength&quot;: 1,
-      &quot;maxLength&quot;: 64,
-      &quot;type&quot;: &quot;string&quot;
-    }
-  }
-}</code></pre>
-<h4>Response 200</h4>
-<pre class="schema"><code>{
-  &quot;type&quot;: &quot;object&quot;,
-  &quot;required&quot;: [
-    &quot;appId&quot;,
-    &quot;status&quot;,
-    &quot;port&quot;,
-    &quot;error&quot;
-  ],
-  &quot;properties&quot;: {
-    &quot;appId&quot;: {
-      &quot;type&quot;: &quot;string&quot;
-    },
-    &quot;status&quot;: {
-      &quot;type&quot;: &quot;string&quot;,
-      &quot;enum&quot;: [
-        &quot;stopped&quot;,
-        &quot;installing&quot;,
-        &quot;starting&quot;,
-        &quot;running&quot;,
-        &quot;failed&quot;
-      ]
-    },
-    &quot;port&quot;: {
-      &quot;anyOf&quot;: [
-        {
-          &quot;type&quot;: &quot;integer&quot;
-        },
-        {
-          &quot;type&quot;: &quot;null&quot;
-        }
-      ]
-    },
-    &quot;error&quot;: {
-      &quot;anyOf&quot;: [
-        {
-          &quot;type&quot;: &quot;string&quot;
-        },
-        {
-          &quot;type&quot;: &quot;null&quot;
-        }
-      ]
-    }
-  }
-}</code></pre>
-<h4>Errors · 400</h4>
-<pre class="schema"><code>{&quot;type&quot;:&quot;object&quot;,&quot;required&quot;:[&quot;error&quot;],&quot;properties&quot;:{&quot;error&quot;:{&quot;type&quot;:&quot;string&quot;}}}</code></pre>
-  </div>
-</details>
-<details class="route">
-  <summary><span class="method post">POST</span><code class="route-path">/internal/preview/stop</code><span class="route-summary">Stop the sandbox</span></summary>
-  <div class="route-body">
-<h4>Request body</h4>
-<pre class="schema"><code>{
-  &quot;type&quot;: &quot;object&quot;,
-  &quot;required&quot;: [
-    &quot;appId&quot;
-  ],
-  &quot;properties&quot;: {
-    &quot;appId&quot;: {
-      &quot;minLength&quot;: 1,
-      &quot;maxLength&quot;: 64,
-      &quot;type&quot;: &quot;string&quot;
-    }
-  }
-}</code></pre>
-<h4>Response 200</h4>
-<pre class="schema"><code>{
-  &quot;type&quot;: &quot;object&quot;,
-  &quot;required&quot;: [
-    &quot;appId&quot;,
-    &quot;status&quot;,
-    &quot;port&quot;,
-    &quot;error&quot;
-  ],
-  &quot;properties&quot;: {
-    &quot;appId&quot;: {
-      &quot;type&quot;: &quot;string&quot;
-    },
-    &quot;status&quot;: {
-      &quot;type&quot;: &quot;string&quot;,
-      &quot;enum&quot;: [
-        &quot;stopped&quot;,
-        &quot;installing&quot;,
-        &quot;starting&quot;,
-        &quot;running&quot;,
-        &quot;failed&quot;
-      ]
-    },
-    &quot;port&quot;: {
-      &quot;anyOf&quot;: [
-        {
-          &quot;type&quot;: &quot;integer&quot;
-        },
-        {
-          &quot;type&quot;: &quot;null&quot;
-        }
-      ]
-    },
-    &quot;error&quot;: {
-      &quot;anyOf&quot;: [
-        {
-          &quot;type&quot;: &quot;string&quot;
-        },
-        {
-          &quot;type&quot;: &quot;null&quot;
-        }
-      ]
-    }
-  }
-}</code></pre>
-<h4>Errors · 400</h4>
-<pre class="schema"><code>{&quot;type&quot;:&quot;object&quot;,&quot;required&quot;:[&quot;error&quot;],&quot;properties&quot;:{&quot;error&quot;:{&quot;type&quot;:&quot;string&quot;}}}</code></pre>
-  </div>
-</details>
-<details class="route">
-  <summary><span class="method post">POST</span><code class="route-path">/internal/preview/restart</code><span class="route-summary">Stop, then start the sandbox</span></summary>
-  <div class="route-body">
-<h4>Request body</h4>
-<pre class="schema"><code>{
-  &quot;type&quot;: &quot;object&quot;,
-  &quot;required&quot;: [
-    &quot;appId&quot;
-  ],
-  &quot;properties&quot;: {
-    &quot;appId&quot;: {
-      &quot;minLength&quot;: 1,
-      &quot;maxLength&quot;: 64,
-      &quot;type&quot;: &quot;string&quot;
-    }
-  }
-}</code></pre>
-<h4>Response 200</h4>
-<pre class="schema"><code>{
-  &quot;type&quot;: &quot;object&quot;,
-  &quot;required&quot;: [
-    &quot;appId&quot;,
-    &quot;status&quot;,
-    &quot;port&quot;,
-    &quot;error&quot;
-  ],
-  &quot;properties&quot;: {
-    &quot;appId&quot;: {
-      &quot;type&quot;: &quot;string&quot;
-    },
-    &quot;status&quot;: {
-      &quot;type&quot;: &quot;string&quot;,
-      &quot;enum&quot;: [
-        &quot;stopped&quot;,
-        &quot;installing&quot;,
-        &quot;starting&quot;,
-        &quot;running&quot;,
-        &quot;failed&quot;
-      ]
-    },
-    &quot;port&quot;: {
-      &quot;anyOf&quot;: [
-        {
-          &quot;type&quot;: &quot;integer&quot;
-        },
-        {
-          &quot;type&quot;: &quot;null&quot;
-        }
-      ]
-    },
-    &quot;error&quot;: {
-      &quot;anyOf&quot;: [
-        {
-          &quot;type&quot;: &quot;string&quot;
-        },
-        {
-          &quot;type&quot;: &quot;null&quot;
-        }
-      ]
-    }
-  }
-}</code></pre>
-<h4>Errors · 400, 404, 503</h4>
-<pre class="schema"><code>{&quot;type&quot;:&quot;object&quot;,&quot;required&quot;:[&quot;error&quot;],&quot;properties&quot;:{&quot;error&quot;:{&quot;type&quot;:&quot;string&quot;}}}</code></pre>
-  </div>
-</details>
-<details class="route">
-  <summary><span class="method post">POST</span><code class="route-path">/internal/preview/exec</code><span class="route-summary">Run a shell command in the app&#x27;s sandbox</span></summary>
-  <div class="route-body">
-<h4>Request body</h4>
-<pre class="schema"><code>{
-  &quot;type&quot;: &quot;object&quot;,
-  &quot;required&quot;: [
-    &quot;appId&quot;,
+    &quot;workspaceId&quot;,
     &quot;command&quot;
   ],
   &quot;properties&quot;: {
-    &quot;appId&quot;: {
-      &quot;minLength&quot;: 1,
-      &quot;maxLength&quot;: 64,
+    &quot;workspaceId&quot;: {
+      &quot;format&quot;: &quot;uuid&quot;,
       &quot;type&quot;: &quot;string&quot;
     },
     &quot;command&quot;: {
       &quot;minLength&quot;: 1,
-      &quot;maxLength&quot;: 4000,
       &quot;type&quot;: &quot;string&quot;
     },
     &quot;timeoutMs&quot;: {
-      &quot;minimum&quot;: 1000,
-      &quot;maximum&quot;: 240000,
       &quot;default&quot;: 120000,
+      &quot;minimum&quot;: 1,
+      &quot;maximum&quot;: 240000,
       &quot;type&quot;: &quot;integer&quot;
+    },
+    &quot;env&quot;: {
+      &quot;type&quot;: &quot;object&quot;,
+      &quot;patternProperties&quot;: {
+        &quot;^.*$&quot;: {
+          &quot;type&quot;: &quot;string&quot;
+        }
+      }
     }
   }
 }</code></pre>
@@ -1536,19 +1321,11 @@
 <pre class="schema"><code>{
   &quot;type&quot;: &quot;object&quot;,
   &quot;required&quot;: [
-    &quot;appId&quot;,
-    &quot;command&quot;,
     &quot;exitCode&quot;,
-    &quot;durationMs&quot;,
-    &quot;output&quot;
+    &quot;output&quot;,
+    &quot;timedOut&quot;
   ],
   &quot;properties&quot;: {
-    &quot;appId&quot;: {
-      &quot;type&quot;: &quot;string&quot;
-    },
-    &quot;command&quot;: {
-      &quot;type&quot;: &quot;string&quot;
-    },
     &quot;exitCode&quot;: {
       &quot;anyOf&quot;: [
         {
@@ -1559,16 +1336,78 @@
         }
       ]
     },
-    &quot;durationMs&quot;: {
-      &quot;type&quot;: &quot;integer&quot;
-    },
     &quot;output&quot;: {
-      &quot;maxLength&quot;: 16384,
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;timedOut&quot;: {
+      &quot;type&quot;: &quot;boolean&quot;
+    }
+  }
+}</code></pre>
+<h4>Errors · 400</h4>
+<pre class="schema"><code>{&quot;type&quot;:&quot;object&quot;,&quot;required&quot;:[&quot;error&quot;],&quot;properties&quot;:{&quot;error&quot;:{&quot;type&quot;:&quot;string&quot;}}}</code></pre>
+  </div>
+</details>
+<details class="route">
+  <summary><span class="method post">POST</span><code class="route-path">/internal/sandbox/stop</code><span class="route-summary">Stop the workspace&#x27;s background process</span></summary>
+  <div class="route-body">
+<h4>Request body</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;workspaceId&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;workspaceId&quot;: {
+      &quot;format&quot;: &quot;uuid&quot;,
       &quot;type&quot;: &quot;string&quot;
     }
   }
 }</code></pre>
-<h4>Errors · 400, 404</h4>
+<h4>Response 204</h4>
+<p>No body. Also <code>204</code> when nothing is running.</p>
+<h4>Errors · 400</h4>
+<pre class="schema"><code>{&quot;type&quot;:&quot;object&quot;,&quot;required&quot;:[&quot;error&quot;],&quot;properties&quot;:{&quot;error&quot;:{&quot;type&quot;:&quot;string&quot;}}}</code></pre>
+  </div>
+</details>
+<details class="route">
+  <summary><span class="method post">POST</span><code class="route-path">/internal/sandbox/logs</code><span class="route-summary">The last lines the background process wrote</span></summary>
+  <div class="route-body">
+<h4>Request body</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;workspaceId&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;workspaceId&quot;: {
+      &quot;format&quot;: &quot;uuid&quot;,
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;tail&quot;: {
+      &quot;default&quot;: 200,
+      &quot;minimum&quot;: 1,
+      &quot;maximum&quot;: 5000,
+      &quot;type&quot;: &quot;integer&quot;
+    }
+  }
+}</code></pre>
+<h4>Response 200</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;lines&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;lines&quot;: {
+      &quot;type&quot;: &quot;array&quot;,
+      &quot;items&quot;: {
+        &quot;type&quot;: &quot;string&quot;
+      }
+    }
+  }
+}</code></pre>
+<h4>Errors · 400</h4>
 <pre class="schema"><code>{&quot;type&quot;:&quot;object&quot;,&quot;required&quot;:[&quot;error&quot;],&quot;properties&quot;:{&quot;error&quot;:{&quot;type&quot;:&quot;string&quot;}}}</code></pre>
   </div>
 </details>
@@ -1580,19 +1419,18 @@
               <tr><th>Event</th><th>What happens</th></tr>
             </thead>
             <tbody>
-              <tr><td>A worker pod starts</td><td>Rows with <code>host</code> = this pod → <code>stopped</code>; their sandboxes died with it.</td></tr>
-              <tr><td>Any status change</td><td>Written to the row <code>WHERE host = me</code> and published as <code>app.updated</code>.</td></tr>
-              <tr><td>Start</td><td>App folder missing → <code>404</code>. Already <code>installing</code>, <code>starting</code> or <code>running</code> → return its status. No free pool port → <code>503</code>. Otherwise take the port, set the row to <code>installing</code> with <code>host = me</code>, and return at once. Then in the background: <code>npm ci</code> if the lockfile changed since this pod's deps cache was built → <code>prisma generate</code> → <code>prisma db push</code> → <code>starting</code>, launch the dev server → <code>running</code> once it listens. A failing step, or no listener within 90 s → <code>failed</code> with the tail of its output.</td></tr>
-              <tr><td>Preview request, <code>running</code></td><td>The port forwarder sends it to <code>127.0.0.1:&lt;port&gt;</code>. Requests and open WebSockets count as use.</td></tr>
-              <tr><td>Preview request, <code>stopped</code></td><td>The port forwarder wakes it through the manager and holds the request until <code>running</code>, up to 90 s. Still installing after that → <code>503</code> with <code>Retry-After</code>.</td></tr>
-              <tr><td>Preview request, <code>failed</code></td><td><code>502</code> with the error. Traffic doesn't restart it; start or restart does.</td></tr>
-              <tr><td>Exec</td><td><code>sh -c</code> in the app's confinement, whether or not the dev server runs. Waits for a running install first. At <code>timeoutMs</code> (2 min default, 4 min max) the process tree is killed and <code>exitCode</code> is <code>null</code>. Counts as use.</td></tr>
-              <tr><td>Stop</td><td>Kill the process tree, a running install included → free the port → <code>stopped</code>.</td></tr>
-              <tr><td>Restart</td><td>Stop, then start.</td></tr>
-              <tr><td>Dev server exits on its own</td><td>Free the port → <code>failed</code> with the tail of its output.</td></tr>
-              <tr><td>Idle, 15 min with no preview traffic, open WebSocket or exec</td><td>The sweeper stops it. The next preview request wakes it. Status calls don't count as use.</td></tr>
-              <tr><td>A worker pod dies</td><td>Placement moves the app. The next start or preview request starts it on the new worker, which takes over the row with <code>host</code> = the new pod and installs into its own deps cache.</td></tr>
-              <tr><td>A worker pod shuts down</td><td>Stop every sandbox → its rows <code>stopped</code>.</td></tr>
+              <tr><td>Any status change</td><td>The row's <code>status</code> is <code>running</code> while the background process runs, <code>stopped</code> otherwise.</td></tr>
+              <tr><td>Launch</td><td>Already <code>starting</code> or <code>running</code> → <code>409</code>. No free pool port → <code>503</code>. Otherwise its env is <code>PORT</code> = <code>port</code>, then the workspace's env, then <code>env</code>, each winning over the one before. Take the port, start it, save it with that env to the row's <code>launch_options</code> and return at once. In the background: run <code>command</code> with its <code>port</code> mapped to <code>127.0.0.1:&lt;pool port&gt;</code> → <code>running</code> once it listens. No listener within 90 s → <code>failed</code>.</td></tr>
+              <tr><td>Request, <code>running</code></td><td>The port forwarder sends it to <code>127.0.0.1:&lt;port&gt;</code>. Requests and open WebSockets count as use.</td></tr>
+              <tr><td>Request, <code>stopped</code></td><td>The port forwarder wakes it through the manager: the row has <code>launch_options</code> → start it again exactly as launched and hold the request until <code>running</code>, up to 90 s. Still starting after that → <code>503</code> with <code>Retry-After</code>. No <code>launch_options</code> → <code>503</code>.</td></tr>
+              <tr><td>Request, <code>failed</code></td><td><code>502</code>. Traffic doesn't relaunch it; launch does.</td></tr>
+              <tr><td>Exec</td><td><code>sh -c</code> in the workspace's confinement, with the workspace's env and <code>env</code> on top. While the background process runs, it joins that process's network namespace: <code>localhost:&lt;port&gt;</code> reaches it, it gets <code>PORT</code> = that <code>port</code>, and the launch's <code>network</code> applies. With nothing running, its own namespace with open egress and no <code>PORT</code>. Its stdout and stderr go together to its own log, and <code>output</code> is the last 16 KB of it; the log is deleted once read. At <code>timeoutMs</code> (2 min default, 4 min max) the process tree is killed, <code>timedOut</code> is <code>true</code> and <code>exitCode</code> is <code>null</code>.</td></tr>
+              <tr><td>Stop</td><td>Clear the row's <code>launch_options</code> first, so requests no longer wake it → kill the process tree → free the port → <code>stopped</code>. Nothing running → already <code>stopped</code>.</td></tr>
+              <tr><td>Logs</td><td>The last <code>tail</code> lines of stdout and stderr together, in the order written, with blank lines and terminal colour codes left out. Each process writes to its own file in the pod's temp folder. After a stop or a crash they stay until the next launch. The idle sweep and a pod shutdown delete them, and so does a pod restart.</td></tr>
+              <tr><td>Background process exits on its own</td><td>Free the port → <code>failed</code>.</td></tr>
+              <tr><td>Idle, 15 min with no traffic or open WebSocket</td><td>The sweeper stops it, deletes its logs and keeps the row's <code>launch_options</code>. The next request wakes it. Logs calls don't count as use.</td></tr>
+              <tr><td>A worker pod dies</td><td>Placement moves the workspace. The next request wakes it on the new worker from the row's <code>launch_options</code>.</td></tr>
+              <tr><td>A worker pod shuts down</td><td>Stop every process and delete its logs → their rows <code>stopped</code>. Their <code>launch_options</code> stay, so the next request wakes them.</td></tr>
             </tbody>
           </table>
 
@@ -1603,11 +1441,11 @@
             </thead>
             <tbody>
               <tr><td>Namespaces</td><td>Its own user, pid, ipc, uts, cgroup and network namespaces.</td></tr>
-              <tr><td>Files</td><td><code>/app</code> is <code>WORKSPACE_ROOT/&lt;appId&gt;</code> on the shared volume, read-write. <code>/app/node_modules</code> comes from the pod-local deps cache. System paths read-only. <code>/tmp</code> empty; <code>HOME=/tmp</code>.</td></tr>
-              <tr><td>Network</td><td>Its own namespace through pasta. Inbound: only port 3000, mapped to the pod's <code>127.0.0.1:&lt;port&gt;</code>. Outbound: the app's database and the internet. Nothing on the pod or cluster: not other sandboxes, not Chromium, not the internal API on 4002.</td></tr>
-              <tr><td>Limits</td><td>A cgroup per sandbox caps memory, CPU and process count, so one app can't starve the pod.</td></tr>
-              <tr><td>Environment</td><td><code>PORT=3000</code>, <code>DATABASE_URL</code> (the app's own role), <code>SESSION_SECRET</code>, file watching by polling, plus <code>PATH</code>, <code>LANG</code>, <code>TZ</code>. Nothing else from the runner.</td></tr>
-              <tr><td>Local dev</td><td><code>SANDBOX_MODE=none</code> runs unconfined, allowed only with <code>ENVIRONMENT=local</code>.</td></tr>
+              <tr><td>Files</td><td><code>/workspace</code> is <code>WORKSPACES_DIR/&lt;workspaceId&gt;</code> on the shared volume, read-write. <code>/workspace/node_modules</code> comes from the pod-local deps cache. System paths read-only. <code>/tmp</code> empty; <code>HOME=/tmp</code>.</td></tr>
+              <tr><td>Network</td><td>One namespace per workspace through pasta, made by launch; an exec joins it while the background process runs, else gets its own. Inbound: only the launch's <code>port</code>, mapped to the pod's <code>127.0.0.1:&lt;port&gt;</code>. Outbound: only loopback leaves the namespace. The internet is reached through the network controller, an HTTP proxy at <code>127.0.0.1:3128</code> inside every namespace, mapped by pasta to the controller's own port on the pod. It applies the launch's <code>allow</code> and <code>deny</code> lists to each host name and refuses private addresses; an exec's own namespace reaches every public host. Tools that ignore the proxy settings can't reach the internet. Nothing on the pod or cluster: not other sandboxes, not Chromium, not the internal API on 4002.</td></tr>
+              <tr><td>Limits</td><td>One cgroup per workspace, shared by its launch and every exec, caps memory, CPU and process count, so one workspace can't starve the pod.</td></tr>
+              <tr><td>Environment</td><td><code>PORT</code> = the launch's <code>port</code>, the workspace's env over it, the command's <code>env</code> on top, plus <code>PATH</code>, <code>LANG</code>, <code>LC_ALL</code>, <code>TZ</code>. Under them, the proxy settings that point at the network controller: <code>HTTP_PROXY</code>, <code>HTTPS_PROXY</code> and their lowercase forms, <code>NO_PROXY</code> for <code>localhost</code>, and <code>NODE_USE_ENV_PROXY</code>. Nothing else from the runner.</td></tr>
+              <tr><td>Local dev</td><td><code>SANDBOX_MODE=none</code> runs unconfined, allowed only with <code>NODE_ENV=development</code>.</td></tr>
             </tbody>
           </table>
         </section>

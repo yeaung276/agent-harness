@@ -1,15 +1,12 @@
 import { afterAll, describe, expect, test } from 'bun:test'
-import { inArray } from 'drizzle-orm'
 
-import { buildApp } from '../../../src/app.ts'
 import { loadConfig } from '../../../src/config.ts'
 import { users } from '../../../src/db/schema.ts'
+import { buildTestApp } from '../../test-app.ts'
 
-const app = await buildApp(loadConfig({ ...process.env, NODE_ENV: 'test', LOG_LEVEL: 'silent' }))
-const emails: string[] = []
+const app = await buildTestApp(loadConfig({ ...process.env, NODE_ENV: 'test', LOG_LEVEL: 'silent' }))
 
 afterAll(async () => {
-  await app.db.delete(users).where(inArray(users.email, emails))
   await app.close()
 })
 
@@ -18,7 +15,6 @@ const form = { 'content-type': 'application/x-www-form-urlencoded' }
 // a new user, logged in
 const signIn = async () => {
   const email = `${crypto.randomUUID()}@example.com`
-  emails.push(email)
   const [user] = await app.db
     .insert(users)
     .values({ email, passwordHash: await Bun.password.hash('secret-password', 'argon2id') })

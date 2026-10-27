@@ -65,6 +65,7 @@
               <tr><td><code>id</code></td><td><code>uuid</code></td><td>Primary key, <code>gen_random_uuid()</code>.</td></tr>
               <tr><td><code>name</code></td><td><code>text</code></td><td>Unique. 1–63 lowercase letters, digits and <code>-</code>, not starting or ending with <code>-</code>.</td></tr>
               <tr><td><code>status</code></td><td><code>text</code></td><td>Whether its web server is <code>running</code> or <code>stopped</code>. Starts as <code>stopped</code>.</td></tr>
+              <tr><td><code>launch_options</code></td><td><code>jsonb</code></td><td>The last launch: <code>command</code>, <code>port</code>, <code>network</code> and the <code>env</code> it ran with, <code>PORT</code> and the workspace's env merged in, its values encrypted. A request to a stopped web server starts it again from this, exactly as launched. Null until the first launch; cleared by stop.</td></tr>
               <tr><td><code>user_id</code></td><td><code>uuid</code></td><td>References <code>users.id</code>: who created it, shown as Created by. A user who created a workspace can't be deleted.</td></tr>
               <tr><td><code>created_at</code></td><td><code>timestamptz</code></td><td><code>now()</code>.</td></tr>
               <tr><td><code>updated_at</code></td><td><code>timestamptz</code></td><td><code>now()</code>. Set again by each zip upload.</td></tr>
