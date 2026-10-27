@@ -1,4 +1,6 @@
-import { index, integer, jsonb, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core'
+import { boolean, index, integer, jsonb, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core'
+
+import type { SessionState } from '../services/chromium/session.ts'
 
 export const users = pgTable('users', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -60,3 +62,19 @@ export const sandboxActivities = pgTable(
   },
   table => [index('sandbox_activities_workspace_created_idx').on(table.workspaceId, table.createdAt)]
 )
+
+export const browserSessions = pgTable('browser_sessions', {
+  id: uuid('id').primaryKey().defaultRandom(),
+  workspaceId: uuid('workspace_id').references(() => workspaces.id, { onDelete: 'cascade' }),
+  record: boolean('record').notNull().default(false),
+  status: text('status', { enum: ['alive', 'closed'] })
+    .notNull()
+    .default('alive'),
+  url: text('url'),
+  storageState: jsonb('storage_state').$type<NonNullable<SessionState['storageState']>>(),
+  userId: uuid('user_id')
+    .notNull()
+    .references(() => users.id, { onDelete: 'restrict' }),
+  lastUsedAt: timestamp('last_used_at', { withTimezone: true }).notNull().defaultNow(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+})

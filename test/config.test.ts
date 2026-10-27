@@ -25,6 +25,7 @@ describe('loadConfig', () => {
       SANDBOX_PIDS_MAX: 512,
       SANDBOX_PORT_MIN: 4100,
       SANDBOX_PORT_MAX: 4149,
+      BROWSER_IDLE_MS: 300_000,
       ...required,
     })
   })

@@ -34,6 +34,8 @@ export const ConfigSchema = Type.Object({
   SANDBOX_PIDS_MAX: Type.Number({ default: 512 }),
   SANDBOX_PORT_MIN: Type.Number({ default: 4100 }),
   SANDBOX_PORT_MAX: Type.Number({ default: 4149 }),
+
+  BROWSER_IDLE_MS: Type.Number({ default: 5 * 60 * 1000 }),
 })
 
 export type Config = Static<typeof ConfigSchema>

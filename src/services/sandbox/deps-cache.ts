@@ -9,7 +9,7 @@ const RULES: { manifests: string[]; deps: string; env: Record<string, string> }[
 ]
 const MAX_DEPTH = 3
 
-export type Mount = { source: string; target: string }
+export type Mount = { source: string; target: string; readOnly?: true }
 
 export const depsCache = (root: string) => ({
   mounts: async (workspaceId: string, dir: string) => {

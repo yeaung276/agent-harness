@@ -234,6 +234,21 @@ describe('a command without a port', () => {
   }, 30_000)
 })
 
+describe('a piped command', () => {
+  test('hands back its stdout as a stream, drops stderr, and keeps no logs', async () => {
+    const before = await readdir(join(tmpdir(), 'sandbox-logs')).catch(() => [])
+    const sandbox = start(await workspace(), { command: 'echo out; echo err >&2; echo more', stdout: 'pipe' })
+
+    let output = ''
+    sandbox.stdout?.on('data', chunk => (output += chunk))
+    expect(await sandbox.exited()).toBe(0)
+
+    expect(output).toBe('out\nmore\n')
+    expect(await sandbox.logs(10)).toEqual([])
+    expect(await readdir(join(tmpdir(), 'sandbox-logs')).catch(() => [])).toEqual(before)
+  }, 30_000)
+})
+
 describe('logs', () => {
   test('hold stdout and stderr together, in the order written', async () => {
     const { output } = await run(await workspace(), 'echo one; echo two >&2; echo three')
@@ -303,6 +318,23 @@ describe.if(linux)('confinement', () => {
     expect(output).not.toContain('other-workspace-visible')
     expect(output).not.toContain('server-visible')
     expect(output).toContain('home=/tmp')
+  }, 30_000)
+
+  test('reads a read-only mount and cannot change it', async () => {
+    const shared = await workspace({ 'lib.js': 'original' })
+
+    const { output } = await run(
+      await workspace(),
+      [
+        'cat /workspace/lib/lib.js; echo',
+        '{ echo tampered > /workspace/lib/lib.js; } 2>/dev/null && echo written',
+        'touch /workspace/lib/new 2>/dev/null && echo created',
+      ].join('; '),
+      { mounts: [{ source: shared.dir, target: 'lib', readOnly: true }] }
+    )
+
+    expect(output.trim()).toBe('original')
+    expect(await readFile(join(shared.dir, 'lib.js'), 'utf8')).toBe('original')
   }, 30_000)
 
   test("can't loosen its own firewall", async () => {
@@ -434,6 +466,22 @@ describe.if(linux)('network', () => {
     )
 
     expect(output.split('\n').filter(Boolean)).toEqual(['403', '403', 'done'])
+  }, 60_000)
+
+  test("reaches the pod's 127.0.0.1 on its outbound ports, and on nothing else there", async () => {
+    const sibling = launch(await workspace())
+    await sibling.ready()
+
+    const { output } = await run(
+      await workspace(),
+      [
+        `curl -s -m 3 http://127.0.0.1:${sibling.hostPort}/; echo`,
+        "curl -s -m 3 http://127.0.0.1:4002/ || echo blocked",
+      ].join('; '),
+      { outboundPorts: String(sibling.hostPort) }
+    )
+
+    expect(output.split('\n').filter(Boolean)).toEqual(['ok', 'blocked'])
   }, 60_000)
 
   test("blocks tools that don't use the proxy", async () => {

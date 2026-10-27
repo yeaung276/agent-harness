@@ -176,6 +176,9 @@ export const createSandboxManager = ({
 
     logs: async (workspaceId: string, tail: number) => (await sandboxes.get(workspaceId)?.logs(tail, true)) ?? [],
 
+    hostPort: (workspaceId: string) =>
+      sandboxes.get(workspaceId)?.status() === 'running' ? sandboxes.get(workspaceId)!.hostPort : null,
+
     wake: async (workspaceId: string) => {
       const launched = await locked(workspaceId, async () => {
         const current = sandboxes.get(workspaceId)

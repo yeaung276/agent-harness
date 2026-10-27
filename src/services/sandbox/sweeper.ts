@@ -1,8 +1,6 @@
-import type { createSandboxManager } from './manager.ts'
-
 const SWEEP_EVERY_MS = 60_000
 
-export const sweeper = (manager: ReturnType<typeof createSandboxManager>) => {
+export const sweeper = (manager: { stopIdle: () => Promise<unknown> }) => {
   let timer: NodeJS.Timeout | undefined
 
   return {

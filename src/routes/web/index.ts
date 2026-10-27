@@ -8,6 +8,7 @@ import fastifyView from '@fastify/view'
 import { Eta } from 'eta'
 
 import { auth, requireSession } from './auth.ts'
+import { browsers } from './browsers.ts'
 import { health } from './health.ts'
 import { tokens } from './tokens.ts'
 import { workspaces } from './workspaces.ts'
@@ -30,6 +31,7 @@ export const web: FastifyPluginAsyncTypebox = async app => {
 
     pages.get('/', async (_request, reply) => reply.redirect('/workspaces'))
     await pages.register(workspaces)
+    await pages.register(browsers)
     await pages.register(tokens)
   })
 }

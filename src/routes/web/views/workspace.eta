@@ -21,7 +21,7 @@
     </div>
   </header>
   <nav id="views" role="tablist" class="flex shrink-0 gap-1 border-b border-gray-200 px-4 text-sm">
-    <% [['files', 'Files'], ['activity', 'Sandbox activity'], ['logs', 'Launch logs'], ['browsers', 'Browsers']].forEach(([view, label], index) => { %>
+    <% [['files', 'Files'], ['activity', 'Sandbox activity'], ['logs', 'Launch logs']].forEach(([view, label], index) => { %>
     <button type="button" role="tab" data-view="<%= view %>" aria-selected="<%= index === 0 %>" class="-mb-px border-b-2 border-transparent px-3 py-2 text-gray-500 hover:text-gray-900 aria-selected:border-gray-900 aria-selected:text-gray-900"><%= label %></button>
     <% }) %>
   </nav>
@@ -45,9 +45,6 @@
     <ul id="activities" class="divide-y divide-gray-200 text-sm"></ul>
     <p id="activities-empty" class="p-6 text-sm text-gray-500">No launches or execs yet.</p>
     <nav id="activities-pages" class="flex items-center justify-between border-t border-gray-200 px-4 py-2 text-sm text-gray-500 empty:hidden"></nav>
-  </div>
-  <div data-panel="browsers" hidden class="min-h-0 flex-1">
-    <p class="p-6 text-sm text-gray-500">No browser sessions.</p>
   </div>
 </div>
 

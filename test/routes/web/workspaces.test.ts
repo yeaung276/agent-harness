@@ -262,16 +262,18 @@ describe('workspace page', () => {
     expect(link.statusCode).toBe(404)
   })
 
-  test('the page has files, logs, sandbox activity and browsers tabs, with files open', async () => {
+  test('the page has files, sandbox activity and launch logs tabs, with files open', async () => {
     const { cookies } = await signIn()
     const { id } = await workspaceWithFiles(cookies, {})
 
     const page = await app.inject({ url: `/workspaces/${id}`, cookies })
 
-    for (const view of ['files', 'logs', 'activity', 'browsers']) expect(page.body).toContain(`data-view="${view}"`)
+    for (const view of ['files', 'activity', 'logs']) expect(page.body).toContain(`data-view="${view}"`)
     expect(page.body).toContain('Sandbox activity')
+    expect(page.body).toContain('Launch logs')
     expect(page.body).toContain('data-view="files" aria-selected="true"')
-    for (const panel of ['logs', 'activity', 'browsers']) expect(page.body).toContain(`data-panel="${panel}" hidden`)
+    for (const panel of ['activity', 'logs']) expect(page.body).toContain(`data-panel="${panel}" hidden`)
+    expect(page.body).not.toContain('data-view="browsers"')
   })
 
   test('sandbox activity lists launches and execs newest first, 20 to a page, and goes with the workspace', async () => {

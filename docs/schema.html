@@ -98,6 +98,29 @@
           </table>
           <p>The worker running the sandbox writes each row; the web app reads them for a workspace's Sandbox activity tab, 20 to a page. Like <code>status</code> on <code>workspaces</code>, <code>kind</code> and <code>status</code> are limited only by the app.</p>
         </section>
+
+        <section class="doc-section" id="browser-sessions">
+          <h2>Browsers</h2>
+
+          <h3>browser_sessions</h3>
+          <table>
+            <thead>
+              <tr><th>Column</th><th>Type</th><th>Notes</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>id</code></td><td><code>uuid</code></td><td>Primary key, <code>gen_random_uuid()</code>. The session id in the API.</td></tr>
+              <tr><td><code>workspace_id</code></td><td><code>uuid</code></td><td>References <code>workspaces.id</code>: the workspace whose background process the tab can reach. Null for a session that reaches only public sites. Deleted with the workspace.</td></tr>
+              <tr><td><code>record</code></td><td><code>boolean</code></td><td>Whether the tab is filmed and allows screenshots. Only with a workspace. Default <code>false</code>.</td></tr>
+              <tr><td><code>status</code></td><td><code>text</code></td><td><code>alive</code> while its tab is open, <code>closed</code> once it is closed: by the API, after 5 minutes unused, when the worker shuts down, or when a call finds its tab gone. A closed session answers <code>404</code>.</td></tr>
+              <tr><td><code>url</code></td><td><code>text</code></td><td>Where the tab is, saved after each call. Null on a blank tab.</td></tr>
+              <tr><td><code>storage_state</code></td><td><code>jsonb</code></td><td>The tab's cookies and local storage, saved after each call.</td></tr>
+              <tr><td><code>user_id</code></td><td><code>uuid</code></td><td>References <code>users.id</code>: who created it, shown as Created by. A user who created a session can't be deleted.</td></tr>
+              <tr><td><code>last_used_at</code></td><td><code>timestamptz</code></td><td><code>now()</code>. Set again by each call and by closing.</td></tr>
+              <tr><td><code>created_at</code></td><td><code>timestamptz</code></td><td><code>now()</code>.</td></tr>
+            </tbody>
+          </table>
+          <p>The worker running the browser writes each row. Rows are never deleted; closing sets <code>status</code>. Like <code>status</code> on <code>workspaces</code>, <code>status</code> is limited only by the app.</p>
+        </section>
       </div>
     </main>
   </div>

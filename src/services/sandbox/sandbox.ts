@@ -14,7 +14,7 @@ const CGROUP_CONTROLLERS = ['memory', 'cpu', 'pids']
 
 export type SandboxOptions = {
   dir: string
-  mounts: Mount[]
+  mounts?: Mount[]
   mode: 'bwrap' | 'none'
   memoryMaxMb: number
   cpuMax: number
@@ -23,21 +23,39 @@ export type SandboxOptions = {
   env: Record<string, string>
   network?: NetworkRules
   ports?: { inside: number; host: number }
+  outboundPorts?: string
   readyTimeoutMs?: number
   joinPid?: number
+  // 'log' (default) writes stdout and stderr to a log file read by logs(); 'pipe' hands stdout back as the sandbox's stdout stream and drops stderr: nothing is written to a log file, and logs() returns nothing
+  stdout?: 'log' | 'pipe'
 }
 
 export type SandboxStatus = 'starting' | 'running' | 'failed' | 'stopped'
 
 export const createSandbox = (
   workspaceId: string,
-  { dir, mounts, mode, memoryMaxMb, cpuMax, pidsMax, command, env, network, ports, readyTimeoutMs, joinPid }: SandboxOptions
+  {
+    dir,
+    mounts = [],
+    mode,
+    memoryMaxMb,
+    cpuMax,
+    pidsMax,
+    command,
+    env,
+    network,
+    ports,
+    outboundPorts,
+    readyTimeoutMs,
+    joinPid,
+    stdout = 'log',
+  }: SandboxOptions
 ) => {
   let inUse = 0
   let lastUsedAt = Date.now()
   let status: SandboxStatus = ports ? 'starting' : 'running'
 
-  const log = createLog()
+  const log = stdout === 'log' ? createLog() : null
   const cgroup = join(CGROUP_ROOT, `workspace-${workspaceId}`)
   const controller = mode === 'bwrap' && joinPid === undefined ? createNetworkController(network ?? {}) : null
 
@@ -54,9 +72,11 @@ export const createSandbox = (
           'none',
           '-T',
           `${PROXY_PORT}:${controller?.port}`,
+          ...(outboundPorts ? ['-T', outboundPorts] : []),
           '-U',
           'none',
           '--no-map-gw',
+          '--host-lo-to-ns-lo',
           '--',
           'unshare',
           '--mount',
@@ -105,7 +125,11 @@ export const createSandbox = (
     '--bind',
     dir,
     '/workspace',
-    ...mounts.flatMap(({ source, target }) => ['--bind', source, join('/workspace', target)]),
+    ...mounts.flatMap(({ source, target, readOnly }) => [
+      readOnly ? '--ro-bind' : '--bind',
+      source,
+      join('/workspace', target),
+    ]),
     '--chdir',
     '/workspace',
     ...[
@@ -120,6 +144,7 @@ export const createSandbox = (
       '/etc/ssl',
       '/etc/ca-certificates',
       '/etc/hosts',
+      '/etc/fonts',
     ].flatMap(path => ['--ro-bind-try', path, path]),
     '--tmpfs',
     process.cwd(),
@@ -158,9 +183,9 @@ export const createSandbox = (
       ...(mode === 'none' && ports ? { PORT: String(ports.host) } : {}),
     },
     detached: true,
-    stdio: ['ignore', log.fd, log.fd],
+    stdio: log ? ['ignore', log.fd, log.fd] : ['ignore', 'pipe', 'ignore'],
   })
-  child.on('error', error => log.write(`${error.message}\n`))
+  child.on('error', error => log?.write(`${error.message}\n`))
 
   const killTree = async () => {
     if (child.pid === undefined) return
@@ -206,7 +231,14 @@ export const createSandbox = (
     child.once('close', exitCode => {
       controller?.close()
       if (status !== 'stopped') status = ports ? 'failed' : 'stopped'
-      if (mode === 'bwrap') void rmdir(cgroup).catch(() => {})
+      if (mode === 'bwrap') {
+        void (async () => {
+          for (let attempt = 0; attempt < 20; attempt++) {
+            if (await rmdir(cgroup).then(() => true, error => error.code === 'ENOENT')) return
+            await Bun.sleep(100)
+          }
+        })()
+      }
       resolve(exitCode)
     })
   )
@@ -222,14 +254,18 @@ export const createSandbox = (
 
     ready: async () => {
       await readiness
-      if (status !== 'running') throw new Error((await log.tail(20, true)).join('\n'))
+      if (status !== 'running') throw new Error(((await log?.tail(20, true)) ?? []).join('\n'))
     },
 
     exited: () => finished,
 
-    logs: (tail: number, clean?: boolean) => log.tail(tail, clean),
+    stdout: child.stdout,
 
-    deleteLogs: () => log.remove(),
+    logs: async (tail: number, clean?: boolean) => (await log?.tail(tail, clean)) ?? [],
+
+    deleteLogs: async () => {
+      await log?.remove()
+    },
 
     kill: async () => {
       if (status === 'failed' || status === 'stopped') return

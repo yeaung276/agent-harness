@@ -43,6 +43,7 @@ const fakeSandbox = (workspaceId: string, options: SandboxOptions) => {
     status: () => status,
     ready: () => listening.promise,
     exited: () => exit.promise,
+    stdout: null,
     logs: async (tail: number, clean = false) => {
       if (fake.unreadable) throw new Error('log unreadable')
       if (fake.logsDeleted) return []
@@ -825,7 +826,7 @@ describe('wake', () => {
     await woken
 
     expect(first.options.mounts).toEqual([])
-    expect(latestLaunch('ws-1').options.mounts.map(mount => mount.target)).toEqual(['node_modules'])
+    expect(latestLaunch('ws-1').options.mounts!.map(mount => mount.target)).toEqual(['node_modules'])
   })
 
   test('starts a workspace this pod never ran from its saved launch', async () => {

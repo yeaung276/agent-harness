@@ -86,7 +86,7 @@
 
                 <rect class="component" x="104" y="550" width="660" height="46" rx="6"/>
                 <text class="on-light name" x="434" y="569" text-anchor="middle">internal API</text>
-                <text class="on-light type" x="434" y="585" text-anchor="middle">[/internal/preview/* · /internal/browser/*]</text>
+                <text class="on-light type" x="434" y="585" text-anchor="middle">[/internal/sandbox/* · /internal/chromium/*]</text>
 
                 <rect class="component" x="104" y="616" width="290" height="84" rx="6"/>
                 <text class="on-light name" x="249" y="640" text-anchor="middle">Sandbox</text>
@@ -95,7 +95,7 @@
 
                 <rect class="component" x="474" y="616" width="290" height="84" rx="6"/>
                 <text class="on-light name" x="619" y="640" text-anchor="middle">Chromium</text>
-                <text class="on-light type" x="619" y="657" text-anchor="middle">[core/browser]</text>
+                <text class="on-light type" x="619" y="657" text-anchor="middle">[plugins/chromium.ts]</text>
                 <text class="on-light type" x="619" y="678" text-anchor="middle">one page per session</text>
 
                 <rect class="component" x="104" y="740" width="660" height="46" rx="6"/>
@@ -161,10 +161,10 @@
               <tr><td>Preview proxy</td><td>Server</td><td>Takes every request that carries the signed preview cookie, HTTP and WebSocket, and sends it to the cookie's app on its worker pod. <code>/__preview/view</code> sets the cookie in exchange for a view token another service mints; the proxy verifies the cookie and reads the appId. The app is served at the root of the preview host, so its absolute links such as <code>/css/…</code> keep working.</td></tr>
               <tr><td>preview + browser API</td><td>Server</td><td>The endpoints appx calls. Finds the app's worker, for a session through its row's appId, and forwards each call to that worker's internal API. The worker writes the rows.</td></tr>
               <tr><td>Placement controller</td><td>Server</td><td>A module both of the above use: appId → worker pod, through Redis.</td></tr>
-              <tr><td>Internal API</td><td>Worker</td><td><code>/internal/preview/*</code> and <code>/internal/browser/*</code>. Drives this pod's sandbox and Chromium.</td></tr>
+              <tr><td>Internal API</td><td>Worker</td><td><code>/internal/sandbox/*</code> and <code>/internal/chromium/*</code>. Drives this pod's sandbox and Chromium.</td></tr>
               <tr><td>Port forwarder</td><td>Worker</td><td>On the pod's own port, 4002. Hands <code>&lt;appId&gt;</code> traffic to <code>localhost:&lt;port&gt;</code>.</td></tr>
               <tr><td>Sandbox</td><td>Worker</td><td>Runs each app's dev server on a port from <code>PREVIEW_PORT_MIN</code>–<code>MAX</code>, bound to 127.0.0.1.</td></tr>
-              <tr><td>Chromium</td><td>Worker</td><td>The <code>core/browser</code> plugin: one Chromium in its own network namespace, one page per session. See <a href="#browser-sessions">Browser sessions</a>.</td></tr>
+              <tr><td>Chromium</td><td>Worker</td><td>The chromium plugin, <code>plugins/chromium.ts</code>: one Chromium in its own network namespace, one page per session. See <a href="#browser-sessions">Browsers</a>.</td></tr>
               <tr><td>Stats reporter</td><td>Worker</td><td>Writes this pod's load and address to Redis every 10 s.</td></tr>
             </tbody>
           </table>
@@ -187,7 +187,7 @@
             </thead>
             <tbody>
               <tr><td>A worker pod is added</td><td>It starts reporting and takes new apps by headroom. Apps already placed stay where they are.</td></tr>
-              <tr><td>A worker pod dies</td><td>Its <code>pods</code> key expires within 30 s. The next call for each of its apps places the app on another worker; the preview restarts there and browser sessions reopen from their rows.</td></tr>
+              <tr><td>A worker pod dies</td><td>Its <code>pods</code> key expires within 30 s. The next call for each of its apps places the app on another worker; the preview restarts there. Its browser sessions are gone; each one's next call closes it and answers <code>404</code>.</td></tr>
               <tr><td>The server pod restarts</td><td>Rows are in Postgres and placements in Redis, so nothing is lost. Previews and pages on the workers keep running.</td></tr>
               <tr><td>Two calls place one app at once</td><td><code>SET NX</code> lets one win; the other reads the winner.</td></tr>
               <tr><td>Network</td><td>A NetworkPolicy lets only the server pod reach the workers' port 4002. Sandbox ports bind to 127.0.0.1 and never leave the pod.</td></tr>
@@ -725,7 +725,7 @@
     }
   }
 }</code></pre>
-<h4>Errors · 400, 404, 503, 504</h4>
+<h4>Errors · 400, 404, 504</h4>
 <pre class="schema"><code>{&quot;type&quot;:&quot;object&quot;,&quot;required&quot;:[&quot;error&quot;],&quot;properties&quot;:{&quot;error&quot;:{&quot;type&quot;:&quot;string&quot;}}}</code></pre>
   </div>
 </details>
@@ -809,7 +809,7 @@
     }
   }
 }</code></pre>
-<h4>Errors · 400, 404, 503, 504</h4>
+<h4>Errors · 400, 404, 504</h4>
 <pre class="schema"><code>{&quot;type&quot;:&quot;object&quot;,&quot;required&quot;:[&quot;error&quot;],&quot;properties&quot;:{&quot;error&quot;:{&quot;type&quot;:&quot;string&quot;}}}</code></pre>
   </div>
 </details>
@@ -895,7 +895,7 @@
     }
   }
 }</code></pre>
-<h4>Errors · 400, 404, 503, 504</h4>
+<h4>Errors · 400, 404, 504</h4>
 <pre class="schema"><code>{&quot;type&quot;:&quot;object&quot;,&quot;required&quot;:[&quot;error&quot;],&quot;properties&quot;:{&quot;error&quot;:{&quot;type&quot;:&quot;string&quot;}}}</code></pre>
   </div>
 </details>
@@ -990,7 +990,7 @@
     }
   }
 }</code></pre>
-<h4>Errors · 400, 404, 503, 504</h4>
+<h4>Errors · 400, 404, 504</h4>
 <pre class="schema"><code>{&quot;type&quot;:&quot;object&quot;,&quot;required&quot;:[&quot;error&quot;],&quot;properties&quot;:{&quot;error&quot;:{&quot;type&quot;:&quot;string&quot;}}}</code></pre>
   </div>
 </details>
@@ -1020,7 +1020,7 @@
     }
   }
 }</code></pre>
-<h4>Errors · 400, 404, 503, 504</h4>
+<h4>Errors · 400, 404, 504</h4>
 <pre class="schema"><code>{&quot;type&quot;:&quot;object&quot;,&quot;required&quot;:[&quot;error&quot;],&quot;properties&quot;:{&quot;error&quot;:{&quot;type&quot;:&quot;string&quot;}}}</code></pre>
   </div>
 </details>
@@ -1077,7 +1077,7 @@
   </div>
 </details>
 <details class="route">
-  <summary><span class="method post">POST</span><code class="route-path">/v1/browser/session/:id/close</code><span class="route-summary">Close the session on its worker and delete its row</span></summary>
+  <summary><span class="method post">POST</span><code class="route-path">/v1/browser/session/:id/close</code><span class="route-summary">Close the session on its worker and set its status to closed</span></summary>
   <div class="route-body">
 <h4>Response 200</h4>
 <pre class="schema"><code>{
@@ -1103,13 +1103,13 @@
         </section>
 
         <section class="doc-section" id="sandbox">
-          <h2>Application sandboxes</h2>
-          <p>Each worker pod runs the sandboxes of the workspaces placed on it, one per workspace. The <code>core/sandbox</code> plugin owns them in memory. The <code>workspaces</code> row records each workspace's status, and only the worker running its sandbox writes it.</p>
+          <h2>Sandboxes</h2>
+          <p>Each worker pod runs the sandboxes of the workspaces placed on it, one per workspace. The sandbox plugin, <code>plugins/sandbox.ts</code>, owns them in memory. The <code>workspaces</code> row records each workspace's status, and only the worker running its sandbox writes it.</p>
           <p>The internal API and the port forwarder share one port, 4002. A request carrying <code>x-workspace-app: &lt;workspaceId&gt;</code> is app traffic, whatever its path: the forwarder takes it over before routing and sends it to the workspace, so an app's own <code>/internal/…</code> routes reach the app. Any other request is an internal API call. A WebSocket upgrade with the header is forwarded the same way; one without it is refused.</p>
 
           <figure>
             <div class="diagram">
-              <svg class="c4" viewBox="0 0 1000 720" role="img" aria-label="A sandbox on a worker pod. Calls come from the server pod's sandbox API to the worker's internal API: launch, exec, stop or logs with a workspaceId. App traffic comes from the preview proxy to the worker's port forwarder on port 4002, the same port as the internal API: a request with the x-workspace-app header is taken over before routing and forwarded, and any other request is an internal API call. The internal API, at /internal/sandbox, drives the core/sandbox plugin, workspace.sandbox. Its sandbox manager maps a workspaceId to its sandbox in memory, runs one launch at a time per workspace, and writes status and the saved launch to the workspace's row in Postgres. It takes a port from the pod's pool, 4100 to 4149, and spawns the sandbox under bubblewrap. The sweeper stops sandboxes idle for 15 minutes. The port forwarder sends a workspace's traffic to 127.0.0.1 on its port, and when the workspace has no running sandbox it wakes it through the manager. Each sandbox has its own network namespace and holds the workspace's launch server, for example npm run dev, with PORT 3000 inside mapped to 127.0.0.1 on the pool port; and exec, sh -c with a 2 minute default and 4 minute maximum, returning the exit code and the last 16 KB of output. A sandbox mounts the workspace's folder from the shared workspace volume at /workspace, and its deps folders, such as node_modules, vendor or .venv, from the deps cache at SANDBOX_DEPS_ROOT. Its only egress is the internet, including the npm registry, through the network controller, which applies each command's allow and deny lists. Other workspaces get one sandbox each on the same pod.">
+              <svg class="c4" viewBox="0 0 1000 720" role="img" aria-label="A sandbox on a worker pod. Calls come from the server pod's sandbox API to the worker's internal API: launch, exec, stop or logs with a workspaceId. App traffic comes from the preview proxy to the worker's port forwarder on port 4002, the same port as the internal API: a request with the x-workspace-app header is taken over before routing and forwarded, and any other request is an internal API call. The internal API, at /internal/sandbox from services/sandbox/routes, drives the sandbox plugin in plugins/sandbox.ts, app.sandbox. Its sandbox manager maps a workspaceId to its sandbox in memory, runs one launch at a time per workspace, and writes status and the saved launch to the workspace's row in Postgres. It takes a port from the pod's pool, 4100 to 4149, and spawns the sandbox under bubblewrap. The sweeper stops sandboxes idle for 15 minutes. The port forwarder sends a workspace's traffic to 127.0.0.1 on its port, and when the workspace has no running sandbox it wakes it through the manager. Each sandbox has its own network namespace and holds the workspace's launch server, for example npm run dev, with PORT 3000 inside mapped to 127.0.0.1 on the pool port; and exec, sh -c with a 2 minute default and 4 minute maximum, returning the exit code and the last 16 KB of output. A sandbox mounts the workspace's folder from the shared workspace volume at /workspace, and its deps folders, such as node_modules, vendor or .venv, from the deps cache at SANDBOX_DEPS_ROOT. Its only egress is the internet, including the npm registry, through the network controller, which applies each command's allow and deny lists. Other workspaces get one sandbox each on the same pod.">
                 <defs>
                   <marker id="sb-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
                     <path d="M0 0L10 5L0 10z" class="arrowhead"/>
@@ -1122,10 +1122,10 @@
 
                 <rect class="component" x="100" y="120" width="580" height="44" rx="6"/>
                 <text class="on-light name" x="390" y="139" text-anchor="middle">internal API</text>
-                <text class="on-light type" x="390" y="155" text-anchor="middle">[:4002, no x-workspace-app · /internal/sandbox/*]</text>
+                <text class="on-light type" x="390" y="155" text-anchor="middle">[:4002, no x-workspace-app · /internal/sandbox/* · services/sandbox/routes]</text>
 
                 <rect class="group" x="100" y="184" width="580" height="492" rx="8"/>
-                <text class="label name" x="668" y="668" text-anchor="end">core/sandbox plugin · app.sandbox</text>
+                <text class="label name" x="668" y="668" text-anchor="end">plugins/sandbox.ts · app.sandbox</text>
 
                 <rect class="component" x="116" y="200" width="548" height="90" rx="8"/>
                 <text class="on-light name" x="390" y="222" text-anchor="middle">sandbox manager</text>
@@ -1460,11 +1460,11 @@
         </section>
 
         <section class="doc-section" id="browser-sessions">
-          <h2>Browser sessions</h2>
+          <h2>Browsers</h2>
 
           <figure>
             <div class="diagram">
-              <svg class="c4" viewBox="0 0 1000 802" role="img" aria-label="Browser sessions on a worker pod. Calls come from the server pod's browser API to the worker's internal API: session, navigate, read, click, type, screenshot, run or close. The internal API drives the core/browser plugin, app.browser, which owns the session manager and the sweeper. The session manager starts one Chromium in its own network namespace and restarts it if it exits. It maps a sessionId to its page in memory. Create checks the caps, inserts the row and opens a page. A call returns 404 if the row's lastUsedAt is over 30 minutes old, reopens the page from the row if it is not in memory, runs one call at a time per session, and writes appUrl, storageState and lastUsedAt back. Close closes the context and deletes the row. It reads and writes the session row in Postgres browser_sessions, an app having many, and reads the app's preview port from previews. Over CDP it opens and closes pages in Chromium, where each session has its own context and one page. Its ops turn navigate, read, click, type and screenshot into code. For every call it hands the code, its own ops or the LLM's, and the page's id to a runner, a Node process under bubblewrap started per call, with no secrets and a network that reaches only Chromium's CDP port. Chromium's namespace lets out only public addresses and the pool ports 4100 to 4149 on the pod's loopback, and its files hold no workspace and no secrets. The sweeper runs every minute and closes pages idle for 5 minutes. Every request a session's page makes also goes through the network rule on its context: public addresses and loopback on the app's own preview port are allowed, anything else is blocked. Allowed requests reach public sites and the app's preview at localhost:port.">
+              <svg class="c4" viewBox="0 0 1000 802" role="img" aria-label="Browser sessions on a worker pod. Calls come from the server pod's /api/v1/browser to the worker's internal API: create, navigate, read, click, type, screenshot, run or close. The internal API, at /internal/chromium from services/chromium/routes, drives the chromium plugin in plugins/chromium.ts, app.chromium, which owns the session manager and the sweeper. The session manager starts one Chromium in its own network namespace and restarts it if it exits. It maps a session to its tab in memory; one session is one tab. Create inserts the row and opens a tab. A call returns 404 if the row's status is closed, closes the session and returns 404 if its tab is gone, runs one call at a time per session, and writes url, storageState and lastUsedAt back. Close saves the video if the session is recorded and sets the row's status to closed. It reads and writes the session row in Postgres browser_sessions, a workspace having many, or none for a session without one. Over CDP it opens and closes tabs in Chromium, where each session has its own context and one tab. Its ops turn navigate, read, click, type and screenshot, with their waitFor, into code. For every call it hands the code, its own ops or the caller's run code, and the tab's id to a runner, a Bun process under bubblewrap started per call, with no secrets and a network that reaches only Chromium's CDP port. Chromium's namespace lets out only public addresses and the pool ports 4100 to 4149 on the pod's loopback, and its files hold no workspace and no secrets. A recorded session's video and screenshots are saved into its workspace. The sweeper runs every minute and closes tabs idle for 5 minutes, ending recorded sessions. Every request a session's tab makes also goes through the network rule on its context: public addresses, and loopback on its own workspace's launch port, are allowed; anything else is blocked. Allowed requests reach public sites and the workspace's launch at localhost:port.">
                 <defs>
                   <marker id="bs-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
                     <path d="M0 0L10 5L0 10z" class="arrowhead"/>
@@ -1473,44 +1473,45 @@
 
                 <rect class="component" x="40" y="120" width="600" height="44" rx="6"/>
                 <text class="on-light name" x="340" y="139" text-anchor="middle">internal API</text>
-                <text class="on-light type" x="340" y="155" text-anchor="middle">[/internal/browser/* · drives app.browser]</text>
+                <text class="on-light type" x="340" y="155" text-anchor="middle">[/internal/chromium/* · services/chromium/routes]</text>
 
                 <rect class="group" x="40" y="184" width="600" height="592" rx="8"/>
-                <text class="label name" x="52" y="752">core/browser plugin · app.browser</text>
+                <text class="label name" x="52" y="752">plugins/chromium.ts · app.chromium</text>
                 <text class="note" x="52" y="767">owns the session manager and the sweeper</text>
 
                 <rect class="component" x="56" y="200" width="568" height="182" rx="8"/>
                 <text class="on-light name" x="340" y="222" text-anchor="middle">session manager</text>
-                <text class="on-light type" x="340" y="239" text-anchor="middle">[sessionId → page · in memory]</text>
+                <text class="on-light type" x="340" y="239" text-anchor="middle">[session → tab · in memory]</text>
                 <text class="on-light type" x="72" y="262">start: Chromium, restart on exit</text>
-                <text class="on-light type" x="72" y="279">create: check caps, insert row, open page</text>
+                <text class="on-light type" x="72" y="279">create: insert row, open tab</text>
                 <text class="on-light type" x="72" y="296">call: row check → runner → write row</text>
-                <text class="on-light type" x="72" y="313">close: close context, delete row</text>
-                <text class="on-light type" x="356" y="262">lastUsedAt over 30 min → 404</text>
-                <text class="on-light type" x="356" y="279">reopens from row if not in memory</text>
+                <text class="on-light type" x="72" y="313">close: save video if recorded, status closed</text>
+                <text class="on-light type" x="356" y="262">status closed → 404</text>
+                <text class="on-light type" x="356" y="279">tab gone → close, 404</text>
                 <text class="on-light type" x="356" y="296">one call at a time per session</text>
-                <text class="on-light type" x="356" y="313">writes appUrl, storageState, lastUsedAt</text>
+                <text class="on-light type" x="356" y="313">writes url, storageState, lastUsedAt</text>
                 <rect x="72" y="326" width="536" height="44" rx="6" style="fill:none;stroke:var(--c4-on-light);stroke-opacity:0.45"/>
                 <text class="on-light name" x="340" y="345" text-anchor="middle">ops</text>
-                <text class="on-light type" x="340" y="361" text-anchor="middle">[navigate · read · click · type · screenshot · arbitrary → code]</text>
+                <text class="on-light type" x="340" y="361" text-anchor="middle">[navigate · read · click · type · screenshot + waitFor · run → code]</text>
 
                 <rect class="group" x="56" y="432" width="320" height="288" rx="8"/>
                 <text class="label name" x="68" y="708">Chromium · one, shared</text>
                 <rect class="component" x="76" y="448" width="280" height="44" rx="6"/>
                 <text class="on-light name" x="216" y="467" text-anchor="middle">session A</text>
-                <text class="on-light type" x="216" y="483" text-anchor="middle">own context + one page</text>
+                <text class="on-light type" x="216" y="483" text-anchor="middle">own context + one tab</text>
                 <rect class="component" x="76" y="502" width="280" height="44" rx="6"/>
                 <text class="on-light name" x="216" y="521" text-anchor="middle">session B</text>
-                <text class="on-light type" x="216" y="537" text-anchor="middle">own context + one page</text>
+                <text class="on-light type" x="216" y="537" text-anchor="middle">own context + one tab</text>
                 <rect class="tbd" x="76" y="556" width="280" height="36" rx="6"/>
-                <text class="note" x="216" y="579" text-anchor="middle">one per session, any app</text>
+                <text class="note" x="216" y="579" text-anchor="middle">one per session, any workspace or none</text>
                 <text class="note" x="76" y="622">own network namespace · pasta + nft</text>
                 <text class="note" x="76" y="638">out: public addresses + pool ports 4100–4149</text>
                 <text class="note" x="76" y="654">in: CDP only · bwrap: no workspace, no secrets</text>
+                <text class="note" x="76" y="670">record: video + screenshots → workspace</text>
 
                 <rect class="component" x="400" y="432" width="224" height="84" rx="8"/>
                 <text class="on-light name" x="512" y="454" text-anchor="middle">runner</text>
-                <text class="on-light type" x="512" y="471" text-anchor="middle">[node · bwrap · one per call]</text>
+                <text class="on-light type" x="512" y="471" text-anchor="middle">[bun · bwrap · one per call]</text>
                 <text class="on-light type" x="512" y="490" text-anchor="middle">no secrets · own cgroup</text>
                 <text class="on-light type" x="512" y="506" text-anchor="middle">network: Chromium's CDP only</text>
 
@@ -1518,44 +1519,43 @@
                 <text class="on-light name" x="512" y="552" text-anchor="middle">Network rule</text>
                 <text class="on-light type" x="512" y="569" text-anchor="middle">[guard.ts · on each context]</text>
                 <text class="on-light type" x="512" y="590" text-anchor="middle">public address: allowed</text>
-                <text class="on-light type" x="512" y="606" text-anchor="middle">loopback + app's preview</text>
-                <text class="on-light type" x="512" y="622" text-anchor="middle">port: allowed</text>
+                <text class="on-light type" x="512" y="606" text-anchor="middle">loopback + its workspace's</text>
+                <text class="on-light type" x="512" y="622" text-anchor="middle">launch port: allowed</text>
                 <text class="on-light type" x="512" y="638" text-anchor="middle">anything else: blocked</text>
 
                 <rect class="component" x="400" y="662" width="224" height="58" rx="8"/>
                 <text class="on-light name" x="512" y="681" text-anchor="middle">sweeper</text>
                 <text class="on-light type" x="512" y="698" text-anchor="middle">[every minute]</text>
-                <text class="on-light type" x="512" y="713" text-anchor="middle">idle 5 min → close page</text>
+                <text class="on-light type" x="512" y="713" text-anchor="middle">idle 5 min → close session</text>
 
                 <rect class="external" x="740" y="200" width="240" height="90" rx="8"/>
                 <text class="on-dark name" x="860" y="226" text-anchor="middle">Postgres</text>
                 <text class="on-dark type" x="860" y="243" text-anchor="middle">browser_sessions: one row</text>
-                <text class="on-dark type" x="860" y="259" text-anchor="middle">per session, an app has many</text>
-                <text class="on-dark type" x="860" y="275" text-anchor="middle">previews: the app's port</text>
+                <text class="on-dark type" x="860" y="259" text-anchor="middle">per session, a workspace has many</text>
+                <text class="on-dark type" x="860" y="275" text-anchor="middle">workspaceId may be null</text>
 
                 <rect class="external" x="740" y="549" width="240" height="80" rx="8"/>
                 <text class="on-dark name" x="860" y="573" text-anchor="middle">Websites</text>
                 <text class="on-dark type" x="860" y="590" text-anchor="middle">public sites</text>
-                <text class="on-dark type" x="860" y="606" text-anchor="middle">app preview · localhost:&lt;port&gt;</text>
+                <text class="on-dark type" x="860" y="606" text-anchor="middle">workspace launch · localhost:&lt;port&gt;</text>
 
                 <line class="edge" x1="340" y1="16" x2="340" y2="118" marker-end="url(#bs-arrow)"/>
-                <text class="edge-label" x="348" y="40">session · navigate · read · click</text>
+                <text class="edge-label" x="348" y="40">create · navigate · read · click</text>
                 <text class="edge-label" x="348" y="54">type · screenshot · run · close</text>
-                <text class="note" x="348" y="70">from the server pod's browser API</text>
+                <text class="note" x="348" y="70">from the server pod's /api/v1/browser</text>
 
                 <line class="edge" x1="340" y1="164" x2="340" y2="198" marker-end="url(#bs-arrow)"/>
 
                 <line class="edge" x1="624" y1="245" x2="738" y2="245" marker-end="url(#bs-arrow)"/>
                 <text class="edge-label halo" x="681" y="237" text-anchor="middle">row by sessionId</text>
-                <text class="note" x="681" y="261" text-anchor="middle">+ the app's port</text>
-
+                
                 <line class="edge" x1="216" y1="382" x2="216" y2="430" marker-end="url(#bs-arrow)"/>
                 <text class="edge-label" x="224" y="400">CDP · tab management</text>
                 <text class="note" x="224" y="413">open · close · network rule</text>
-                <text class="note" x="224" y="426">save appUrl, storageState</text>
+                <text class="note" x="224" y="426">save url, storageState</text>
 
                 <line class="edge" x1="512" y1="382" x2="512" y2="430" marker-end="url(#bs-arrow)"/>
-                <text class="edge-label" x="520" y="400">page ops</text>
+                <text class="edge-label" x="520" y="400">tab ops</text>
                 <text class="note" x="520" y="413">each op, as code</text>
 
                 <line class="edge" x1="400" y1="474" x2="378" y2="474" marker-end="url(#bs-arrow)"/>
@@ -1566,61 +1566,99 @@
                 <line class="edge" x1="400" y1="691" x2="378" y2="691" marker-end="url(#bs-arrow)"/>
               </svg>
             </div>
-            <figcaption>C4 component diagram: browser sessions on a worker pod. Solid arrows are calls. Grey boxes are outside preview-runner.</figcaption>
+            <figcaption>C4 component diagram: browser sessions on a worker pod. Solid arrows are calls. Grey boxes are outside code-harness.</figcaption>
           </figure>
 
           <h3>Endpoints</h3>
 <div class="routes">
 <details class="route">
-  <summary><span class="method post">POST</span><code class="route-path">/internal/browser/session</code><span class="route-summary">Open a session for the app: its own context and one page</span></summary>
+  <summary><span class="method post">POST</span><code class="route-path">/internal/chromium/session</code><span class="route-summary">Open a session: its own context and one tab</span></summary>
   <div class="route-body">
 <h4>Request body</h4>
 <pre class="schema"><code>{
   &quot;type&quot;: &quot;object&quot;,
   &quot;required&quot;: [
-    &quot;appId&quot;
+    &quot;userId&quot;,
+    &quot;record&quot;
   ],
   &quot;properties&quot;: {
-    &quot;appId&quot;: {
-      &quot;minLength&quot;: 1,
-      &quot;maxLength&quot;: 64,
-      &quot;type&quot;: &quot;string&quot;
+    &quot;userId&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;format&quot;: &quot;uuid&quot;
+    },
+    &quot;workspaceId&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;format&quot;: &quot;uuid&quot;
+    },
+    &quot;record&quot;: {
+      &quot;type&quot;: &quot;boolean&quot;,
+      &quot;default&quot;: false
     }
   }
 }</code></pre>
-<h4>Response 200</h4>
+<h4>Response 201</h4>
 <pre class="schema"><code>{
   &quot;type&quot;: &quot;object&quot;,
   &quot;required&quot;: [
-    &quot;sessionId&quot;,
-    &quot;appId&quot;,
-    &quot;previewUrl&quot;
+    &quot;id&quot;,
+    &quot;workspaceId&quot;,
+    &quot;record&quot;,
+    &quot;status&quot;,
+    &quot;userId&quot;,
+    &quot;createdAt&quot;,
+    &quot;lastUsedAt&quot;
   ],
   &quot;properties&quot;: {
-    &quot;sessionId&quot;: {
-      &quot;type&quot;: &quot;string&quot;
+    &quot;id&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;format&quot;: &quot;uuid&quot;
     },
-    &quot;appId&quot;: {
-      &quot;type&quot;: &quot;string&quot;
-    },
-    &quot;previewUrl&quot;: {
+    &quot;workspaceId&quot;: {
       &quot;anyOf&quot;: [
         {
-          &quot;type&quot;: &quot;string&quot;
+          &quot;type&quot;: &quot;string&quot;,
+          &quot;format&quot;: &quot;uuid&quot;
         },
         {
           &quot;type&quot;: &quot;null&quot;
         }
       ]
+    },
+    &quot;record&quot;: {
+      &quot;type&quot;: &quot;boolean&quot;
+    },
+    &quot;status&quot;: {
+      &quot;anyOf&quot;: [
+        {
+          &quot;type&quot;: &quot;string&quot;,
+          &quot;const&quot;: &quot;alive&quot;
+        },
+        {
+          &quot;type&quot;: &quot;string&quot;,
+          &quot;const&quot;: &quot;closed&quot;
+        }
+      ]
+    },
+    &quot;userId&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;format&quot;: &quot;uuid&quot;
+    },
+    &quot;createdAt&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;format&quot;: &quot;date-time&quot;
+    },
+    &quot;lastUsedAt&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;format&quot;: &quot;date-time&quot;
     }
   }
 }</code></pre>
-<h4>Errors · 400, 429, 503</h4>
+<h4>Errors · 400, 404, 503</h4>
 <pre class="schema"><code>{&quot;type&quot;:&quot;object&quot;,&quot;required&quot;:[&quot;error&quot;],&quot;properties&quot;:{&quot;error&quot;:{&quot;type&quot;:&quot;string&quot;}}}</code></pre>
   </div>
 </details>
 <details class="route">
-  <summary><span class="method post">POST</span><code class="route-path">/internal/browser/navigate</code><span class="route-summary">Go to a URL; a path such as /orders opens the app&#x27;s preview</span></summary>
+  <summary><span class="method post">POST</span><code class="route-path">/internal/chromium/navigate</code><span class="route-summary">Go to a URL, then wait for until; a path such as /orders opens the workspace&#x27;s launch</span></summary>
   <div class="route-body">
 <h4>Request body</h4>
 <pre class="schema"><code>{
@@ -1631,14 +1669,35 @@
   ],
   &quot;properties&quot;: {
     &quot;sessionId&quot;: {
-      &quot;minLength&quot;: 1,
-      &quot;maxLength&quot;: 21,
-      &quot;type&quot;: &quot;string&quot;
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;format&quot;: &quot;uuid&quot;
     },
     &quot;url&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
       &quot;minLength&quot;: 1,
-      &quot;maxLength&quot;: 4000,
-      &quot;type&quot;: &quot;string&quot;
+      &quot;maxLength&quot;: 4000
+    },
+    &quot;until&quot;: {
+      &quot;type&quot;: &quot;object&quot;,
+      &quot;required&quot;: [
+        &quot;timeoutMs&quot;
+      ],
+      &quot;properties&quot;: {
+        &quot;selector&quot;: {
+          &quot;type&quot;: &quot;string&quot;,
+          &quot;minLength&quot;: 1
+        },
+        &quot;text&quot;: {
+          &quot;type&quot;: &quot;string&quot;,
+          &quot;minLength&quot;: 1
+        },
+        &quot;timeoutMs&quot;: {
+          &quot;type&quot;: &quot;integer&quot;,
+          &quot;default&quot;: 10000,
+          &quot;minimum&quot;: 1,
+          &quot;maximum&quot;: 60000
+        }
+      }
     }
   }
 }</code></pre>
@@ -1730,12 +1789,12 @@
     }
   }
 }</code></pre>
-<h4>Errors · 400, 404, 503, 504</h4>
+<h4>Errors · 400, 404, 504</h4>
 <pre class="schema"><code>{&quot;type&quot;:&quot;object&quot;,&quot;required&quot;:[&quot;error&quot;],&quot;properties&quot;:{&quot;error&quot;:{&quot;type&quot;:&quot;string&quot;}}}</code></pre>
   </div>
 </details>
 <details class="route">
-  <summary><span class="method post">POST</span><code class="route-path">/internal/browser/read</code><span class="route-summary">Read the page&#x27;s text and the refs it can act on</span></summary>
+  <summary><span class="method post">POST</span><code class="route-path">/internal/chromium/read</code><span class="route-summary">Wait for waitFor, then read the page&#x27;s text and the refs it can act on</span></summary>
   <div class="route-body">
 <h4>Request body</h4>
 <pre class="schema"><code>{
@@ -1745,14 +1804,35 @@
   ],
   &quot;properties&quot;: {
     &quot;sessionId&quot;: {
-      &quot;minLength&quot;: 1,
-      &quot;maxLength&quot;: 21,
-      &quot;type&quot;: &quot;string&quot;
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;format&quot;: &quot;uuid&quot;
     },
     &quot;maxChars&quot;: {
+      &quot;type&quot;: &quot;integer&quot;,
       &quot;minimum&quot;: 1,
-      &quot;maximum&quot;: 100000,
-      &quot;type&quot;: &quot;integer&quot;
+      &quot;maximum&quot;: 100000
+    },
+    &quot;waitFor&quot;: {
+      &quot;type&quot;: &quot;object&quot;,
+      &quot;required&quot;: [
+        &quot;timeoutMs&quot;
+      ],
+      &quot;properties&quot;: {
+        &quot;selector&quot;: {
+          &quot;type&quot;: &quot;string&quot;,
+          &quot;minLength&quot;: 1
+        },
+        &quot;text&quot;: {
+          &quot;type&quot;: &quot;string&quot;,
+          &quot;minLength&quot;: 1
+        },
+        &quot;timeoutMs&quot;: {
+          &quot;type&quot;: &quot;integer&quot;,
+          &quot;default&quot;: 10000,
+          &quot;minimum&quot;: 1,
+          &quot;maximum&quot;: 60000
+        }
+      }
     }
   }
 }</code></pre>
@@ -1822,12 +1902,12 @@
     }
   }
 }</code></pre>
-<h4>Errors · 400, 404, 503, 504</h4>
+<h4>Errors · 400, 404, 504</h4>
 <pre class="schema"><code>{&quot;type&quot;:&quot;object&quot;,&quot;required&quot;:[&quot;error&quot;],&quot;properties&quot;:{&quot;error&quot;:{&quot;type&quot;:&quot;string&quot;}}}</code></pre>
   </div>
 </details>
 <details class="route">
-  <summary><span class="method post">POST</span><code class="route-path">/internal/browser/click</code><span class="route-summary">Click the element with a ref</span></summary>
+  <summary><span class="method post">POST</span><code class="route-path">/internal/chromium/click</code><span class="route-summary">Wait for waitFor, then click the element with a ref</span></summary>
   <div class="route-body">
 <h4>Request body</h4>
 <pre class="schema"><code>{
@@ -1838,13 +1918,34 @@
   ],
   &quot;properties&quot;: {
     &quot;sessionId&quot;: {
-      &quot;minLength&quot;: 1,
-      &quot;maxLength&quot;: 21,
-      &quot;type&quot;: &quot;string&quot;
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;format&quot;: &quot;uuid&quot;
     },
     &quot;ref&quot;: {
-      &quot;minimum&quot;: 1,
-      &quot;type&quot;: &quot;integer&quot;
+      &quot;type&quot;: &quot;integer&quot;,
+      &quot;minimum&quot;: 1
+    },
+    &quot;waitFor&quot;: {
+      &quot;type&quot;: &quot;object&quot;,
+      &quot;required&quot;: [
+        &quot;timeoutMs&quot;
+      ],
+      &quot;properties&quot;: {
+        &quot;selector&quot;: {
+          &quot;type&quot;: &quot;string&quot;,
+          &quot;minLength&quot;: 1
+        },
+        &quot;text&quot;: {
+          &quot;type&quot;: &quot;string&quot;,
+          &quot;minLength&quot;: 1
+        },
+        &quot;timeoutMs&quot;: {
+          &quot;type&quot;: &quot;integer&quot;,
+          &quot;default&quot;: 10000,
+          &quot;minimum&quot;: 1,
+          &quot;maximum&quot;: 60000
+        }
+      }
     }
   }
 }</code></pre>
@@ -1914,12 +2015,12 @@
     }
   }
 }</code></pre>
-<h4>Errors · 400, 404, 503, 504</h4>
+<h4>Errors · 400, 404, 504</h4>
 <pre class="schema"><code>{&quot;type&quot;:&quot;object&quot;,&quot;required&quot;:[&quot;error&quot;],&quot;properties&quot;:{&quot;error&quot;:{&quot;type&quot;:&quot;string&quot;}}}</code></pre>
   </div>
 </details>
 <details class="route">
-  <summary><span class="method post">POST</span><code class="route-path">/internal/browser/type</code><span class="route-summary">Type into the element with a ref, then submit if asked</span></summary>
+  <summary><span class="method post">POST</span><code class="route-path">/internal/chromium/type</code><span class="route-summary">Wait for waitFor, then type into the element with a ref, then submit if asked</span></summary>
   <div class="route-body">
 <h4>Request body</h4>
 <pre class="schema"><code>{
@@ -1927,25 +2028,47 @@
   &quot;required&quot;: [
     &quot;sessionId&quot;,
     &quot;ref&quot;,
-    &quot;text&quot;
+    &quot;text&quot;,
+    &quot;submit&quot;
   ],
   &quot;properties&quot;: {
     &quot;sessionId&quot;: {
-      &quot;minLength&quot;: 1,
-      &quot;maxLength&quot;: 21,
-      &quot;type&quot;: &quot;string&quot;
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;format&quot;: &quot;uuid&quot;
     },
     &quot;ref&quot;: {
-      &quot;minimum&quot;: 1,
-      &quot;type&quot;: &quot;integer&quot;
+      &quot;type&quot;: &quot;integer&quot;,
+      &quot;minimum&quot;: 1
     },
     &quot;text&quot;: {
-      &quot;maxLength&quot;: 10000,
-      &quot;type&quot;: &quot;string&quot;
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;maxLength&quot;: 10000
     },
     &quot;submit&quot;: {
-      &quot;default&quot;: false,
-      &quot;type&quot;: &quot;boolean&quot;
+      &quot;type&quot;: &quot;boolean&quot;,
+      &quot;default&quot;: false
+    },
+    &quot;waitFor&quot;: {
+      &quot;type&quot;: &quot;object&quot;,
+      &quot;required&quot;: [
+        &quot;timeoutMs&quot;
+      ],
+      &quot;properties&quot;: {
+        &quot;selector&quot;: {
+          &quot;type&quot;: &quot;string&quot;,
+          &quot;minLength&quot;: 1
+        },
+        &quot;text&quot;: {
+          &quot;type&quot;: &quot;string&quot;,
+          &quot;minLength&quot;: 1
+        },
+        &quot;timeoutMs&quot;: {
+          &quot;type&quot;: &quot;integer&quot;,
+          &quot;default&quot;: 10000,
+          &quot;minimum&quot;: 1,
+          &quot;maximum&quot;: 60000
+        }
+      }
     }
   }
 }</code></pre>
@@ -2015,74 +2138,96 @@
     }
   }
 }</code></pre>
-<h4>Errors · 400, 404, 503, 504</h4>
+<h4>Errors · 400, 404, 504</h4>
 <pre class="schema"><code>{&quot;type&quot;:&quot;object&quot;,&quot;required&quot;:[&quot;error&quot;],&quot;properties&quot;:{&quot;error&quot;:{&quot;type&quot;:&quot;string&quot;}}}</code></pre>
   </div>
 </details>
 <details class="route">
-  <summary><span class="method post">POST</span><code class="route-path">/internal/browser/screenshot</code><span class="route-summary">Screenshot the page as a PNG</span></summary>
-  <div class="route-body">
-<h4>Request body</h4>
-<pre class="schema"><code>{
-  &quot;type&quot;: &quot;object&quot;,
-  &quot;required&quot;: [
-    &quot;sessionId&quot;
-  ],
-  &quot;properties&quot;: {
-    &quot;sessionId&quot;: {
-      &quot;minLength&quot;: 1,
-      &quot;maxLength&quot;: 21,
-      &quot;type&quot;: &quot;string&quot;
-    },
-    &quot;fullPage&quot;: {
-      &quot;default&quot;: false,
-      &quot;type&quot;: &quot;boolean&quot;
-    }
-  }
-}</code></pre>
-<h4>Response 200</h4>
-<pre class="schema"><code>{
-  &quot;type&quot;: &quot;object&quot;,
-  &quot;required&quot;: [
-    &quot;png&quot;
-  ],
-  &quot;properties&quot;: {
-    &quot;png&quot;: {
-      &quot;contentEncoding&quot;: &quot;base64&quot;,
-      &quot;type&quot;: &quot;string&quot;
-    }
-  }
-}</code></pre>
-<h4>Errors · 400, 404, 503, 504</h4>
-<pre class="schema"><code>{&quot;type&quot;:&quot;object&quot;,&quot;required&quot;:[&quot;error&quot;],&quot;properties&quot;:{&quot;error&quot;:{&quot;type&quot;:&quot;string&quot;}}}</code></pre>
-  </div>
-</details>
-<details class="route">
-  <summary><span class="method post">POST</span><code class="route-path">/internal/browser/run</code><span class="route-summary">Run Playwright code in the runner: the body of async (page) =&gt; …</span></summary>
+  <summary><span class="method post">POST</span><code class="route-path">/internal/chromium/screenshot</code><span class="route-summary">Wait for waitFor, then save a PNG of a recorded session into its workspace</span></summary>
   <div class="route-body">
 <h4>Request body</h4>
 <pre class="schema"><code>{
   &quot;type&quot;: &quot;object&quot;,
   &quot;required&quot;: [
     &quot;sessionId&quot;,
-    &quot;code&quot;
+    &quot;fullPage&quot;
   ],
   &quot;properties&quot;: {
     &quot;sessionId&quot;: {
-      &quot;minLength&quot;: 1,
-      &quot;maxLength&quot;: 21,
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;format&quot;: &quot;uuid&quot;
+    },
+    &quot;fullPage&quot;: {
+      &quot;type&quot;: &quot;boolean&quot;,
+      &quot;default&quot;: false
+    },
+    &quot;waitFor&quot;: {
+      &quot;type&quot;: &quot;object&quot;,
+      &quot;required&quot;: [
+        &quot;timeoutMs&quot;
+      ],
+      &quot;properties&quot;: {
+        &quot;selector&quot;: {
+          &quot;type&quot;: &quot;string&quot;,
+          &quot;minLength&quot;: 1
+        },
+        &quot;text&quot;: {
+          &quot;type&quot;: &quot;string&quot;,
+          &quot;minLength&quot;: 1
+        },
+        &quot;timeoutMs&quot;: {
+          &quot;type&quot;: &quot;integer&quot;,
+          &quot;default&quot;: 10000,
+          &quot;minimum&quot;: 1,
+          &quot;maximum&quot;: 60000
+        }
+      }
+    }
+  }
+}</code></pre>
+<h4>Response 201</h4>
+<p>The PNG's path in the workspace, <code>screenshot/&lt;sessionId&gt;-&lt;time&gt;.png</code>.</p>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;path&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;path&quot;: {
       &quot;type&quot;: &quot;string&quot;
+    }
+  }
+}</code></pre>
+<h4>Errors · 400, 404, 409, 504</h4>
+<pre class="schema"><code>{&quot;type&quot;:&quot;object&quot;,&quot;required&quot;:[&quot;error&quot;],&quot;properties&quot;:{&quot;error&quot;:{&quot;type&quot;:&quot;string&quot;}}}</code></pre>
+  </div>
+</details>
+<details class="route">
+  <summary><span class="method post">POST</span><code class="route-path">/internal/chromium/run</code><span class="route-summary">Run Playwright code in the runner: the body of async (page) =&gt; …</span></summary>
+  <div class="route-body">
+<h4>Request body</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;sessionId&quot;,
+    &quot;code&quot;,
+    &quot;timeoutMs&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;sessionId&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;format&quot;: &quot;uuid&quot;
     },
     &quot;code&quot;: {
+      &quot;type&quot;: &quot;string&quot;,
       &quot;minLength&quot;: 1,
-      &quot;maxLength&quot;: 100000,
-      &quot;type&quot;: &quot;string&quot;
+      &quot;maxLength&quot;: 100000
     },
     &quot;timeoutMs&quot;: {
-      &quot;minimum&quot;: 1000,
-      &quot;maximum&quot;: 120000,
+      &quot;type&quot;: &quot;integer&quot;,
       &quot;default&quot;: 60000,
-      &quot;type&quot;: &quot;integer&quot;
+      &quot;minimum&quot;: 1000,
+      &quot;maximum&quot;: 120000
     }
   }
 }</code></pre>
@@ -2111,12 +2256,12 @@
     }
   }
 }</code></pre>
-<h4>Errors · 400, 404, 503</h4>
+<h4>Errors · 400, 404</h4>
 <pre class="schema"><code>{&quot;type&quot;:&quot;object&quot;,&quot;required&quot;:[&quot;error&quot;],&quot;properties&quot;:{&quot;error&quot;:{&quot;type&quot;:&quot;string&quot;}}}</code></pre>
   </div>
 </details>
 <details class="route">
-  <summary><span class="method post">POST</span><code class="route-path">/internal/browser/close</code><span class="route-summary">Close the session&#x27;s context and delete its row</span></summary>
+  <summary><span class="method post">POST</span><code class="route-path">/internal/chromium/close</code><span class="route-summary">Close the session&#x27;s context, save a recorded session&#x27;s video, and set its status to closed</span></summary>
   <div class="route-body">
 <h4>Request body</h4>
 <pre class="schema"><code>{
@@ -2126,28 +2271,13 @@
   ],
   &quot;properties&quot;: {
     &quot;sessionId&quot;: {
-      &quot;minLength&quot;: 1,
-      &quot;maxLength&quot;: 21,
-      &quot;type&quot;: &quot;string&quot;
+      &quot;type&quot;: &quot;string&quot;,
+      &quot;format&quot;: &quot;uuid&quot;
     }
   }
 }</code></pre>
-<h4>Response 200</h4>
-<pre class="schema"><code>{
-  &quot;type&quot;: &quot;object&quot;,
-  &quot;required&quot;: [
-    &quot;sessionId&quot;,
-    &quot;closed&quot;
-  ],
-  &quot;properties&quot;: {
-    &quot;sessionId&quot;: {
-      &quot;type&quot;: &quot;string&quot;
-    },
-    &quot;closed&quot;: {
-      &quot;type&quot;: &quot;boolean&quot;
-    }
-  }
-}</code></pre>
+<h4>Response 204</h4>
+<p>No body.</p>
 <h4>Errors · 400, 404</h4>
 <pre class="schema"><code>{&quot;type&quot;:&quot;object&quot;,&quot;required&quot;:[&quot;error&quot;],&quot;properties&quot;:{&quot;error&quot;:{&quot;type&quot;:&quot;string&quot;}}}</code></pre>
   </div>
@@ -2160,18 +2290,17 @@
               <tr><th>Event</th><th>What happens</th></tr>
             </thead>
             <tbody>
-              <tr><td>A worker pod starts</td><td>Its <code>core/browser</code> plugin starts the session manager, which starts its one Chromium in its own confinement and connects to it over CDP. Then the plugin starts the sweeper.</td></tr>
-              <tr><td>Create</td><td>Check the caps per app and per host, counting sessions used in the last 30 min → insert the row with the app's worker pod as host → open a context with the network rule and one page on that pod.</td></tr>
-              <tr><td>Call, page in memory</td><td>Load the row → forward to its worker pod → run the call's ops code in a runner, one call at a time per session → write appUrl, storageState, lastUsedAt.</td></tr>
-              <tr><td>Call, page not in memory</td><td>Open a context from the row's storageState and go to its appUrl → then the call as above. Concurrent calls wait for the same open.</td></tr>
-              <tr><td>Call, lastUsedAt over 30 min old</td><td><code>404 session_not_found</code>. The row is kept.</td></tr>
-              <tr><td><code>run</code></td><td>Start a runner with the LLM's code and the page's id → it connects to Chromium over CDP, finds the page, runs <code>async (page) =&gt; …</code> and prints the result → write appUrl, storageState, lastUsedAt. It holds the session's turn, so no other call runs on the page meanwhile.</td></tr>
-              <tr><td><code>run</code> times out</td><td>Kill the runner → close the session's context → the next call reopens it from the row. The run answers with the timeout in its <code>error</code>; any other op answers <code>504 call_timed_out</code>.</td></tr>
-              <tr><td>Idle, 5 min without a call</td><td>The plugin's sweeper closes the session's context and page. The row stays; the next call reopens it from the row.</td></tr>
-              <tr><td>Close</td><td>Close the context → delete the row.</td></tr>
-              <tr><td>Chromium exits</td><td>The session manager starts a new one and reconnects. Pages in memory are dropped; each session's next call reopens it from its row. Until it's back, calls get <code>503 browser_unavailable</code>.</td></tr>
-              <tr><td>A worker pod restarts or dies</td><td>Its Chromium and pages are gone → each session's next call reopens it from its row, on the worker pod the app is placed on.</td></tr>
-              <tr><td>A worker pod shuts down</td><td>Its plugin stops the sweeper and closes Chromium.</td></tr>
+              <tr><td>A worker pod starts</td><td>Its chromium plugin, <code>plugins/chromium.ts</code>, starts the session manager, which starts its one Chromium in its own confinement and connects to it over CDP. Then the plugin starts the sweeper.</td></tr>
+              <tr><td>Create</td><td>Insert the row with <code>status</code> <code>alive</code> → open a context with the network rule and one tab, filmed if <code>record</code>. While Chromium is restarting, <code>503</code>.</td></tr>
+              <tr><td>Call</td><td>Load the row → <code>404</code> if its <code>status</code> is <code>closed</code> → run the call's ops code in a runner, one call at a time per session → write url, storageState, lastUsedAt.</td></tr>
+              <tr><td>Call, tab gone</td><td>Close the session as below, without a video if the tab died with Chromium → <code>404</code>.</td></tr>
+              <tr><td><code>run</code></td><td>Start a runner with the LLM's code and the tab's id → it connects to Chromium over CDP, finds the tab, runs <code>async (page) =&gt; …</code> and prints the result → write url, storageState, lastUsedAt. It holds the session's turn, so no other call runs on the tab meanwhile.</td></tr>
+              <tr><td>A call times out</td><td>Kill the runner. The tab stays. The run answers with the timeout in its <code>error</code>; any other op answers <code>504</code>.</td></tr>
+              <tr><td>Close</td><td>Close the context → save the video into the workspace at <code>browser/&lt;id&gt;.webm</code> if recorded → set <code>status</code> to <code>closed</code>. The row is kept.</td></tr>
+              <tr><td>Idle, 5 min without a call</td><td>The plugin's sweeper closes the session as above.</td></tr>
+              <tr><td>Chromium exits</td><td>The session manager starts a new one and reconnects. Tabs in memory are dropped; each session's next call finds its tab gone. Until Chromium is back, creates get <code>503</code>.</td></tr>
+              <tr><td>A worker pod restarts or dies</td><td>Its Chromium and tabs are gone → each session's next call finds its tab gone.</td></tr>
+              <tr><td>A worker pod shuts down</td><td>Its plugin stops the sweeper and closes every session as above, then stops Chromium.</td></tr>
             </tbody>
           </table>
 

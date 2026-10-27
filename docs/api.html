@@ -799,6 +799,606 @@
 </details>
 </div>
         </section>
+
+        <section class="doc-section" id="browser">
+          <h2>Browser</h2>
+          <p>A session is one browser tab, kept between calls: its cookies, local storage and URL last until it is closed. Calls read the page as text and numbered refs, click and type by ref, and run Playwright code against the page. A session answers one call at a time; a second call waits for the first.</p>
+          <p>Created with a <code>workspaceId</code>, the session's tab can also reach that workspace's background process, and a URL that is a path, like <code>/orders</code>, opens it. Without one, the tab reaches public hosts only. Private addresses are never reachable, and one workspace's session can't reach another workspace's process.</p>
+          <p>Created with <code>record</code>, the session films its tab and can take screenshots, both saved into the workspace: the video at <code>browser/&lt;sessionId&gt;.webm</code> when the session closes, each screenshot at <code>screenshot/&lt;sessionId&gt;-&lt;time&gt;.png</code>. They are read with the <a href="#files">Files</a> routes. <code>record</code> needs a <code>workspaceId</code>.</p>
+          <p>A session with no call for 5 minutes is closed, the same as closing it: its tab is closed, a recorded session's video is saved, and its <code>status</code> becomes <code>closed</code>. A session whose tab is lost, because the browser restarted or the page closed itself, is closed by its next call. A closed session answers <code>404</code>. Every route here also answers <code>401</code> as described in <a href="#authentication">Authentication</a>.</p>
+
+          <h3>The session object</h3>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;id&quot;,
+    &quot;workspaceId&quot;,
+    &quot;record&quot;,
+    &quot;status&quot;,
+    &quot;createdBy&quot;,
+    &quot;createdAt&quot;,
+    &quot;lastUsedAt&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;id&quot;: {
+      &quot;format&quot;: &quot;uuid&quot;,
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;workspaceId&quot;: {
+      &quot;anyOf&quot;: [
+        {
+          &quot;format&quot;: &quot;uuid&quot;,
+          &quot;type&quot;: &quot;string&quot;
+        },
+        {
+          &quot;type&quot;: &quot;null&quot;
+        }
+      ]
+    },
+    &quot;record&quot;: {
+      &quot;type&quot;: &quot;boolean&quot;
+    },
+    &quot;status&quot;: {
+      &quot;enum&quot;: [
+        &quot;alive&quot;,
+        &quot;closed&quot;
+      ],
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;createdBy&quot;: {
+      &quot;type&quot;: &quot;object&quot;,
+      &quot;required&quot;: [
+        &quot;id&quot;,
+        &quot;email&quot;
+      ],
+      &quot;properties&quot;: {
+        &quot;id&quot;: {
+          &quot;format&quot;: &quot;uuid&quot;,
+          &quot;type&quot;: &quot;string&quot;
+        },
+        &quot;email&quot;: {
+          &quot;type&quot;: &quot;string&quot;
+        }
+      }
+    },
+    &quot;createdAt&quot;: {
+      &quot;format&quot;: &quot;date-time&quot;,
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;lastUsedAt&quot;: {
+      &quot;format&quot;: &quot;date-time&quot;,
+      &quot;type&quot;: &quot;string&quot;
+    }
+  }
+}</code></pre>
+
+          <h3 id="browser-waiting">Waiting</h3>
+          <p>Read, click, type and screenshot take a <code>waitFor</code>, and navigate an <code>until</code>, with the same fields: <code>selector</code> waits until an element matching that CSS selector is visible, and <code>text</code> until that text is on the page. With both, it waits for both. <code>timeoutMs</code> is how long to wait: 10 seconds by default, 1 minute at most. <code>run</code> has none; its code waits with Playwright itself.</p>
+          <p>Read, click, type and screenshot wait before they act, on the page that is there: wait for <code>waitFor</code>, then read, click, type or take the screenshot, and answer. When the wait runs out, the call answers <code>504</code> without acting. Navigate waits after: go to the URL, wait for the page to load, wait for <code>until</code> on the new page, and answer. When the wait runs out there, the tab has already moved, so navigate answers <code>200</code> with the page it landed on and <code>error</code> set to <code>waitFor timed out</code>.</p>
+          <p>Click and type answer with the page as it is just after the action, and a page that changes on its own afterwards, like an app loading data, may not be there yet. To see the result, follow with a read whose <code>waitFor</code> names it; its refs are the ones to use next.</p>
+
+          <h3>Endpoints</h3>
+<div class="routes">
+<details class="route">
+  <summary><span class="method post">POST</span><code class="route-path">/api/v1/browser</code><span class="route-summary">Open a session</span></summary>
+  <div class="route-body">
+<h4>Body</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;properties&quot;: {
+    &quot;workspaceId&quot;: {
+      &quot;format&quot;: &quot;uuid&quot;,
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;record&quot;: {
+      &quot;default&quot;: false,
+      &quot;type&quot;: &quot;boolean&quot;
+    }
+  }
+}</code></pre>
+<p><code>workspaceId</code> lets the tab reach that workspace's background process. <code>record</code> films the tab and allows screenshots; it needs <code>workspaceId</code>.</p>
+<h4>Response 201</h4>
+<p>The session object. Its tab starts on <code>about:blank</code>.</p>
+<h4>Errors · 400</h4>
+<p>The body doesn't match the schema, or <code>record</code> is set without <code>workspaceId</code>. Fastify's validation body: <code>statusCode</code>, <code>code</code>, <code>error</code>, <code>message</code>.</p>
+<h4>Errors · 404</h4>
+<p>No workspace has this id.</p>
+<h4>Errors · 429</h4>
+<p>Too many sessions are open for this workspace, or on the worker.</p>
+<h4>Errors · 503</h4>
+<p>The browser is restarting. Try again shortly.</p>
+  </div>
+</details>
+<details class="route">
+  <summary><span class="method post">POST</span><code class="route-path">/api/v1/browser/:id/navigate</code><span class="route-summary">Go to a URL</span></summary>
+  <div class="route-body">
+<h4>Params</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;id&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;id&quot;: {
+      &quot;format&quot;: &quot;uuid&quot;,
+      &quot;type&quot;: &quot;string&quot;
+    }
+  }
+}</code></pre>
+<h4>Body</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;url&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;url&quot;: {
+      &quot;minLength&quot;: 1,
+      &quot;maxLength&quot;: 4000,
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;until&quot;: {
+      &quot;type&quot;: &quot;object&quot;,
+      &quot;properties&quot;: {
+        &quot;selector&quot;: {
+          &quot;minLength&quot;: 1,
+          &quot;type&quot;: &quot;string&quot;
+        },
+        &quot;text&quot;: {
+          &quot;minLength&quot;: 1,
+          &quot;type&quot;: &quot;string&quot;
+        },
+        &quot;timeoutMs&quot;: {
+          &quot;default&quot;: 10000,
+          &quot;minimum&quot;: 1,
+          &quot;maximum&quot;: 60000,
+          &quot;type&quot;: &quot;integer&quot;
+        }
+      }
+    }
+  }
+}</code></pre>
+<p><code>until</code> is described in <a href="#browser-waiting">Waiting</a>.</p>
+<p>A <code>url</code> that is a path, like <code>/orders</code>, opens the workspace's background process.</p>
+<h4>Response 200</h4>
+<p>What the page shows once it has loaded, as <a href="#browser">read</a> returns it, with two more fields: <code>status</code>, the HTTP status of the response or <code>null</code>, and <code>error</code>, why the page didn't load, <code>waitFor timed out</code>, or <code>null</code>. A page that doesn't load, is blocked, or is a path with no workspace or no background process running still answers <code>200</code>; check <code>error</code>.</p>
+<pre class="schema"><code>{
+  &quot;status&quot;: {
+    &quot;anyOf&quot;: [
+      {
+        &quot;type&quot;: &quot;integer&quot;
+      },
+      {
+        &quot;type&quot;: &quot;null&quot;
+      }
+    ]
+  },
+  &quot;error&quot;: {
+    &quot;anyOf&quot;: [
+      {
+        &quot;type&quot;: &quot;string&quot;
+      },
+      {
+        &quot;type&quot;: &quot;null&quot;
+      }
+    ]
+  }
+}</code></pre>
+<h4>Errors · 404</h4>
+<p>No session has this id, or it is closed.</p>
+<h4>Errors · 504</h4>
+<p>The page didn't load in time.</p>
+  </div>
+</details>
+<details class="route">
+  <summary><span class="method post">POST</span><code class="route-path">/api/v1/browser/:id/read</code><span class="route-summary">Read the page's text and refs</span></summary>
+  <div class="route-body">
+<h4>Params</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;id&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;id&quot;: {
+      &quot;format&quot;: &quot;uuid&quot;,
+      &quot;type&quot;: &quot;string&quot;
+    }
+  }
+}</code></pre>
+<h4>Body</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;properties&quot;: {
+    &quot;maxChars&quot;: {
+      &quot;minimum&quot;: 1,
+      &quot;maximum&quot;: 100000,
+      &quot;type&quot;: &quot;integer&quot;
+    },
+    &quot;waitFor&quot;: {
+      &quot;type&quot;: &quot;object&quot;,
+      &quot;properties&quot;: {
+        &quot;selector&quot;: {
+          &quot;minLength&quot;: 1,
+          &quot;type&quot;: &quot;string&quot;
+        },
+        &quot;text&quot;: {
+          &quot;minLength&quot;: 1,
+          &quot;type&quot;: &quot;string&quot;
+        },
+        &quot;timeoutMs&quot;: {
+          &quot;default&quot;: 10000,
+          &quot;minimum&quot;: 1,
+          &quot;maximum&quot;: 60000,
+          &quot;type&quot;: &quot;integer&quot;
+        }
+      }
+    }
+  }
+}</code></pre>
+<p><code>waitFor</code> is described in <a href="#browser-waiting">Waiting</a>.</p>
+<p><code>maxChars</code> is how much of the page's text to return: 20,000 characters by default.</p>
+<h4>Response 200</h4>
+<p>What the page shows now.</p>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;title&quot;,
+    &quot;url&quot;,
+    &quot;text&quot;,
+    &quot;refs&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;title&quot;: {
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;url&quot;: {
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;text&quot;: {
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;refs&quot;: {
+      &quot;type&quot;: &quot;array&quot;,
+      &quot;items&quot;: {
+        &quot;type&quot;: &quot;object&quot;,
+        &quot;required&quot;: [
+          &quot;ref&quot;,
+          &quot;tag&quot;,
+          &quot;role&quot;,
+          &quot;name&quot;,
+          &quot;value&quot;,
+          &quot;placeholder&quot;,
+          &quot;href&quot;
+        ],
+        &quot;properties&quot;: {
+          &quot;ref&quot;: {
+            &quot;type&quot;: &quot;integer&quot;
+          },
+          &quot;tag&quot;: {
+            &quot;type&quot;: &quot;string&quot;
+          },
+          &quot;role&quot;: {
+            &quot;anyOf&quot;: [
+              {
+                &quot;type&quot;: &quot;string&quot;
+              },
+              {
+                &quot;type&quot;: &quot;null&quot;
+              }
+            ]
+          },
+          &quot;name&quot;: {
+            &quot;type&quot;: &quot;string&quot;
+          },
+          &quot;value&quot;: {
+            &quot;type&quot;: &quot;string&quot;
+          },
+          &quot;placeholder&quot;: {
+            &quot;type&quot;: &quot;string&quot;
+          },
+          &quot;href&quot;: {
+            &quot;type&quot;: &quot;string&quot;
+          }
+        }
+      }
+    }
+  }
+}</code></pre>
+<p><code>text</code> is the page's visible text, cut to 20,000 characters unless <code>maxChars</code> says otherwise. <code>refs</code> numbers what can be clicked or typed into, up to 500, in page order; a ref is good until the next navigate, read, click or type. Password values are left out.</p>
+<h4>Errors · 404</h4>
+<p>No session has this id, or it is closed.</p>
+<h4>Errors · 504</h4>
+<p>The call didn't finish in time. <code>waitFor</code> running out also answers <code>504</code>, without acting.</p>
+  </div>
+</details>
+<details class="route">
+  <summary><span class="method post">POST</span><code class="route-path">/api/v1/browser/:id/click</code><span class="route-summary">Click the element with a ref</span></summary>
+  <div class="route-body">
+<h4>Params</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;id&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;id&quot;: {
+      &quot;format&quot;: &quot;uuid&quot;,
+      &quot;type&quot;: &quot;string&quot;
+    }
+  }
+}</code></pre>
+<h4>Body</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;ref&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;ref&quot;: {
+      &quot;minimum&quot;: 1,
+      &quot;type&quot;: &quot;integer&quot;
+    },
+    &quot;waitFor&quot;: {
+      &quot;type&quot;: &quot;object&quot;,
+      &quot;properties&quot;: {
+        &quot;selector&quot;: {
+          &quot;minLength&quot;: 1,
+          &quot;type&quot;: &quot;string&quot;
+        },
+        &quot;text&quot;: {
+          &quot;minLength&quot;: 1,
+          &quot;type&quot;: &quot;string&quot;
+        },
+        &quot;timeoutMs&quot;: {
+          &quot;default&quot;: 10000,
+          &quot;minimum&quot;: 1,
+          &quot;maximum&quot;: 60000,
+          &quot;type&quot;: &quot;integer&quot;
+        }
+      }
+    }
+  }
+}</code></pre>
+<p><code>waitFor</code> is described in <a href="#browser-waiting">Waiting</a>.</p>
+<h4>Response 200</h4>
+<p>What the page shows just after the click, once it has loaded, as read returns it. It may not show the click's result yet; see <a href="#browser-waiting">Waiting</a>.</p>
+<h4>Errors · 400</h4>
+<p>The click failed, for example the element is covered or disabled.</p>
+<h4>Errors · 404</h4>
+<p>No session has this id, or it is closed, or no element on the page has this ref.</p>
+<h4>Errors · 504</h4>
+<p>The call didn't finish in time. <code>waitFor</code> running out also answers <code>504</code>, without acting.</p>
+  </div>
+</details>
+<details class="route">
+  <summary><span class="method post">POST</span><code class="route-path">/api/v1/browser/:id/type</code><span class="route-summary">Type into the element with a ref</span></summary>
+  <div class="route-body">
+<h4>Params</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;id&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;id&quot;: {
+      &quot;format&quot;: &quot;uuid&quot;,
+      &quot;type&quot;: &quot;string&quot;
+    }
+  }
+}</code></pre>
+<h4>Body</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;ref&quot;,
+    &quot;text&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;ref&quot;: {
+      &quot;minimum&quot;: 1,
+      &quot;type&quot;: &quot;integer&quot;
+    },
+    &quot;text&quot;: {
+      &quot;maxLength&quot;: 10000,
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;submit&quot;: {
+      &quot;default&quot;: false,
+      &quot;type&quot;: &quot;boolean&quot;
+    },
+    &quot;waitFor&quot;: {
+      &quot;type&quot;: &quot;object&quot;,
+      &quot;properties&quot;: {
+        &quot;selector&quot;: {
+          &quot;minLength&quot;: 1,
+          &quot;type&quot;: &quot;string&quot;
+        },
+        &quot;text&quot;: {
+          &quot;minLength&quot;: 1,
+          &quot;type&quot;: &quot;string&quot;
+        },
+        &quot;timeoutMs&quot;: {
+          &quot;default&quot;: 10000,
+          &quot;minimum&quot;: 1,
+          &quot;maximum&quot;: 60000,
+          &quot;type&quot;: &quot;integer&quot;
+        }
+      }
+    }
+  }
+}</code></pre>
+<p><code>waitFor</code> is described in <a href="#browser-waiting">Waiting</a>.</p>
+<p><code>text</code> replaces what the element holds. With <code>submit</code>, Enter is pressed after it.</p>
+<h4>Response 200</h4>
+<p>What the page shows just after typing, once it has loaded, as read returns it. It may not show the result yet; see <a href="#browser-waiting">Waiting</a>.</p>
+<h4>Errors · 400</h4>
+<p>The element can't be typed into.</p>
+<h4>Errors · 404</h4>
+<p>No session has this id, or it is closed, or no element on the page has this ref.</p>
+<h4>Errors · 504</h4>
+<p>The call didn't finish in time. <code>waitFor</code> running out also answers <code>504</code>, without acting.</p>
+  </div>
+</details>
+<details class="route">
+  <summary><span class="method post">POST</span><code class="route-path">/api/v1/browser/:id/screenshot</code><span class="route-summary">Save a screenshot into the workspace</span></summary>
+  <div class="route-body">
+<h4>Params</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;id&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;id&quot;: {
+      &quot;format&quot;: &quot;uuid&quot;,
+      &quot;type&quot;: &quot;string&quot;
+    }
+  }
+}</code></pre>
+<h4>Body</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;properties&quot;: {
+    &quot;fullPage&quot;: {
+      &quot;default&quot;: false,
+      &quot;type&quot;: &quot;boolean&quot;
+    },
+    &quot;waitFor&quot;: {
+      &quot;type&quot;: &quot;object&quot;,
+      &quot;properties&quot;: {
+        &quot;selector&quot;: {
+          &quot;minLength&quot;: 1,
+          &quot;type&quot;: &quot;string&quot;
+        },
+        &quot;text&quot;: {
+          &quot;minLength&quot;: 1,
+          &quot;type&quot;: &quot;string&quot;
+        },
+        &quot;timeoutMs&quot;: {
+          &quot;default&quot;: 10000,
+          &quot;minimum&quot;: 1,
+          &quot;maximum&quot;: 60000,
+          &quot;type&quot;: &quot;integer&quot;
+        }
+      }
+    }
+  }
+}</code></pre>
+<p><code>waitFor</code> is described in <a href="#browser-waiting">Waiting</a>.</p>
+<p>Without <code>fullPage</code>, only what fits in the 1280×800 window.</p>
+<h4>Response 201</h4>
+<p>The screenshot's path in the workspace, a PNG at <code>screenshot/&lt;sessionId&gt;-&lt;time&gt;.png</code>.</p>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;path&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;path&quot;: {
+      &quot;type&quot;: &quot;string&quot;
+    }
+  }
+}</code></pre>
+<h4>Errors · 404</h4>
+<p>No session has this id, or it is closed.</p>
+<h4>Errors · 409</h4>
+<p>The session wasn't created with <code>record</code>.</p>
+<h4>Errors · 504</h4>
+<p>The call didn't finish in time. <code>waitFor</code> running out also answers <code>504</code>, without acting.</p>
+  </div>
+</details>
+<details class="route">
+  <summary><span class="method post">POST</span><code class="route-path">/api/v1/browser/:id/run</code><span class="route-summary">Run Playwright code against the page</span></summary>
+  <div class="route-body">
+<h4>Params</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;id&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;id&quot;: {
+      &quot;format&quot;: &quot;uuid&quot;,
+      &quot;type&quot;: &quot;string&quot;
+    }
+  }
+}</code></pre>
+<h4>Body</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;code&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;code&quot;: {
+      &quot;minLength&quot;: 1,
+      &quot;maxLength&quot;: 100000,
+      &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;timeoutMs&quot;: {
+      &quot;default&quot;: 60000,
+      &quot;minimum&quot;: 1000,
+      &quot;maximum&quot;: 120000,
+      &quot;type&quot;: &quot;integer&quot;
+    }
+  }
+}</code></pre>
+<p><code>code</code> is the body of <code>async (page) =&gt; { … }</code>, with Playwright's <code>page</code> for the session's tab; what it returns is the result. It runs in its own confined process that reaches only the browser. <code>timeoutMs</code> is how long it may run: 1 minute by default, 2 at most.</p>
+<h4>Response 200</h4>
+<p>Code that throws or runs out of time still answers <code>200</code>; check <code>error</code>. A result that isn't JSON, or is over 32 MB, is an <code>error</code> too.</p>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;result&quot;,
+    &quot;error&quot;,
+    &quot;durationMs&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;result&quot;: {},
+    &quot;error&quot;: {
+      &quot;anyOf&quot;: [
+        {
+          &quot;type&quot;: &quot;string&quot;
+        },
+        {
+          &quot;type&quot;: &quot;null&quot;
+        }
+      ]
+    },
+    &quot;durationMs&quot;: {
+      &quot;type&quot;: &quot;integer&quot;
+    }
+  }
+}</code></pre>
+<h4>Errors · 404</h4>
+<p>No session has this id, or it is closed.</p>
+  </div>
+</details>
+<details class="route">
+  <summary><span class="method delete">DELETE</span><code class="route-path">/api/v1/browser/:id</code><span class="route-summary">Close a session</span></summary>
+  <div class="route-body">
+<h4>Params</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;id&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;id&quot;: {
+      &quot;format&quot;: &quot;uuid&quot;,
+      &quot;type&quot;: &quot;string&quot;
+    }
+  }
+}</code></pre>
+<h4>Response 204</h4>
+<p>No body. The tab is closed and the session's <code>status</code> becomes <code>closed</code>. A recorded session's video is saved at <code>browser/&lt;sessionId&gt;.webm</code> before this answers.</p>
+<h4>Errors · 404</h4>
+<p>No session has this id, or it is already closed.</p>
+  </div>
+</details>
+</div>
+        </section>
       </div>
     </main>
   </div>

@@ -43,6 +43,13 @@
       "when": 1793091768185,
       "tag": "0005_sandbox_activities",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1793111877436,
+      "tag": "0006_browser_sessions",
+      "breakpoints": true
     }
   ]
 }
