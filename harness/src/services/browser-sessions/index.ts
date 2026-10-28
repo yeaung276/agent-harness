@@ -1,6 +1,6 @@
-import { eq } from 'drizzle-orm'
+import { desc, eq } from 'drizzle-orm'
 
-import { browserSessions } from '../../db/schema.ts'
+import { browserSessions, users } from '../../db/schema.ts'
 import type { Db } from '../../db/type.ts'
 import type { SessionState } from '../chromium/session.ts'
 
@@ -13,6 +13,29 @@ export const createBrowserSessionService = ({ db }: { db: Db }) => ({
   get: async (id: string) => {
     const [row] = await db.select().from(browserSessions).where(eq(browserSessions.id, id))
     return row ?? null
+  },
+
+  list: async ({ limit, offset }: { limit: number; offset: number }) => {
+    const [items, total] = await Promise.all([
+      db
+        .select({
+          id: browserSessions.id,
+          status: browserSessions.status,
+          workspaceId: browserSessions.workspaceId,
+          url: browserSessions.url,
+          record: browserSessions.record,
+          createdBy: users.email,
+          lastUsedAt: browserSessions.lastUsedAt,
+          createdAt: browserSessions.createdAt,
+        })
+        .from(browserSessions)
+        .innerJoin(users, eq(users.id, browserSessions.userId))
+        .orderBy(desc(browserSessions.lastUsedAt), desc(browserSessions.createdAt), desc(browserSessions.id))
+        .limit(limit)
+        .offset(offset),
+      db.$count(browserSessions),
+    ])
+    return { items, total }
   },
 
   update: async (
