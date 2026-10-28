@@ -175,7 +175,7 @@
               <tr><th>Key</th><th>Value</th><th>Written by</th><th>Lifetime</th></tr>
             </thead>
             <tbody>
-              <tr><td><code>pods:&lt;name&gt;</code></td><td>cpu, memory, previews, sessions, address</td><td>A worker's stats reporter</td><td>Expires 30 s after its last write.</td></tr>
+              <tr><td><code>pods:&lt;name&gt;</code></td><td>cpu, memory, previews, sessions, address</td><td>The server at registration (hostname, address); the worker's stats reporter (the rest)</td><td>Expires 30 s after its last write.</td></tr>
               <tr><td><code>placement:&lt;appId&gt;</code></td><td>Worker pod name</td><td>Placement controller, <code>SET NX</code></td><td>Until that worker's <code>pods</code> key is gone; then the next call replaces it.</td></tr>
               <tr><td><code>logs:&lt;name&gt;</code></td><td>Stream of the worker's log lines</td><td>A worker's logger</td><td>Capped at <code>LOG_MAX_LINES</code>; expires 24 h after its last write. See <a href="#logging">Logging</a>.</td></tr>
             </tbody>
@@ -1118,8 +1118,120 @@
             </tbody>
           </table>
 
+          <h3 id="authentication">Authentication</h3>
+          <p>A worker registers with the server on every boot. The request and the reply are sealed with a key derived from <code>WORKER_JOIN_SECRET</code>, which the server and every worker read from one Kubernetes Secret; the secret itself is never sent. At registration the server signs the worker's certificate with <code>WORKER_CA_KEY</code>, and on its own boot it signs its client certificate, <code>server.crt</code>, with the same key. Calls from the server to a worker's internal API are mTLS: each side presents its certificate and checks the other's against <code>WORKER_CA_CERT</code>. Preview traffic from the preview proxy to the port forwarder is not covered.</p>
+          <p>A worker makes a new key and gets a new certificate on every boot, and registers again before the certificate expires. The server calls a worker only while its <code>pods:&lt;hostname&gt;</code> key holds stats, so a stopped worker drops out within 30 s. The Postgres row records the worker for the machines page; routing never reads it.</p>
+          <figure>
+            <div class="diagram">
+              <svg class="c4" viewBox="0 0 980 920" role="img" aria-label="Sequence of worker registration and mTLS calls between a worker pod, the server pod, Redis and Postgres. On server boot: 1, the server signs its own client certificate, server.crt, with WORKER_CA_KEY, CN server. On every worker boot: 2, the worker makes a key and a certificate signing request for its hostname. 3, the worker calls POST /workers/register with its hostname, the CSR, its address and the time, sealed with the join secret. 4, the server upserts the worker's row by hostname with its address in Postgres, for the machines page. 5, the server writes the hostname and address to pods:hostname in Redis, expiring in 30 seconds. 6, the server replies, sealed, with the worker's certificate signed with WORKER_CA_KEY and valid for one year, WORKER_CA_CERT, additional data and the stats key pods:hostname. 7, the worker starts serving HTTPS with that certificate and requires a client certificate signed by the CA. 8, every 10 seconds the worker renews the key's expiry and writes its stats into it; if the key is gone it registers again from step 3. Every internal API call: 9, the server looks up the worker's address in pods:hostname, only if the key holds stats. 10, it calls the worker over mTLS: server.crt and the worker's certificate, both checked against WORKER_CA_CERT. 11, the worker accepts only a client certificate with CN server and answers 403 otherwise; a certificate not signed by the CA fails the handshake.">
+                <defs>
+                  <marker id="au-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                    <path d="M0 0L10 5L0 10z" class="arrowhead"/>
+                  </marker>
+                </defs>
+
+                <line class="lifeline" x1="150" y1="72" x2="150" y2="914"/>
+                <line class="lifeline" x1="430" y1="72" x2="430" y2="914"/>
+                <line class="lifeline" x1="660" y1="72" x2="660" y2="914"/>
+                <line class="lifeline" x1="870" y1="72" x2="870" y2="914"/>
+
+                <rect class="component" x="65" y="16" width="170" height="56" rx="6"/>
+                <text class="on-light name" x="150" y="39" text-anchor="middle">Worker pod</text>
+                <text class="on-light type" x="150" y="56" text-anchor="middle">[APP_MODE=worker]</text>
+
+                <rect class="component" x="345" y="16" width="170" height="56" rx="6"/>
+                <text class="on-light name" x="430" y="39" text-anchor="middle">Server pod</text>
+                <text class="on-light type" x="430" y="56" text-anchor="middle">[WORKER_CA_KEY]</text>
+
+                <rect class="external" x="575" y="16" width="170" height="56" rx="8"/>
+                <text class="on-dark name" x="660" y="39" text-anchor="middle">Redis</text>
+                <text class="on-dark type" x="660" y="56" text-anchor="middle">[routing · stats]</text>
+
+                <rect class="external" x="785" y="16" width="170" height="56" rx="8"/>
+                <text class="on-dark name" x="870" y="39" text-anchor="middle">Postgres</text>
+                <text class="on-dark type" x="870" y="56" text-anchor="middle">[workers]</text>
+
+                <rect class="group" x="20" y="92" width="940" height="72" rx="6"/>
+                <rect class="frame-tab" x="20" y="92" width="130" height="22" rx="4"/>
+                <text class="label name" x="30" y="107">on server boot</text>
+
+                <path class="edge" d="M430 124H470V148H432" marker-end="url(#au-arrow)"/>
+                <text class="edge-label" x="478" y="134"><tspan font-weight="600">1.</tspan> sign server.crt</text>
+                <text class="note" x="478" y="148">with WORKER_CA_KEY · CN server</text>
+
+                <rect class="group" x="20" y="184" width="940" height="492" rx="6"/>
+                <rect class="frame-tab" x="20" y="184" width="170" height="22" rx="4"/>
+                <text class="label name" x="30" y="199">on every worker boot</text>
+
+                <path class="edge" d="M150 228H190V252H152" marker-end="url(#au-arrow)"/>
+                <text class="edge-label" x="198" y="238"><tspan font-weight="600">2.</tspan> new key + CSR</text>
+                <text class="note" x="198" y="252">for its hostname</text>
+
+                <line class="edge" x1="150" y1="298" x2="428" y2="298" marker-end="url(#au-arrow)"/>
+                <text class="edge-label" x="290" y="290" text-anchor="middle"><tspan font-weight="600">3.</tspan> POST /workers/register</text>
+                <text class="note" x="290" y="312" text-anchor="middle">sealed with the join secret</text>
+                <text class="note" x="290" y="326" text-anchor="middle">hostname · CSR · address · time</text>
+
+                <line class="edge" x1="430" y1="372" x2="868" y2="372" marker-end="url(#au-arrow)"/>
+                <text class="edge-label" x="545" y="364" text-anchor="middle"><tspan font-weight="600">4.</tspan> upsert by hostname</text>
+                <text class="note" x="545" y="386" text-anchor="middle">address · for the machines page</text>
+
+                <line class="edge" x1="430" y1="432" x2="658" y2="432" marker-end="url(#au-arrow)"/>
+                <text class="edge-label" x="545" y="424" text-anchor="middle"><tspan font-weight="600">5.</tspan> HSET pods:&lt;hostname&gt;</text>
+                <text class="note" x="545" y="446" text-anchor="middle">hostname · address · expire 30 s</text>
+
+                <line class="edge async" x1="430" y1="492" x2="152" y2="492" marker-end="url(#au-arrow)"/>
+                <text class="edge-label" x="290" y="484" text-anchor="middle"><tspan font-weight="600">6.</tspan> sealed reply</text>
+                <text class="note" x="290" y="506" text-anchor="middle">worker cert signed with WORKER_CA_KEY · 1 year</text>
+                <text class="note" x="290" y="520" text-anchor="middle">WORKER_CA_CERT · additional data</text>
+                <text class="note" x="290" y="534" text-anchor="middle">stats key: pods:&lt;hostname&gt;</text>
+
+                <path class="edge" d="M150 558H190V582H152" marker-end="url(#au-arrow)"/>
+                <text class="edge-label" x="198" y="568"><tspan font-weight="600">7.</tspan> serve HTTPS with the cert</text>
+                <text class="note" x="198" y="582">requires a client cert from the CA</text>
+
+                <line class="edge" x1="150" y1="632" x2="658" y2="632" marker-end="url(#au-arrow)"/>
+                <text class="edge-label" x="290" y="624" text-anchor="middle"><tspan font-weight="600">8.</tspan> stats every 10 s</text>
+                <text class="note" x="290" y="646" text-anchor="middle">EXPIRE, then HSET stats</text>
+                <text class="note" x="290" y="660" text-anchor="middle">key gone → register again</text>
+
+                <rect class="group" x="20" y="696" width="940" height="210" rx="6"/>
+                <rect class="frame-tab" x="20" y="696" width="180" height="22" rx="4"/>
+                <text class="label name" x="30" y="711">every internal API call</text>
+
+                <line class="edge" x1="430" y1="742" x2="658" y2="742" marker-end="url(#au-arrow)"/>
+                <text class="edge-label" x="545" y="734" text-anchor="middle"><tspan font-weight="600">9.</tspan> look up the address</text>
+                <text class="note" x="545" y="756" text-anchor="middle">only a key with stats</text>
+
+                <line class="edge" x1="430" y1="802" x2="152" y2="802" marker-end="url(#au-arrow)"/>
+                <text class="edge-label" x="290" y="794" text-anchor="middle"><tspan font-weight="600">10.</tspan> mTLS</text>
+                <text class="note" x="290" y="816" text-anchor="middle">server.crt ⇄ worker cert</text>
+                <text class="note" x="290" y="830" text-anchor="middle">both checked against WORKER_CA_CERT</text>
+
+                <path class="edge" d="M150 856H190V880H152" marker-end="url(#au-arrow)"/>
+                <text class="edge-label" x="198" y="866"><tspan font-weight="600">11.</tspan> accept only CN server</text>
+                <text class="note" x="198" y="880">else 403 · not from the CA: handshake fails</text>
+              </svg>
+            </div>
+            <figcaption>Sequence diagram: registration on every worker boot, then every call from the server. Numbers follow the order of messages. The dashed arrow is a reply.</figcaption>
+          </figure>
+
+          <table>
+            <thead>
+              <tr><th>Part</th><th>Setting</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Sealing</td><td>AES-256-GCM with a key derived from <code>WORKER_JOIN_SECRET</code> by HKDF-SHA256, a random 12-byte nonce per message. A request that fails to open, or whose time is more than 60 s off, gets 401. The reply carries the request's nonce, so it can't be replayed to another registration.</td></tr>
+              <tr><td>Request</td><td><code>hostname</code> (the pod name), <code>csr</code> (PEM, subject and SAN the hostname), <code>address</code>, <code>time</code>.</td></tr>
+              <tr><td>Reply</td><td><code>cert</code>, the worker's certificate signed with <code>WORKER_CA_KEY</code>, valid for one year; <code>caCert</code>, <code>WORKER_CA_CERT</code>, which the worker checks client certificates against; <code>statsKey</code>, <code>pods:&lt;hostname&gt;</code>, a pattern fixed by the server; additional data, TBD.</td></tr>
+              <tr><td>CA</td><td><code>WORKER_CA_KEY</code> and <code>WORKER_CA_CERT</code>, in the Kubernetes Secret, mounted into the server only. The server signs each CSR whose hostname matches the request's, and on every boot signs <code>server.crt</code> for itself: CN <code>server</code>, client auth only, kept in memory. A worker registers again 7 days before its certificate expires and swaps the new one into its listener without restarting.</td></tr>
+              <tr><td>Redis</td><td>The server writes <code>hostname</code> and <code>address</code> to <code>pods:&lt;hostname&gt;</code> with a 30 s expiry. Once the worker serves HTTPS, its stats reporter runs every 10 s: <code>EXPIRE pods:&lt;hostname&gt; 30</code>, then <code>HSET</code> its stats. An <code>EXPIRE</code> that finds no key means the key was lost, and the worker registers again. Placement and calls use only a key that holds stats, so a worker is called only once it serves HTTPS.</td></tr>
+              <tr><td>Calls</td><td>Internal API only, <code>/internal/sandbox/*</code> and <code>/internal/chromium/*</code>. mTLS to the address in <code>pods:&lt;hostname&gt;</code>. The server presents <code>server.crt</code> and checks the worker's certificate against <code>WORKER_CA_CERT</code> with the hostname as the server name; one connection pool serves every worker. The worker requires a client certificate signed by the CA, or the handshake fails, and answers 403 to one whose CN isn't <code>server</code>.</td></tr>
+            </tbody>
+          </table>
+
           <h3 id="stats-reporter">Stats reporter</h3>
-          <p>Every 10 s each worker sets <code>pods:&lt;name&gt;</code> to its cpu, memory, running previews, open sessions and internal address, expiring after 30 s. A worker whose key has expired is gone as far as placement is concerned.</p>
+          <p>Every 10 s each worker writes its cpu, memory, running previews and open sessions to the key the server gave it at registration, <code>pods:&lt;name&gt;</code>, and renews its 30 s expiry. The address in it is written by the server. A worker whose key has expired is gone as far as placement is concerned.</p>
           <div class="pending">
             <span class="badge tbd">TBD</span>
             <p>Each field's exact meaning and unit, how the reporter measures them, what it writes on shutdown, and how the server lists registered workers for the machines page.</p>
