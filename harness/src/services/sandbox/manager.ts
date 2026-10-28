@@ -188,6 +188,8 @@ export const createSandboxManager = ({
 
     logs: async (workspaceId: string, tail: number) => (await sandboxes.get(workspaceId)?.logs(tail, true)) ?? [],
 
+    count: () => sandboxes.size,
+
     hostPort: (workspaceId: string) =>
       sandboxes.get(workspaceId)?.status() === 'running' ? sandboxes.get(workspaceId)!.hostPort : null,
 

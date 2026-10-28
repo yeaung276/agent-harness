@@ -12,6 +12,7 @@ const app = await buildApp(
     DATABASE_URL: 'postgres://127.0.0.1:1/none',
     REDIS_URL: 'redis://127.0.0.1:1',
     DATA_ENCRYPTION_KEY: '0'.repeat(64),
+    WORKER_JOIN_SECRET: 'j'.repeat(32),
     WORKER_CA_KEY: ca.key,
     WORKER_CA_CERT: ca.cert,
   })

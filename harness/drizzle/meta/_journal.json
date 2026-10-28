@@ -50,6 +50,13 @@
       "when": 1793111877436,
       "tag": "0006_browser_sessions",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1793179912924,
+      "tag": "0007_workers",
+      "breakpoints": true
     }
   ]
 }

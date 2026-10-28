@@ -63,6 +63,12 @@ export const sandboxActivities = pgTable(
   table => [index('sandbox_activities_workspace_created_idx').on(table.workspaceId, table.createdAt)]
 )
 
+export const workers = pgTable('workers', {
+  hostname: text('hostname').primaryKey(),
+  address: text('address').notNull(),
+  registeredAt: timestamp('registered_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
 export const browserSessions = pgTable('browser_sessions', {
   id: uuid('id').primaryKey().defaultRandom(),
   workspaceId: uuid('workspace_id').references(() => workspaces.id, { onDelete: 'cascade' }),

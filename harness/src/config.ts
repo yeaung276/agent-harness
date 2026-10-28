@@ -41,6 +41,9 @@ export const ConfigSchema = Type.Object({
   // the server only; PEM, EC P-256
   WORKER_CA_KEY: Type.Optional(Type.String({ minLength: 1 })),
   WORKER_CA_CERT: Type.Optional(Type.String({ minLength: 1 })),
+  // the worker only
+  WORKER_NAME: Type.Optional(Type.String({ pattern: '^[a-z0-9]([-a-z0-9.]{0,251}[a-z0-9])?$' })),
+  SERVER_URL: Type.Optional(Type.String({ minLength: 1 })),
 })
 
 export type Config = Static<typeof ConfigSchema>

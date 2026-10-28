@@ -13,6 +13,8 @@ import { workers } from './plugins/workers.ts'
 import { api } from './routes/api/index.ts'
 import { mcp } from './routes/mcp/index.ts'
 import { web } from './routes/web/index.ts'
+import { workerRoutes } from './routes/workers/index.ts'
+import { registerWithServer } from './services/workers/registration.ts'
 
 declare module 'fastify' {
   interface FastifyInstance {
@@ -32,7 +34,8 @@ const logger = ({ NODE_ENV, LOG_LEVEL }: Config): FastifyServerOptions['logger']
     : { level: LOG_LEVEL }
 
 export const buildApp = async (config: Config) => {
-  const app = Fastify({ logger: logger(config) }).withTypeProvider<TypeBoxTypeProvider>()
+  const registration = config.APP_MODE === 'worker' ? await registerWithServer(config) : null
+  const app = Fastify({ logger: logger(config), https: registration?.https ?? null }).withTypeProvider<TypeBoxTypeProvider>()
   bindLogger(app.log)
 
   app.decorate('config', config)
@@ -40,9 +43,10 @@ export const buildApp = async (config: Config) => {
   await app.register(redis)
   await app.register(services)
 
-  if (config.APP_MODE === 'worker') {
+  if (registration) {
     await app.register(sandbox)
     await app.register(chromium)
+    await app.register(registration.statsReporter)
     return app
   }
 
@@ -51,6 +55,7 @@ export const buildApp = async (config: Config) => {
 
   await app.register(api, { prefix: '/api/v1' })
   await app.register(mcp, { prefix: '/mcp' })
+  await app.register(workerRoutes, { prefix: '/workers' })
   await app.register(web)
 
   return app

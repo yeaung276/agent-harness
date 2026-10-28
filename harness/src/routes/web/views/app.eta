@@ -2,6 +2,7 @@
 <% const nav = [
   { id: 'workspaces', title: 'Workspaces', href: '/workspaces' },
   { id: 'browsers', title: 'Browsers', href: '/browsers' },
+  { id: 'machines', title: 'Machines', href: '/machines' },
   { id: 'tokens', title: 'API tokens', href: '/tokens' },
 ] %>
 <div class="flex min-h-screen">

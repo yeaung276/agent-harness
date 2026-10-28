@@ -10,6 +10,7 @@ import { Eta } from 'eta'
 import { auth, requireSession } from './auth.ts'
 import { browsers } from './browsers.ts'
 import { health } from './health.ts'
+import { machines } from './machines.ts'
 import { tokens } from './tokens.ts'
 import { workspaces } from './workspaces.ts'
 
@@ -32,6 +33,7 @@ export const web: FastifyPluginAsyncTypebox = async app => {
     pages.get('/', async (_request, reply) => reply.redirect('/workspaces'))
     await pages.register(workspaces)
     await pages.register(browsers)
+    await pages.register(machines)
     await pages.register(tokens)
   })
 }

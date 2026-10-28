@@ -1,0 +1,74 @@
+<% layout('./app') %>
+<%
+  const tone = percent => percent === null ? 'text-gray-300' : percent >= 90 ? 'text-red-500' : percent >= 70 ? 'text-amber-500' : 'text-green-500'
+  const bar = percent => percent === null ? 'bg-gray-300' : percent >= 90 ? 'bg-red-500' : percent >= 70 ? 'bg-amber-500' : 'bg-green-500'
+  const CIRCUMFERENCE = 2 * Math.PI * 40
+  const m = it.machine
+%>
+<div class="px-8 py-6">
+  <a href="/machines" class="text-sm text-gray-600 hover:text-gray-900">← Machines</a>
+
+  <div id="stats">
+    <div class="mt-2 flex items-center gap-3">
+      <h1 class="font-mono text-xl font-semibold tracking-tight"><%= m.name %></h1>
+      <span class="inline-flex items-center gap-1.5 text-sm capitalize">
+        <span class="size-2 rounded-full <%= m.status === 'live' ? 'bg-green-500' : 'bg-amber-500' %>"></span>
+        <%= m.status %>
+      </span>
+    </div>
+    <dl class="mt-4 grid grid-cols-[max-content_1fr] gap-x-6 gap-y-1.5 text-sm">
+      <dt class="text-gray-500">Address</dt>
+      <dd class="font-mono"><%= m.address %></dd>
+      <dt class="text-gray-500">Last report</dt>
+      <dd><%= m.lastReported ?? 'Never' %></dd>
+      <dt class="text-gray-500">Registered</dt>
+      <dd><%= m.registered %></dd>
+      <dt class="text-gray-500">Refresh</dt>
+      <dd>Every 10 seconds</dd>
+    </dl>
+
+    <div class="mt-6 grid gap-4 sm:grid-cols-2">
+      <% [
+        { label: 'CPU', percent: m.cpu.percent, text: m.cpu.value === null ? '—' : `${m.cpu.value}%`, detail: 'of one core' },
+        { label: 'Memory', percent: m.memory.percent, text: m.memory.used ?? '—', detail: m.memory.limit ? `of ${m.memory.limit}` : 'no limit' },
+      ].forEach(dial => { %>
+      <div class="flex items-center gap-5 rounded-lg border border-gray-200 p-5">
+        <svg viewBox="0 0 100 100" class="size-24 -rotate-90" aria-hidden="true">
+          <circle cx="50" cy="50" r="40" fill="none" stroke-width="10" class="stroke-gray-100"></circle>
+          <circle cx="50" cy="50" r="40" fill="none" stroke-width="10" stroke-linecap="round" stroke="currentColor"
+            class="<%= tone(dial.percent) %>" stroke-dasharray="<%= ((dial.percent ?? 0) / 100) * CIRCUMFERENCE %> <%= CIRCUMFERENCE %>"></circle>
+        </svg>
+        <div>
+          <div class="text-xs uppercase tracking-wide text-gray-500"><%= dial.label %></div>
+          <div class="mt-1 text-2xl font-semibold tabular-nums"><%= dial.text %></div>
+          <div class="text-sm text-gray-500"><%= dial.detail %></div>
+        </div>
+      </div>
+      <% }) %>
+    </div>
+
+    <div class="mt-4 space-y-4 rounded-lg border border-gray-200 p-5">
+      <div>
+        <div class="flex justify-between text-sm">
+          <span class="text-gray-600">Sandboxes</span>
+          <span class="tabular-nums"><%= m.sandboxes.used ?? '—' %> / <%= m.sandboxes.total ?? '—' %></span>
+        </div>
+        <div class="mt-1.5 h-2 rounded-full bg-gray-100">
+          <div class="h-2 rounded-full <%= bar(m.sandboxes.percent) %>" style="width: <%= m.sandboxes.percent ?? 0 %>%"></div>
+        </div>
+      </div>
+      <div class="flex justify-between text-sm">
+        <span class="text-gray-600">Browser sessions</span>
+        <span class="tabular-nums"><%= m.sessions ?? '—' %></span>
+      </div>
+    </div>
+  </div>
+
+</div>
+<script type="module">
+  setInterval(async () => {
+    const page = new DOMParser().parseFromString(await (await fetch(location.href)).text(), 'text/html')
+    const stats = page.getElementById('stats')
+    if (stats) document.getElementById('stats').replaceWith(stats)
+  }, 10_000)
+</script>

@@ -1231,11 +1231,21 @@
           </table>
 
           <h3 id="stats-reporter">Stats reporter</h3>
-          <p>Every 10 s each worker writes its cpu, memory, running previews and open sessions to the key the server gave it at registration, <code>pods:&lt;name&gt;</code>, and renews its 30 s expiry. The address in it is written by the server. A worker whose key has expired is gone as far as placement is concerned.</p>
-          <div class="pending">
-            <span class="badge tbd">TBD</span>
-            <p>Each field's exact meaning and unit, how the reporter measures them, what it writes on shutdown, and how the server lists registered workers for the machines page.</p>
-          </div>
+          <p>Once a worker serves HTTPS, it writes the hash below to the key the server gave it at registration, <code>pods:&lt;name&gt;</code>, every 10 s with <code>HSET</code>, then <code>EXPIRE 30</code>. It writes its hostname and address each time, so a key lost in Redis is whole again after the next report. A worker whose key has expired is gone as far as placement is concerned. The machines page lists every worker in the <code>workers</code> table and shows it live when <code>reportedAt</code> is under 30 s old, stale otherwise.</p>
+          <table>
+            <thead>
+              <tr><th>Field</th><th>Value</th><th>Read from</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>hostname</code>, <code>address</code></td><td>The worker's name and <code>ip:port</code></td><td>Registration</td></tr>
+              <tr><td><code>reportedAt</code></td><td>Time of the report, ms since the epoch</td><td>The clock</td></tr>
+              <tr><td><code>cpuPercent</code></td><td>CPU used since the last report, % of one core</td><td>The change in <code>usage_usec</code> in the worker's <code>cpu.stat</code></td></tr>
+              <tr><td><code>memoryBytes</code>, <code>memoryLimitBytes</code></td><td>Memory in use and the worker's limit; no limit is left out</td><td>The worker's <code>memory.current</code> and <code>memory.max</code></td></tr>
+              <tr><td><code>sandboxes</code>, <code>sandboxSlots</code></td><td>Running workspace apps, and how many fit: one per pool port</td><td>The sandbox manager; <code>SANDBOX_PORT_MIN</code>..<code>SANDBOX_PORT_MAX</code></td></tr>
+              <tr><td><code>sessions</code></td><td>Open browser tabs</td><td>The Chromium manager</td></tr>
+            </tbody>
+          </table>
+          <p>The cgroup files are the worker's own, at <code>/sys/fs/cgroup</code>. Where there are none, as with <code>SANDBOX_MODE=none</code> on a laptop, the cpu and memory fields are left out.</p>
 
           <h3 id="placement-controller">Placement controller</h3>
           <p>A module on the server pod, not a worker part, but it is the reader of the stats reporter. It keeps each workspace on one worker: a placement key in Redis names the worker, and the first call for a workspace with no live placement claims the worker with the most headroom in <code>pods:*</code> with <code>SET NX</code>. See <a href="#overview">Overview</a>.</p>

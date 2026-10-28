@@ -1,14 +1,10 @@
 import fp from 'fastify-plugin'
 
-import { createCa } from '../services/workers/certs.ts'
+import { createWorkerService } from '../services/workers/index.ts'
 
 declare module 'fastify' {
   interface FastifyInstance {
-    workers: {
-      ca: Awaited<ReturnType<typeof createCa>>
-      caCert: string
-      serverCert: { key: string; cert: string }
-    }
+    workers: Awaited<ReturnType<typeof createWorkerService>>
   }
 }
 
@@ -17,8 +13,10 @@ export const workers = fp(
     const { WORKER_CA_KEY, WORKER_CA_CERT } = app.config
     if (!WORKER_CA_KEY || !WORKER_CA_CERT) throw new Error('the server needs WORKER_CA_KEY and WORKER_CA_CERT for its workers')
 
-    const ca = await createCa({ key: WORKER_CA_KEY, cert: WORKER_CA_CERT })
-    app.decorate('workers', { ca, caCert: WORKER_CA_CERT, serverCert: await ca.issueServerCert() })
+    app.decorate(
+      'workers',
+      await createWorkerService({ db: app.db, redis: app.redis, caKey: WORKER_CA_KEY, caCert: WORKER_CA_CERT })
+    )
   },
-  { name: 'workers' }
+  { name: 'workers', dependencies: ['db', 'redis'] }
 )

@@ -240,6 +240,8 @@ export const createChromiumManager = ({
         log.info({ sessionId }, 'browser session closed')
       }),
 
+    count: () => tabs.size,
+
     stopIdle: async () => {
       await Promise.all(
         [...tabs]
