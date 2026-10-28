@@ -42,11 +42,13 @@ export const auth: FastifyPluginAsyncTypebox = async app => {
       .where(eq(users.email, email))
     const valid = await Bun.password.verify(request.body.password, user?.passwordHash ?? unknownUserHash)
     if (!user || !valid) {
+      request.log.warn({ email, ip: request.ip }, 'login failed')
       return reply.status(401).viewAsync('login', { title: 'Log in', email, error: 'Wrong email or password.' })
     }
 
     const id = randomBytes(32).toString('base64url')
     await app.redis.set(sessionKey(id), user.id, 'EX', SESSION_TTL_SECONDS)
+    request.log.info({ userId: user.id, ip: request.ip }, 'logged in')
 
     return reply
       .setCookie(COOKIE, id, {

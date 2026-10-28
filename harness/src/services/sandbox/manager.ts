@@ -1,3 +1,4 @@
+import { logger } from '../../logger.ts'
 import type { createActivityService } from '../activities/index.ts'
 import { HttpError } from '../http-error.ts'
 import type { createWorkspaceService } from '../workspaces/index.ts'
@@ -5,6 +6,8 @@ import { depsCache } from './deps-cache.ts'
 import type { NetworkRules } from './network-controller.ts'
 import { portPool } from './port-pool.ts'
 import { createSandbox } from './sandbox.ts'
+
+const log = logger('sandbox-manager')
 
 const READY_TIMEOUT_MS = 90 * 1000
 
@@ -76,6 +79,7 @@ export const createSandboxManager = ({
 
     const hostPort = ports.take()
     if (hostPort === null) {
+      log.warn({ workspaceId }, 'workspace app not launched: no free port on this worker')
       await activities.update(activityId, { status: 'failed', exitCode: null, output: 'No free port on this worker' })
       return null
     }
@@ -95,17 +99,23 @@ export const createSandboxManager = ({
     })
     void sandboxes.get(workspaceId)?.deleteLogs()
     sandboxes.set(workspaceId, launched)
+    log.info({ workspaceId, activityId, port: hostPort }, 'workspace app launching')
 
     void launched.ready().then(
       async () => {
+        log.info({ workspaceId, port: hostPort }, 'workspace app running')
         await workspaces.setStatus(workspaceId, 'running')
         await settle(activityId, launched, 'succeeded', null)
       },
-      async () => settle(activityId, launched, 'failed', await launched.exited())
+      async () => {
+        log.warn({ workspaceId, activityId }, 'workspace app failed to start')
+        await settle(activityId, launched, 'failed', await launched.exited())
+      }
     )
-    void launched.exited().then(async () => {
+    void launched.exited().then(async exitCode => {
       ports.release(hostPort)
       if (sandboxes.get(workspaceId) === launched && launched.status() === 'failed') {
+        log.warn({ workspaceId, exitCode }, 'workspace app exited on its own')
         await workspaces.setStatus(workspaceId, 'stopped')
       }
     })
@@ -159,6 +169,7 @@ export const createSandboxManager = ({
         clearTimeout(timer)
         const exitCode = timedOut ? null : exited
         const output = await settle(activityId, child, exitCode === 0 ? 'succeeded' : 'failed', exitCode)
+        log.info({ workspaceId, activityId, exitCode, timedOut }, 'workspace command finished')
 
         return { exitCode, output, timedOut }
       } finally {
@@ -172,6 +183,7 @@ export const createSandboxManager = ({
         await workspaces.setLaunchOptions(workspaceId, null)
         await sandboxes.get(workspaceId)?.kill()
         await workspaces.setStatus(workspaceId, 'stopped')
+        log.info({ workspaceId }, 'workspace app stopped')
       }),
 
     logs: async (workspaceId: string, tail: number) => (await sandboxes.get(workspaceId)?.logs(tail, true)) ?? [],
@@ -199,6 +211,7 @@ export const createSandboxManager = ({
         [...sandboxes]
           .filter(([, launched]) => launched.status() === 'running' && launched.isIdle(idleMs))
           .map(async ([workspaceId, launched]) => {
+            log.info({ workspaceId }, 'stopping idle workspace app')
             await launched.kill()
             await launched.deleteLogs()
             if (sandboxes.get(workspaceId) === launched) await workspaces.setStatus(workspaceId, 'stopped')

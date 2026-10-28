@@ -3,15 +3,17 @@ import { mkdir, readdir, rename, rm, stat, unlink } from 'node:fs/promises'
 import { basename, dirname, join, relative, resolve } from 'node:path'
 
 import { desc, eq, sql } from 'drizzle-orm'
-import type { FastifyBaseLogger } from 'fastify'
 
 import { users, workspaces } from '../../db/schema.ts'
 import type { Db } from '../../db/type.ts'
+import { logger } from '../../logger.ts'
 import { HttpError } from '../http-error.ts'
 import { depsCache } from '../sandbox/deps-cache.ts'
 import { decrypt, encrypt } from './crypto.ts'
 import { ensureFile, ensureFolder, isBinary, isInside, walk } from './files.ts'
 import { checkZip, extractZip } from './zip.ts'
+
+const log = logger('workspaces-service')
 
 // 1–63 lowercase letters, digits and -, not starting or ending with -
 export const NAME_PATTERN = '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$'
@@ -21,13 +23,11 @@ export const createWorkspaceService = ({
   dir,
   depsRoot,
   dataEncryptionKey,
-  log,
 }: {
   db: Db
   dir: string
   depsRoot: string
   dataEncryptionKey: string
-  log: FastifyBaseLogger
 }) => {
   const path = (id: string) => join(resolve(dir), id)
   const trash = (id: string) => join(resolve(dir), '.deleted', id)
@@ -91,6 +91,7 @@ export const createWorkspaceService = ({
         return row
       })
       if (!created) throw new HttpError(409, 'A workspace already has this name')
+      log.info({ workspaceId: created.id, name, userId }, 'workspace created')
 
       return getOrThrow(created.id)
     },
@@ -119,6 +120,7 @@ export const createWorkspaceService = ({
           .set({ defaultEnv: encryptEnv(defaultEnv, row.defaultEnv), updatedAt: sql`now()` })
           .where(eq(workspaces.id, id))
       })
+      log.info({ workspaceId: id, keys: Object.keys(defaultEnv) }, 'workspace env changed')
     },
 
     delete: async (id: string) => {
@@ -131,6 +133,7 @@ export const createWorkspaceService = ({
           if (err.code !== 'ENOENT') throw err
         })
       })
+      log.info({ workspaceId: id }, 'workspace deleted')
 
       rm(trash(id), { recursive: true, force: true }).catch(err =>
         log.error({ err, id }, 'failed to remove deleted workspace files')
@@ -158,6 +161,7 @@ export const createWorkspaceService = ({
       mkdir(target, { recursive: true })
         .then(() => extractZip(zip, target))
         .then(() => db.update(workspaces).set({ updatedAt: sql`now()` }).where(eq(workspaces.id, id)))
+        .then(() => log.info({ workspaceId: id, path: relativePath, files }, 'upload extracted'))
         .catch(err => log.error({ err, id }, 'failed to extract upload'))
         .then(() => rm(zip, { force: true }))
         .catch(err => log.error({ err, zip }, 'failed to remove upload'))

@@ -2,8 +2,11 @@ import http, { type IncomingMessage, type ServerResponse } from 'node:http'
 import net from 'node:net'
 import type { Duplex } from 'node:stream'
 
+import { logger } from '../../logger.ts'
 import type { createSandboxManager } from './manager.ts'
 import type { createSandbox } from './sandbox.ts'
+
+const log = logger('port-forwarder')
 
 export const WORKSPACE_APP_HEADER = 'x-workspace-app'
 
@@ -30,6 +33,13 @@ export const portForwarder = (manager: ReturnType<typeof createSandboxManager>) 
     },
 
     request: async (req: IncomingMessage, res: ServerResponse, workspaceId: string) => {
+      const startedAt = Date.now()
+      res.once('close', () =>
+        log.debug(
+          { workspaceId, method: req.method, url: req.url, statusCode: res.statusCode, durationMs: Date.now() - startedAt },
+          'workspace app request forwarded'
+        )
+      )
       const found = await target(workspaceId)
 
       if (!('port' in found)) {
@@ -49,6 +59,7 @@ export const portForwarder = (manager: ReturnType<typeof createSandboxManager>) 
         }
       )
       upstream.once('error', err => {
+        log.warn({ workspaceId, port: found.port, err }, 'workspace app unreachable on its port')
         if (!res.headersSent) res.writeHead(502, { 'content-type': 'text/plain; charset=utf-8' })
         res.end(`workspace unreachable: ${err.message}`)
       })
@@ -59,6 +70,7 @@ export const portForwarder = (manager: ReturnType<typeof createSandboxManager>) 
       const found = await target(workspaceId)
 
       if (!('port' in found)) {
+        log.info({ workspaceId, url: req.url, statusCode: found.statusCode }, 'workspace app websocket refused')
         socket.end(`HTTP/1.1 ${found.statusCode} ${http.STATUS_CODES[found.statusCode]}\r\nconnection: close\r\n\r\n`)
         return
       }

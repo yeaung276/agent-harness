@@ -11,6 +11,7 @@ export const redis = fp(
   async app => {
     const redis = new Redis(app.config.REDIS_URL, { lazyConnect: true })
     redis.on('error', err => app.log.error(err, 'redis error'))
+    redis.on('ready', () => app.log.info('redis connected'))
 
     app.decorate('redis', redis)
     app.addHook('onClose', async () => {

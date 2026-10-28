@@ -3,6 +3,10 @@ import { BlockList, isIP, isIPv6 } from 'node:net'
 
 import type { BrowserContext } from 'playwright-core'
 
+import { logger } from '../../logger.ts'
+
+const log = logger('browser-guard')
+
 const privateAddresses = new BlockList()
 for (const [address, prefix] of [
   ['0.0.0.0', 8],
@@ -78,6 +82,7 @@ export const isAllowed = async (raw: string, workspaceAccessPort?: number | null
 export const guard = async (context: BrowserContext, getWorkspaceAccessPort?: () => number | null) => {
   await context.route('**/*', async route => {
     const allowed = await isAllowed(route.request().url(), getWorkspaceAccessPort?.())
+    log.debug({ url: route.request().url(), allowed }, 'browser request checked against the network rule')
 
     await (allowed ? route.continue() : route.abort('blockedbyclient')).catch(() => undefined)
   })
@@ -85,7 +90,9 @@ export const guard = async (context: BrowserContext, getWorkspaceAccessPort?: ()
   await context.routeWebSocket(
     () => true,
     async ws => {
-      if (await isAllowed(ws.url(), getWorkspaceAccessPort?.())) ws.connectToServer()
+      const allowed = await isAllowed(ws.url(), getWorkspaceAccessPort?.())
+      log.info({ url: ws.url(), allowed }, 'browser websocket checked against the network rule')
+      if (allowed) ws.connectToServer()
       else await ws.close({ code: 1008, reason: 'blocked' }).catch(() => undefined)
     }
   )

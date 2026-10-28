@@ -15,7 +15,6 @@ const createServices = (app: FastifyInstance) => ({
     dir: app.config.WORKSPACES_DIR,
     depsRoot: app.config.SANDBOX_DEPS_ROOT,
     dataEncryptionKey: app.config.DATA_ENCRYPTION_KEY,
-    log: app.log,
   }),
 })
 

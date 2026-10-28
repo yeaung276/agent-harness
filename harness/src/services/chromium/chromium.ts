@@ -5,8 +5,11 @@ import { createInterface } from 'node:readline'
 
 import { chromium as playwright } from 'playwright-core'
 
+import { logger } from '../../logger.ts'
 import { PROXY_PORT } from '../sandbox/network-controller.ts'
 import { createSandbox } from '../sandbox/sandbox.ts'
+
+const log = logger('chromium')
 
 export const CDP_PORT = 9222
 
@@ -64,11 +67,8 @@ export const createChromium = ({ mode, portMin, portMax }: { mode: 'bwrap' | 'no
       })
       sandbox = launched
       if (launched.stdout) {
-        // the pipe is read even in tests so chromium never blocks on a full pipe
-        const quiet = process.env.NODE_ENV === 'test'
-        createInterface({ input: launched.stdout }).on('line', line => {
-          if (!quiet) process.stdout.write(`[chromium] ${line}\n`)
-        })
+        // the pipe is read even when nothing logs, so chromium never blocks on a full pipe
+        createInterface({ input: launched.stdout }).on('line', line => log.info({ output: line }, 'chromium printed'))
       }
 
       cleanup = launched.exited().then(async () => {
@@ -83,6 +83,7 @@ export const createChromium = ({ mode, portMin, portMax }: { mode: 'bwrap' | 'no
       try {
         await launched.ready()
         await (await fetch(`${connectionUrl()}/json/version`)).json()
+        log.info('chromium started')
       } catch (error) {
         sandbox = undefined
         await launched.kill()

@@ -2,8 +2,11 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
+import { logger } from '../../logger.ts'
 import { createSandbox } from '../sandbox/sandbox.ts'
 import { CDP_PORT, type Chromium } from './chromium.ts'
+
+const log = logger('chromium-runner')
 
 const MAX_RESULT_BYTES = 32 * 1024 * 1024
 const PLAYWRIGHT_CORE = dirname(require.resolve('playwright-core'))
@@ -111,6 +114,7 @@ export const createRunner = ({ mode, chromium }: { mode: 'bwrap' | 'none'; chrom
       const { result, error } = JSON.parse(output)
       return { result, error, timedOut, durationMs }
     } catch {
+      log.warn({ exitCode, targetId }, 'browser call runner exited without a result')
       return { result: null, error: `the runner exited with ${exitCode}`, timedOut, durationMs }
     }
   },

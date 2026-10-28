@@ -4,6 +4,9 @@ import { and, desc, eq, gt, isNull, lt, or, sql } from 'drizzle-orm'
 
 import { apiTokens, users } from '../../db/schema.ts'
 import type { Db } from '../../db/type.ts'
+import { logger } from '../../logger.ts'
+
+const log = logger('tokens-service')
 
 const PREFIX = 'pat_'
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -21,6 +24,7 @@ export const createTokenService = ({ db }: { db: Db }) => ({
       tokenStart: token.slice(0, PREFIX.length + 4),
       expiresAt: expiresInDays === null ? null : new Date(Date.now() + expiresInDays * DAY_MS),
     })
+    log.info({ userId, name, tokenStart: token.slice(0, PREFIX.length + 4), expiresInDays }, 'api token created')
     return token
   },
 
@@ -49,6 +53,7 @@ export const createTokenService = ({ db }: { db: Db }) => ({
 
   revoke: async (id: string) => {
     await db.delete(apiTokens).where(eq(apiTokens.id, id))
+    log.info({ tokenId: id }, 'api token revoked')
   },
 
   // the user an unexpired token belongs to, or null

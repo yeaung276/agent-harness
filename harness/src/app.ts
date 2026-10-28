@@ -2,6 +2,7 @@ import type { TypeBoxTypeProvider } from '@fastify/type-provider-typebox'
 import Fastify, { type FastifyServerOptions } from 'fastify'
 
 import type { Config } from './config.ts'
+import { bindLogger } from './logger.ts'
 import { chromium } from './plugins/chromium.ts'
 import { db } from './plugins/db.ts'
 import { multipart } from './plugins/multipart.ts'
@@ -31,6 +32,7 @@ const logger = ({ NODE_ENV, LOG_LEVEL }: Config): FastifyServerOptions['logger']
 
 export const buildApp = async (config: Config) => {
   const app = Fastify({ logger: logger(config) }).withTypeProvider<TypeBoxTypeProvider>()
+  bindLogger(app.log)
 
   app.decorate('config', config)
   await app.register(db)

@@ -3,6 +3,7 @@ import { join } from 'node:path'
 
 import type { Browser } from 'playwright-core'
 
+import { logger } from '../../logger.ts'
 import type { createBrowserSessionService } from '../browser-sessions/index.ts'
 import { HttpError } from '../http-error.ts'
 import type { createSandboxManager } from '../sandbox/manager.ts'
@@ -11,6 +12,8 @@ import { createChromium } from './chromium.ts'
 import { type NavigatedContent, ops, type PageContent, type WaitFor } from './ops.ts'
 import { createRunner } from './runner.ts'
 import { createSession, type Session } from './session.ts'
+
+const log = logger('chromium-manager')
 
 const CALL_TIMEOUT_MS = 60 * 1000
 const RESTART_DELAY_MS = 1000
@@ -61,8 +64,11 @@ export const createChromiumManager = ({
       try {
         await chromium.start()
         connection = await chromium.connect()
+        log.info('chromium restarted')
         return
-      } catch {}
+      } catch (err) {
+        log.warn({ err }, 'chromium restart failed, retrying')
+      }
     }
   }
 
@@ -104,11 +110,13 @@ export const createChromiumManager = ({
         if (tab) await closeTab(browserSession)
         tab = await openTab(browserSession)
         await browserSessions.update(sessionId, { status: 'alive' })
+        log.info({ sessionId }, 'browser session tab reopened where it left off')
       }
 
       const release = tab.use()
       try {
         const ran = await runner.exec(tab.targetId, code, timeoutMs)
+        log.info({ sessionId, durationMs: ran.durationMs, timedOut: ran.timedOut, error: ran.error }, 'browser call finished')
         await browserSessions.update(sessionId, await tab.state())
 
         return ran
@@ -120,6 +128,7 @@ export const createChromiumManager = ({
   return {
     start: async () => {
       chromium.onExit(() => {
+        log.error({ lostTabs: tabs.size }, 'chromium exited unexpectedly, restarting')
         tabs.clear()
         connection = undefined
         void restart()
@@ -136,6 +145,7 @@ export const createChromiumManager = ({
 
       const browserSession = await browserSessions.create(userId, { workspaceId, record })
       await openTab(browserSession)
+      log.info({ sessionId: browserSession.id, workspaceId, record, userId }, 'browser session created')
 
       return browserSession
     },
@@ -227,6 +237,7 @@ export const createChromiumManager = ({
         }
 
         await closeTab(browserSession)
+        log.info({ sessionId }, 'browser session closed')
       }),
 
     stopIdle: async () => {
@@ -237,6 +248,7 @@ export const createChromiumManager = ({
             locked(sessionId, async () => {
               const browserSession = await browserSessions.get(sessionId)
               if (browserSession) await closeTab(browserSession)
+              log.info({ sessionId }, 'idle browser session tab closed')
             })
           )
       )
