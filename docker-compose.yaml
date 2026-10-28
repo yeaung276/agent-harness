@@ -28,7 +28,9 @@ services:
       retries: 10
 
   app:
-    build: .
+    build:
+      context: .
+      dockerfile: harness/build/default.Dockerfile
     environment:
       DATABASE_URL: postgres://postgres:postgres@postgres:5432/app
       REDIS_URL: redis://redis:6379

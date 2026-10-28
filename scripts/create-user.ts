@@ -1,8 +1,7 @@
 import { drizzle } from 'drizzle-orm/node-postgres'
 import { Pool } from 'pg'
 
-import { loadConfig } from '../src/config.ts'
-import { users } from '../src/db/schema.ts'
+import { users } from '../harness/src/db/schema.ts'
 
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const MIN_PASSWORD_LENGTH = 8
@@ -48,7 +47,10 @@ if (!EMAIL.test(email)) fail(`Not an email address: ${email}`)
 const password = await readPassword()
 if (password.length < MIN_PASSWORD_LENGTH) fail(`The password needs at least ${MIN_PASSWORD_LENGTH} characters.`)
 
-const pool = new Pool({ connectionString: loadConfig().DATABASE_URL })
+const databaseUrl = process.env.DATABASE_URL
+if (!databaseUrl) fail('DATABASE_URL is not set.')
+
+const pool = new Pool({ connectionString: databaseUrl })
 
 try {
   const [user] = await drizzle({ client: pool })

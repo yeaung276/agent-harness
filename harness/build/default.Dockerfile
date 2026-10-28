@@ -6,10 +6,12 @@ WORKDIR /usr/src/app
 FROM base AS build
 
 COPY package.json bun.lock ./
+COPY harness/package.json harness/
 RUN bun install --frozen-lockfile
 
-COPY src src
-RUN bun run build
+COPY harness/src harness/src
+# bundles the server into harness/dist, with views, public and playwright-core (runner.ts mounts it into the sandbox)
+RUN bun run build:harness
 
 
 FROM base AS runner
@@ -28,12 +30,7 @@ RUN apt-get update \
      jq ripgrep less file tree postgresql-client sqlite3 tzdata \
   && rm -rf /var/lib/apt/lists/*
 
-COPY package.json bun.lock ./
-RUN bun install --frozen-lockfile --production
-
-COPY --from=build /usr/src/app/src src
-COPY scripts scripts
-COPY drizzle drizzle
+COPY --from=build /usr/src/app/harness/dist harness/dist
 
 RUN mkdir -p /workspaces \
   && chown bun:bun /workspaces
@@ -43,4 +40,5 @@ USER bun
 EXPOSE 3000
 
 ENTRYPOINT ["dumb-init", "--"]
-CMD ["bun", "src/index.ts"]
+# run from the repo root: the sandbox hides process.cwd(), so this keeps all of /usr/src/app out of it
+CMD ["bun", "harness/dist/index.js"]

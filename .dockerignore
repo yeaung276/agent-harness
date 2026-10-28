@@ -1,4 +1,6 @@
-node_modules
-.env
-.env.*
-src/routes/web/public/app.css
+**/node_modules
+**/.env
+**/.env.*
+harness/src/routes/web/public/app.css
+harness/dist
+workspaces
