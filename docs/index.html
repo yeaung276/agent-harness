@@ -177,6 +177,7 @@
             <tbody>
               <tr><td><code>pods:&lt;name&gt;</code></td><td>cpu, memory, previews, sessions, address</td><td>A worker's stats reporter</td><td>Expires 30 s after its last write.</td></tr>
               <tr><td><code>placement:&lt;appId&gt;</code></td><td>Worker pod name</td><td>Placement controller, <code>SET NX</code></td><td>Until that worker's <code>pods</code> key is gone; then the next call replaces it.</td></tr>
+              <tr><td><code>logs:&lt;name&gt;</code></td><td>Stream of the worker's log lines</td><td>A worker's logger</td><td>Capped at <code>LOG_MAX_LINES</code>; expires 24 h after its last write. See <a href="#logging">Logging</a>.</td></tr>
             </tbody>
           </table>
 
@@ -1100,6 +1101,137 @@
   </div>
 </details>
 </div>
+        </section>
+
+        <section class="doc-section" id="workers">
+          <h2>Workers</h2>
+          <p>A worker pod is the runner started with <code>APP_MODE=worker</code>. It runs the sandboxes and browser sessions of the workspaces placed on it and reports on itself to Redis: its load through the stats reporter, its logs through a log stream. Both are keyed by its pod name, which a StatefulSet keeps across restarts, so the server pod reads every worker's state from Redis and never has to find or call a worker to learn about it.</p>
+
+          <h3>Capabilities</h3>
+          <table>
+            <thead>
+              <tr><th>Capability</th><th>What it does</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Sandbox execution</td><td>Runs each placed workspace's launch server and execs under bubblewrap, one sandbox per workspace, and forwards its app traffic on port 4002. See <a href="#sandbox">Sandboxes</a>.</td></tr>
+              <tr><td>Browser sessions</td><td>One Chromium per pod, one tab per session, driven over CDP by a confined runner per call. See <a href="#browser-sessions">Browsers</a>.</td></tr>
+            </tbody>
+          </table>
+
+          <h3 id="stats-reporter">Stats reporter</h3>
+          <p>Every 10 s each worker sets <code>pods:&lt;name&gt;</code> to its cpu, memory, running previews, open sessions and internal address, expiring after 30 s. A worker whose key has expired is gone as far as placement is concerned.</p>
+          <div class="pending">
+            <span class="badge tbd">TBD</span>
+            <p>Each field's exact meaning and unit, how the reporter measures them, what it writes on shutdown, and how the server lists registered workers for the machines page.</p>
+          </div>
+
+          <h3 id="placement-controller">Placement controller</h3>
+          <p>A module on the server pod, not a worker part, but it is the reader of the stats reporter. It keeps each workspace on one worker: a placement key in Redis names the worker, and the first call for a workspace with no live placement claims the worker with the most headroom in <code>pods:*</code> with <code>SET NX</code>. See <a href="#overview">Overview</a>.</p>
+          <div class="pending">
+            <span class="badge tbd">TBD</span>
+            <p>How headroom is computed from the stats, how the sandbox manager's stop and idle sweep remove a placement, and what happens to a placement when its worker comes back under the same name.</p>
+          </div>
+
+          <h3 id="logging">Logging</h3>
+          <p>Each worker writes its logs to two places: stdout, for the container runtime, and a Redis stream named after the pod, <code>logs:&lt;name&gt;</code>, for the server's machines page. The server reads any worker's logs from Redis without calling the worker, and the logs of a worker that has died can still be read.</p>
+          <p>The stream is for debugging, not for keeping records. It holds a worker's most recent lines and is gone a day after the worker stops writing. Anything a user needs later, such as why a launch failed, belongs on its Postgres row, as <code>sandbox_activities</code> already does.</p>
+          <figure>
+            <div class="diagram">
+              <svg class="c4" viewBox="0 0 980 720" role="img" aria-label="Logging from a worker pod to the server pod through Redis. 1: on the worker pod, the worker's modules, fastify, the sandbox and the chromium plugin, and Chromium's stdout and stderr lines, tagged component chromium, all log through the logger, pino at LOG_LEVEL, which makes one JSON line per entry. 2: the logger writes each line to stdout, which the container runtime keeps, and hands it to the Redis transport, a pino transport with a buffer. 3: the transport flushes every second or every 200 lines with XADD to logs:name with MAXLEN about LOG_MAX_LINES, then EXPIRE; if Redis is down it keeps the newest 1,000 lines and never blocks. In Redis, logs:name is a stream capped at LOG_MAX_LINES that expires LOG_TTL_HOURS after the last flush. 4: an operator's browser opens a worker's logs on the server pod's machines page. 5: the server pod's logs route reads the stream with XREVRANGE for the newest lines and for older lines on scroll, and XREAD BLOCK for the live tail, which it pushes to the browser over server-sent events. The server pod itself logs to stdout only.">
+                <defs>
+                  <marker id="lg-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                    <path d="M0 0L10 5L0 10z" class="arrowhead"/>
+                  </marker>
+                </defs>
+
+                <rect class="person" x="40" y="16" width="240" height="56" rx="20"/>
+                <text class="on-dark name" x="160" y="39" text-anchor="middle">Operator's browser</text>
+                <text class="on-dark type" x="160" y="56" text-anchor="middle">[machines page]</text>
+
+                <rect class="boundary" x="20" y="110" width="440" height="170" rx="10"/>
+                <text class="label name" x="250" y="134" text-anchor="middle">server pod</text>
+                <text class="label type" x="250" y="150" text-anchor="middle">[logs to stdout only]</text>
+
+                <rect class="component" x="40" y="170" width="400" height="90" rx="8"/>
+                <text class="on-light name" x="240" y="194" text-anchor="middle">Logs route</text>
+                <text class="on-light type" x="240" y="211" text-anchor="middle">[one worker's logs, by name]</text>
+                <text class="on-light type" x="240" y="236" text-anchor="middle">newest · older on scroll · live tail over SSE</text>
+
+                <rect class="external" x="620" y="150" width="340" height="130" rx="8"/>
+                <text class="on-dark name" x="790" y="174" text-anchor="middle">Redis</text>
+                <text class="on-dark type" x="790" y="191" text-anchor="middle">[central]</text>
+                <text class="on-dark type" x="790" y="216" text-anchor="middle">logs:&lt;name&gt; → stream of JSON lines</text>
+                <text class="on-dark type" x="790" y="232" text-anchor="middle">capped at LOG_MAX_LINES</text>
+                <text class="on-dark type" x="790" y="248" text-anchor="middle">expires LOG_TTL_HOURS after the last flush</text>
+
+                <rect class="boundary" x="20" y="340" width="940" height="260" rx="10"/>
+                <text class="label name" x="944" y="576" text-anchor="end">worker pod</text>
+                <text class="label type" x="944" y="590" text-anchor="end">[POD_NAME · same on every worker]</text>
+
+                <rect class="component" x="40" y="370" width="220" height="70" rx="6"/>
+                <text class="on-light name" x="150" y="396" text-anchor="middle">Worker modules</text>
+                <text class="on-light type" x="150" y="413" text-anchor="middle">[fastify · sandbox · chromium plugin]</text>
+
+                <rect class="component" x="40" y="460" width="220" height="70" rx="6"/>
+                <text class="on-light name" x="150" y="486" text-anchor="middle">Chromium process</text>
+                <text class="on-light type" x="150" y="503" text-anchor="middle">[stdout + stderr lines]</text>
+                <text class="on-light type" x="150" y="519" text-anchor="middle">component: chromium</text>
+
+                <rect class="component" x="320" y="370" width="240" height="160" rx="6"/>
+                <text class="on-light name" x="440" y="394" text-anchor="middle">Logger</text>
+                <text class="on-light type" x="440" y="411" text-anchor="middle">[pino · LOG_LEVEL and above]</text>
+                <text class="on-light type" x="440" y="436" text-anchor="middle">one JSON line per entry</text>
+                <text class="on-light type" x="440" y="453" text-anchor="middle">to stdout and the transport</text>
+
+                <rect class="component" x="620" y="370" width="320" height="160" rx="6"/>
+                <text class="on-light name" x="780" y="394" text-anchor="middle">Redis transport</text>
+                <text class="on-light type" x="780" y="411" text-anchor="middle">[pino transport · buffer]</text>
+                <text class="on-light type" x="780" y="436" text-anchor="middle">flush every 1 s or 200 lines</text>
+                <text class="on-light type" x="780" y="453" text-anchor="middle">XADD MAXLEN ~ · then EXPIRE</text>
+                <text class="on-light type" x="780" y="478" text-anchor="middle">Redis down: keep the newest 1,000</text>
+                <text class="on-light type" x="780" y="495" text-anchor="middle">lines, never block the worker</text>
+
+                <rect class="external" x="320" y="640" width="240" height="56" rx="8"/>
+                <text class="on-dark name" x="440" y="663" text-anchor="middle">Container runtime</text>
+                <text class="on-dark type" x="440" y="680" text-anchor="middle">[stdout · kubectl logs]</text>
+
+                <line class="edge" x1="260" y1="405" x2="318" y2="405" marker-end="url(#lg-arrow)"/>
+                <line class="edge" x1="260" y1="495" x2="318" y2="495" marker-end="url(#lg-arrow)"/>
+                <text class="edge-label" x="289" y="397" text-anchor="middle"><tspan font-weight="600">1.</tspan> log</text>
+                <text class="edge-label" x="289" y="487" text-anchor="middle"><tspan font-weight="600">1.</tspan> lines</text>
+
+                <line class="edge" x1="560" y1="450" x2="618" y2="450" marker-end="url(#lg-arrow)"/>
+                <text class="edge-label" x="589" y="442" text-anchor="middle"><tspan font-weight="600">2.</tspan></text>
+                <line class="edge" x1="440" y1="530" x2="440" y2="638" marker-end="url(#lg-arrow)"/>
+                <text class="edge-label" x="448" y="622"><tspan font-weight="600">2.</tspan> stdout</text>
+
+                <line class="edge async" x1="780" y1="370" x2="780" y2="282" marker-end="url(#lg-arrow)"/>
+                <text class="edge-label" x="788" y="318"><tspan font-weight="600">3.</tspan> XADD · EXPIRE</text>
+                <text class="note" x="788" y="332">batched, one pipeline</text>
+
+                <line class="edge" x1="80" y1="72" x2="80" y2="168" marker-end="url(#lg-arrow)"/>
+                <text class="edge-label" x="88" y="92"><tspan font-weight="600">4.</tspan> open a worker's logs</text>
+                <text class="note" x="88" y="106">pages + live tail over SSE</text>
+
+                <line class="edge" x1="440" y1="215" x2="618" y2="215" marker-end="url(#lg-arrow)"/>
+                <text class="edge-label" x="529" y="207" text-anchor="middle"><tspan font-weight="600">5.</tspan> read</text>
+                <text class="note" x="529" y="233" text-anchor="middle">XREVRANGE · XREAD</text>
+              </svg>
+            </div>
+            <figcaption>C4 component diagram: a worker's logs reach the server pod through Redis, never by calling the worker. Numbers follow one line from the worker to the browser. The dashed arrow is batched. Grey boxes are outside the runner.</figcaption>
+          </figure>
+
+          <table>
+            <thead>
+              <tr><th>Part</th><th>Setting</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>What goes in</td><td>Every line the worker's logger writes at <code>LOG_LEVEL</code> and above, as one entry with one field, <code>line</code>: the same JSON line written to stdout. Every line carries <code>component</code>, the module that wrote it, such as <code>port-forwarder</code> or <code>sandbox-manager</code>. Chromium's stdout and stderr go through the logger as <code>component: "chromium"</code>. A sandbox's own output stays in its log files; see <a href="#sandbox">Sandboxes</a>. The server pod logs to stdout only.</td></tr>
+              <tr><td>Write</td><td>The transport flushes every second or every 200 lines in one pipeline: <code>XADD logs:&lt;name&gt; MAXLEN ~ LOG_MAX_LINES * line …</code>, then <code>EXPIRE logs:&lt;name&gt; LOG_TTL_HOURS</code>. If Redis is slow or down it keeps the newest 1,000 lines, and the next flush that succeeds adds one line with the number dropped. Logging never blocks or fails the worker.</td></tr>
+              <tr><td>Limits</td><td><code>LOG_MAX_LINES</code>, 10,000 by default, so a noisy worker can't fill the Redis memory that stats, placements and logins share. <code>LOG_TTL_HOURS</code>, 24 by default: a restarted worker keeps its name and appends to its stream, and a removed one's stream stays readable until it expires.</td></tr>
+              <tr><td>Read</td><td>Newest: <code>XREVRANGE logs:&lt;name&gt; + - COUNT 100</code>. Older, on scroll: the same from <code>(&lt;oldest id shown&gt;</code>; fewer than 100 back is the start of what is kept, marked on the page. Live: <code>XREAD BLOCK 15000</code> from the newest id shown, pushed over server-sent events.</td></tr>
+            </tbody>
+          </table>
         </section>
 
         <section class="doc-section" id="sandbox">
