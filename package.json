@@ -10,6 +10,7 @@
     "migrate:harness": "bun run --filter harness db:migrate",
     "test:harness": "bun run --filter harness test:container",
     "user:create": "bun scripts/create-user.ts",
+    "ca:create": "bun scripts/worker-ca.ts",
     "docs": "bun scripts/docs.ts"
   },
   "dependencies": {

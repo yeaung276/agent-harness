@@ -9,6 +9,7 @@ import { multipart } from './plugins/multipart.ts'
 import { redis } from './plugins/redis.ts'
 import { sandbox } from './plugins/sandbox.ts'
 import { services } from './plugins/services.ts'
+import { workers } from './plugins/workers.ts'
 import { api } from './routes/api/index.ts'
 import { mcp } from './routes/mcp/index.ts'
 import { web } from './routes/web/index.ts'
@@ -45,6 +46,7 @@ export const buildApp = async (config: Config) => {
     return app
   }
 
+  await app.register(workers)
   await app.register(multipart)
 
   await app.register(api, { prefix: '/api/v1' })

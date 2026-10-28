@@ -24,6 +24,7 @@
     "@fastify/static": "^10.1.6",
     "@fastify/type-provider-typebox": "^6.3.0",
     "@fastify/view": "^12.0.1",
+    "@peculiar/x509": "1.14.3",
     "ajv-formats": "^3.0.1",
     "drizzle-orm": "^0.45.4",
     "eta": "^4.6.0",
