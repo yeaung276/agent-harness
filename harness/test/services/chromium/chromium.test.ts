@@ -116,13 +116,13 @@ describe.if(linux)('chromium', () => {
 
   test('tells its owner when Chromium dies on its own, and starts again', async () => {
     const own = await started()
-    const exits: string[] = []
-    own.onExit(output => exits.push(output))
+    let exits = 0
+    own.onExit(() => exits++)
 
     const cdp = await (await own.connect()).newBrowserCDPSession()
     await cdp.send('Browser.close').catch(() => undefined)
 
-    expect(await until(async () => exits.length, count => count > 0)).toBe(1)
+    expect(await until(async () => exits, count => count > 0)).toBe(1)
     expect(() => own.connectionUrl()).toThrow(/not running/)
 
     await own.start()
@@ -130,31 +130,21 @@ describe.if(linux)('chromium', () => {
     await page.goto(LAUNCH)
 
     expect(await page.textContent('body')).toBe('app')
-    expect(exits).toHaveLength(1)
+    expect(exits).toBe(1)
   }, 60_000)
 
   test('stops without reporting a crash, and leaves nothing answering and no profile behind', async () => {
     const before = await profiles()
     const own = await started()
-    const exits: string[] = []
-    own.onExit(output => exits.push(output))
+    let exits = 0
+    own.onExit(() => exits++)
 
     await own.stop()
 
     expect(await until(cdpAnswers, answers => !answers)).toBe(false)
     expect(() => own.connectionUrl()).toThrow(/not running/)
-    expect(exits).toEqual([])
+    expect(exits).toBe(0)
     expect(await profiles()).toEqual(before)
-  }, 60_000)
-
-  test('tails its own output while running, and has none once stopped', async () => {
-    const own = await started()
-
-    expect((await own.logs(200)).join('\n')).toContain('DevTools listening on')
-
-    await own.stop()
-
-    expect(await own.logs(200)).toEqual([])
   }, 60_000)
 
 })

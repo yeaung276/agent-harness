@@ -1,6 +1,7 @@
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { createInterface } from 'node:readline'
 
 import { chromium as playwright } from 'playwright-core'
 
@@ -13,15 +14,14 @@ const READY_TIMEOUT_MS = 30_000
 
 export const createChromium = ({ mode, portMin, portMax }: { mode: 'bwrap' | 'none'; portMin: number; portMax: number }) => {
   let sandbox: ReturnType<typeof createSandbox> | undefined
-  let endpoint: string | undefined
   let stopping = false
   let cleanup: Promise<unknown> = Promise.resolve()
-  const exitHandlers: ((output: string) => void)[] = []
+  const exitHandlers: (() => void)[] = []
 
   const connectionUrl = () => {
-    if (!endpoint) throw new Error('chromium is not running')
+    if (!sandbox) throw new Error('chromium is not running')
 
-    return endpoint
+    return `http://127.0.0.1:${CDP_PORT}`
   }
 
   return {
@@ -55,43 +55,36 @@ export const createChromium = ({ mode, portMin, portMax }: { mode: 'bwrap' | 'no
         memoryMaxMb: 2048,
         cpuMax: 2,
         pidsMax: 1024,
-        command: `exec ${args.map(arg => `'${arg}'`).join(' ')}`,
+        command: `exec ${args.map(arg => `'${arg}'`).join(' ')} 2>&1`,
         env: {},
         ports: { inside: CDP_PORT, host: CDP_PORT },
         outboundPorts: `${portMin}-${portMax}`,
         readyTimeoutMs: READY_TIMEOUT_MS,
+        stdout: 'pipe',
       })
       sandbox = launched
+      if (launched.stdout) {
+        // the pipe is read even in tests so chromium never blocks on a full pipe
+        const quiet = process.env.NODE_ENV === 'test'
+        createInterface({ input: launched.stdout }).on('line', line => {
+          if (!quiet) process.stdout.write(`[chromium] ${line}\n`)
+        })
+      }
 
       cleanup = launched.exited().then(async () => {
         const current = sandbox === launched
-        if (current) {
-          sandbox = undefined
-          endpoint = undefined
-        }
+        if (current) sandbox = undefined
 
-        const output = (await launched.logs(50)).join('\n')
-        await launched.deleteLogs()
         await rm(dir, { recursive: true, force: true })
 
-        if (current && !stopping) for (const handler of exitHandlers) handler(output)
+        if (current && !stopping) for (const handler of exitHandlers) handler()
       })
 
       try {
         await launched.ready()
-
-        const deadline = Date.now() + READY_TIMEOUT_MS
-        for (;;) {
-          const output = (await launched.logs(200)).join('\n')
-          endpoint = /DevTools listening on (ws:\/\/\S+)/.exec(output)?.[1]
-          if (endpoint) break
-          if (launched.status() !== 'running' || Date.now() > deadline) throw new Error(`no CDP endpoint\n${output}`)
-
-          await Bun.sleep(100)
-        }
+        await (await fetch(`${connectionUrl()}/json/version`)).json()
       } catch (error) {
         sandbox = undefined
-        endpoint = undefined
         await launched.kill()
         await cleanup
         throw new Error(`chromium did not start: ${error instanceof Error ? error.message : error}`)
@@ -103,15 +96,12 @@ export const createChromium = ({ mode, portMin, portMax }: { mode: 'bwrap' | 'no
 
       const launched = sandbox
       sandbox = undefined
-      endpoint = undefined
 
       await launched?.kill()
       await cleanup
     },
 
-    logs: async (tail: number) => (await sandbox?.logs(tail, true)) ?? [],
-
-    onExit: (handler: (output: string) => void) => {
+    onExit: (handler: () => void) => {
       exitHandlers.push(handler)
     },
   }

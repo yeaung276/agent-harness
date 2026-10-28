@@ -247,6 +247,16 @@ describe('a piped command', () => {
     expect(await sandbox.logs(10)).toEqual([])
     expect(await readdir(join(tmpdir(), 'sandbox-logs')).catch(() => [])).toEqual(before)
   }, 30_000)
+
+  test('hands back stderr too when the command sends it to stdout', async () => {
+    const sandbox = start(await workspace(), { command: "exec sh -c 'echo out; echo err >&2; echo more' 2>&1", stdout: 'pipe' })
+
+    let output = ''
+    sandbox.stdout?.on('data', chunk => (output += chunk))
+    expect(await sandbox.exited()).toBe(0)
+
+    expect(output).toBe('out\nerr\nmore\n')
+  }, 30_000)
 })
 
 describe('logs', () => {
