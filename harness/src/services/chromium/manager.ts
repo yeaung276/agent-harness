@@ -76,26 +76,34 @@ export const createChromiumManager = ({
       storageState,
     })
     tabs.set(id, tab)
+
+    return tab
   }
 
   const closeTab = async ({ id, workspaceId, record }: BrowserSession) => {
     const tab = tabs.get(id)
     tabs.delete(id)
+    // keep where the tab is, so it reopens there
+    const state = tab?.isOpen() ? await tab.state().catch(() => ({})) : {}
     await tab?.close()
 
-    if (record) await tab?.exportRecording(join(workspaces.getWorkspaceRoot(workspaceId!), 'browser', `${id}.webm`))
-    await browserSessions.update(id, { status: 'closed' })
+    if (record) {
+      await tab?.exportRecording(join(workspaces.getWorkspaceRoot(workspaceId!), 'browser', `${id}-${Date.now()}.webm`))
+    }
+    await browserSessions.update(id, { ...state, status: 'closed' })
   }
 
   const exec = (sessionId: string, code: string, timeoutMs: number) =>
     locked(sessionId, async () => {
       const browserSession = await browserSessions.get(sessionId)
-      if (browserSession?.status !== 'alive') throw new HttpError(404, 'No session has this id, or it is closed')
+      if (!browserSession) throw new HttpError(404, 'No session has this id')
 
-      const tab = tabs.get(sessionId)
+      // a closed, idle or lost tab opens again where the row left off
+      let tab = tabs.get(sessionId)
       if (!tab?.isOpen()) {
-        await closeTab(browserSession)
-        throw new HttpError(404, 'No session has this id, or it is closed')
+        if (tab) await closeTab(browserSession)
+        tab = await openTab(browserSession)
+        await browserSessions.update(sessionId, { status: 'alive' })
       }
 
       const release = tab.use()
@@ -124,6 +132,7 @@ export const createChromiumManager = ({
     create: async (userId: string, { workspaceId, record }: { workspaceId: string | null; record: boolean }) => {
       if (record && !workspaceId) throw new HttpError(400, 'record needs a workspaceId')
       if (workspaceId) await workspaces.get(workspaceId)
+      if (!connection?.isConnected()) throw new HttpError(503, 'The browser is restarting. Try again shortly.')
 
       const browserSession = await browserSessions.create(userId, { workspaceId, record })
       await openTab(browserSession)
@@ -184,7 +193,7 @@ export const createChromiumManager = ({
 
     screenshot: async (sessionId: string, fullPage: boolean, waitFor?: WaitFor) => {
       const browserSession = await browserSessions.get(sessionId)
-      if (browserSession?.status !== 'alive') throw new HttpError(404, 'No session has this id, or it is closed')
+      if (!browserSession) throw new HttpError(404, 'No session has this id')
       if (!browserSession.record) throw new HttpError(409, "The session wasn't created with record")
 
       const ran = await exec(sessionId, ops.screenshot(fullPage, waitFor), CALL_TIMEOUT_MS + (waitFor?.timeoutMs ?? 0))

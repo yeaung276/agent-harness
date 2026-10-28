@@ -24,7 +24,12 @@ let next: (RunResult | Promise<RunResult>)[] = []
 let tabs: ReturnType<typeof fakeTab>[] = []
 let targets = 0
 
-const fakeTab = (options: { record: boolean; getWorkspaceAccessPort?: () => number | null }) => {
+const fakeTab = (options: {
+  record: boolean
+  getWorkspaceAccessPort?: () => number | null
+  url: string | null
+  storageState: unknown
+}) => {
   const tab = {
     options,
     targetId: `target-${targets++}`,
@@ -178,6 +183,7 @@ describe('create', () => {
       status:503,
     })
     expect(tabs).toHaveLength(0)
+    expect(browserSessions.rows.size).toBe(0)
   })
 
   test("gives the tab its workspace's port as it is at each request, and none without a workspace", async () => {
@@ -270,13 +276,17 @@ describe('a call', () => {
     expect(runs).toEqual([])
   })
 
-  test('closes a session whose tab is gone, and says 404', async () => {
-    const { id } = await manager.create('user-1', { workspaceId: null, record: false })
+  test('reopens a tab that closed on its own where the row left off, and runs on it', async () => {
+    const { id } = await manager.create('user-1', { workspaceId: 'ws-1', record: true })
+    await manager.read(id)
     tabOf(0).open = false
 
-    await expect(manager.read(id)).rejects.toMatchObject({ status:404 })
-    expect(browserSessions.rows.get(id)?.status).toBe('closed')
-    expect(runs).toEqual([])
+    await manager.read(id)
+
+    expect(tabOf(0).exportedTo).toHaveLength(1)
+    expect(tabOf(1).options).toMatchObject({ record: true, url: 'http://127.0.0.1:4120/orders' })
+    expect(runs[1]?.targetId).toBe(tabOf(1).targetId)
+    expect(browserSessions.rows.get(id)?.status).toBe('alive')
   })
 })
 
@@ -300,15 +310,25 @@ describe('screenshot', () => {
 })
 
 describe('closing', () => {
-  test('close closes the tab, marks the session closed and keeps the row', async () => {
+  test('close closes the tab, saves where it is to the row and marks it closed', async () => {
     const { id } = await manager.create('user-1', { workspaceId: null, record: false })
 
     await manager.close(id)
 
     expect(tabOf(0).closes).toBe(1)
-    expect(browserSessions.rows.get(id)?.status).toBe('closed')
+    expect(browserSessions.rows.get(id)).toMatchObject({ status: 'closed', url: 'http://127.0.0.1:4120/orders' })
     await expect(manager.close(id)).rejects.toMatchObject({ status:404 })
-    await expect(manager.read(id)).rejects.toMatchObject({ status:404 })
+  })
+
+  test('a call on a closed session reopens it where it was', async () => {
+    const { id } = await manager.create('user-1', { workspaceId: null, record: false })
+    await manager.close(id)
+
+    await manager.read(id)
+
+    expect(tabOf(1).options.url).toBe('http://127.0.0.1:4120/orders')
+    expect(runs[0]?.targetId).toBe(tabOf(1).targetId)
+    expect(browserSessions.rows.get(id)?.status).toBe('alive')
   })
 
   test("saves a recorded session's video into its workspace", async () => {
@@ -316,7 +336,8 @@ describe('closing', () => {
 
     await manager.close(id)
 
-    expect(tabOf(0).exportedTo).toEqual([join(workspaceRoot('ws-1'), 'browser', `${id}.webm`)])
+    expect(tabOf(0).exportedTo).toHaveLength(1)
+    expect(tabOf(0).exportedTo[0]).toMatch(new RegExp(`^${join(workspaceRoot('ws-1'), 'browser', id)}-\\d+\\.webm$`))
   })
 
   test('stopIdle closes only idle tabs, the same way', async () => {
@@ -344,15 +365,18 @@ describe('closing', () => {
 })
 
 describe('Chromium exiting', () => {
-  test('drops the tabs, starts Chromium again, and their sessions answer 404 and are closed', async () => {
+  test('drops the tabs, starts Chromium again, and their sessions reopen on the next call', async () => {
     const { id } = await manager.create('user-1', { workspaceId: null, record: false })
 
     connected = false
     for (const handler of onExit) handler()
+    await expect(manager.read(id)).rejects.toMatchObject({ status:503 })
+
     await Bun.sleep(1100)
     expect(starts).toBe(2)
 
-    await expect(manager.read(id)).rejects.toMatchObject({ status:404 })
-    expect(browserSessions.rows.get(id)?.status).toBe('closed')
+    await manager.read(id)
+    expect(runs[0]?.targetId).toBe(tabOf(1).targetId)
+    expect(browserSessions.rows.get(id)?.status).toBe('alive')
   })
 })
