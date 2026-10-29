@@ -190,10 +190,30 @@ const fakeActivities = () => {
   }
 }
 
+const fakePlacement = () => {
+  const told: string[] = []
+  const elsewhere = new Set<string>()
+
+  return {
+    told,
+    elsewhere,
+    claimWorkspace: async (id: string) => {
+      await lag()
+      told.push(`claim ${id}`)
+      if (elsewhere.has(id)) throw new HttpError(409, 'This workspace is running on another worker')
+    },
+    releaseWorkspace: async (id: string) => {
+      await lag()
+      told.push(`release ${id}`)
+    },
+  }
+}
+
 const devServer: LaunchOptions = { command: 'npm run dev', port: 3000, env: {}, network: {} }
 
 let workspaces: ReturnType<typeof fakeWorkspaces>
 let activities: ReturnType<typeof fakeActivities>
+let placement: ReturnType<typeof fakePlacement>
 let manager: ReturnType<typeof createSandboxManager>
 
 const launchesOf = (id: string) => fakes.filter(fake => fake.workspaceId === id && fake.options.ports)
@@ -228,9 +248,11 @@ beforeEach(() => {
   dirs = join(root, crypto.randomUUID())
   workspaces = fakeWorkspaces()
   activities = fakeActivities()
+  placement = fakePlacement()
   manager = createSandboxManager({
     workspaces: workspaces as unknown as Parameters<typeof createSandboxManager>[0]['workspaces'],
     activities: activities as unknown as Parameters<typeof createSandboxManager>[0]['activities'],
+    placement: placement as unknown as Parameters<typeof createSandboxManager>[0]['placement'],
     mode: 'none',
     memoryMaxMb: 512,
     cpuMax: 1,
@@ -1014,6 +1036,131 @@ describe('stopAll', () => {
 
     expect(calls.slice(before)).not.toContain('status ws-1 stopped')
     expect(workspaces.statuses.get('ws-1')).toBe('running')
+  })
+})
+
+describe('placement', () => {
+  const told = (id: string) => placement.told.filter(entry => entry.endsWith(` ${id}`))
+
+  test('a launch claims the workspace before it starts anything', async () => {
+    await manager.launch('ws-1', devServer)
+
+    expect(told('ws-1')).toEqual(['claim ws-1'])
+    expect(launchesOf('ws-1')).toHaveLength(1)
+  })
+
+  test('a launch the claim refuses is a 409, starts nothing, takes no port and saves nothing', async () => {
+    placement.elsewhere.add('ws-1')
+
+    await expect(manager.launch('ws-1', devServer)).rejects.toMatchObject({ status: 409 })
+
+    expect(launchesOf('ws-1')).toHaveLength(0)
+    expect(workspaces.saved.get('ws-1')).toBeUndefined()
+    await manager.launch('ws-2', devServer)
+    expect(latestLaunch('ws-2').hostPort).toBe(4100)
+  })
+
+  test('a wake claims the workspace again', async () => {
+    const swept = await bringUp('ws-1')
+    swept.idle = true
+    await manager.stopIdle()
+    await until(() => told('ws-1').length === 2, 'release')
+
+    const woken = manager.wake('ws-1')
+    await until(() => launchesOf('ws-1').length === 2, 'relaunch')
+    latestLaunch('ws-1').listen()
+    await woken
+
+    expect(told('ws-1')).toEqual(['claim ws-1', 'release ws-1', 'claim ws-1'])
+  })
+
+  test('no free port releases the claim', async () => {
+    await manager.launch('ws-2', devServer)
+    await manager.launch('ws-3', devServer)
+
+    await expect(manager.launch('ws-1', devServer)).rejects.toMatchObject({ status: 503 })
+
+    expect(told('ws-1')).toEqual(['claim ws-1', 'release ws-1'])
+  })
+
+  test('a stop releases', async () => {
+    await bringUp('ws-1')
+
+    await manager.stop('ws-1')
+    await until(() => told('ws-1').length === 2, 'release')
+
+    expect(told('ws-1')).toEqual(['claim ws-1', 'release ws-1'])
+  })
+
+  test('the idle sweep releases', async () => {
+    const launched = await bringUp('ws-1')
+    launched.idle = true
+
+    await manager.stopIdle()
+    await until(() => told('ws-1').length === 2, 'release')
+
+    expect(told('ws-1')).toEqual(['claim ws-1', 'release ws-1'])
+  })
+
+  test('shutting down releases every workspace', async () => {
+    await bringUp('ws-1')
+    await manager.launch('ws-2', devServer)
+
+    await manager.stopAll()
+    await until(() => placement.told.length === 4, 'releases')
+
+    expect(told('ws-1')).toEqual(['claim ws-1', 'release ws-1'])
+    expect(told('ws-2')).toEqual(['claim ws-2', 'release ws-2'])
+  })
+
+  test('crashing after it listens releases', async () => {
+    const launched = await bringUp('ws-1')
+
+    launched.crash()
+    await until(() => told('ws-1').length === 2, 'release')
+
+    expect(told('ws-1')).toEqual(['claim ws-1', 'release ws-1'])
+  })
+
+  test('dying before it listens releases', async () => {
+    await manager.launch('ws-1', devServer)
+
+    latestLaunch('ws-1').crash()
+    await until(() => told('ws-1').length === 2, 'release')
+
+    expect(told('ws-1')).toEqual(['claim ws-1', 'release ws-1'])
+  })
+
+  test('timing out before it listens releases once it is killed', async () => {
+    await manager.launch('ws-1', devServer)
+    const timedOut = latestLaunch('ws-1')
+
+    timedOut.timeOut()
+    timedOut.die()
+    await until(() => told('ws-1').length === 2, 'release')
+
+    expect(told('ws-1')).toEqual(['claim ws-1', 'release ws-1'])
+  })
+
+  test('an old launch ending after a newer one took its place does not release', async () => {
+    await manager.launch('ws-1', devServer)
+    const timedOut = latestLaunch('ws-1')
+    timedOut.timeOut()
+    await bringUp('ws-1')
+
+    timedOut.die()
+    await timedOut.exited()
+    await Bun.sleep(20)
+
+    expect(told('ws-1')).toEqual(['claim ws-1', 'claim ws-1'])
+  })
+
+  test('an exec neither claims nor releases', async () => {
+    const { pending, child } = await startExec('ws-1')
+    child.finish(0)
+    await pending
+
+    expect(told('ws-1')).toEqual([])
   })
 })
 

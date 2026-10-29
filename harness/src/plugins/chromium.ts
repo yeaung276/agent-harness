@@ -16,6 +16,7 @@ export const chromium = fp(
       workspaces: app.services.workspaces,
       sandboxes: app.sandbox,
       browserSessions: app.services.browserSessions,
+      placement: app.services.placement,
       mode: app.config.SANDBOX_MODE,
       portMin: app.config.SANDBOX_PORT_MIN,
       portMax: app.config.SANDBOX_PORT_MAX,

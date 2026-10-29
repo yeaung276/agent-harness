@@ -1,6 +1,7 @@
 import { logger } from '../../logger.ts'
 import type { createActivityService } from '../activities/index.ts'
 import { HttpError } from '../http-error.ts'
+import type { createPlacementService } from '../placement/index.ts'
 import type { createWorkspaceService } from '../workspaces/index.ts'
 import { depsCache } from './deps-cache.ts'
 import type { NetworkRules } from './network-controller.ts'
@@ -18,6 +19,7 @@ export type ExecOptions = { command: string; timeoutMs: number; env: Record<stri
 export const createSandboxManager = ({
   workspaces,
   activities,
+  placement,
   mode,
   memoryMaxMb,
   cpuMax,
@@ -29,6 +31,7 @@ export const createSandboxManager = ({
 }: {
   workspaces: ReturnType<typeof createWorkspaceService>
   activities: ReturnType<typeof createActivityService>
+  placement: ReturnType<typeof createPlacementService>
   mode: 'bwrap' | 'none'
   memoryMaxMb: number
   cpuMax: number
@@ -74,12 +77,14 @@ export const createSandboxManager = ({
   const start = async (workspaceId: string, { command, port, env, network }: LaunchOptions) => {
     const dir = workspaces.getWorkspaceRoot(workspaceId)
     const { mounts, env: depsEnv } = await deps.mounts(workspaceId, dir)
+    await placement.claimWorkspace(workspaceId)
 
     const activityId = await activities.create(workspaceId, 'launch', command)
 
     const hostPort = ports.take()
     if (hostPort === null) {
       log.warn({ workspaceId }, 'workspace app not launched: no free port on this worker')
+      await placement.releaseWorkspace(workspaceId)
       await activities.update(activityId, { status: 'failed', exitCode: null, output: 'No free port on this worker' })
       return null
     }
@@ -112,9 +117,13 @@ export const createSandboxManager = ({
         await settle(activityId, launched, 'failed', await launched.exited())
       }
     )
+    // every way a sandbox ends, stop, sweep, shutdown or on its own, comes through here
     void launched.exited().then(async exitCode => {
       ports.release(hostPort)
-      if (sandboxes.get(workspaceId) === launched && launched.status() === 'failed') {
+      if (sandboxes.get(workspaceId) !== launched) return
+
+      await placement.releaseWorkspace(workspaceId)
+      if (launched.status() === 'failed') {
         log.warn({ workspaceId, exitCode }, 'workspace app exited on its own')
         await workspaces.setStatus(workspaceId, 'stopped')
       }

@@ -16,11 +16,11 @@
         <section class="doc-section" id="overview">
           <h2>Overview</h2>
           <p>preview-runner runs as one server pod and many worker pods. The server pod is the only entry point: appx calls its API, and users' browsers load previews through its proxy. Worker pods run the app previews and browser sessions. Each app is pinned to one worker pod, so its dev server and its browser sessions share that pod's localhost, and the dev server's port never leaves the pod.</p>
-          <p>Placement is decided per call from Redis. Worker pods publish their load, and the first call for an app claims the worker pod with the most headroom. The claim holds until that pod stops reporting.</p>
+          <p>Placement is decided per call from Redis. A worker pod writes a key for each sandbox and browser session it holds, and the server sends a workspace's calls to the worker pod its key names. A workspace with nothing running goes to the live worker pod with the most free sandbox slots. See <a href="#placement-controller">Placement controller</a>.</p>
 
           <figure>
             <div class="diagram">
-              <svg class="c4" viewBox="0 0 1120 870" role="img" aria-label="preview-runner as one server pod and many worker pods. 1: appx starts a preview, creates a browser session or makes a browser call on the server pod. In the server pod, a stateless Deployment, the preview and browser API reads the rows in Postgres, which the worker pods write with host set to their name, and maps a sessionId to its row and appId. Beside it, the preview proxy, a reverse proxy for requests carrying the signed preview cookie, serves the app preview to the user's browser over HTTP and WebSocket. Both use the placement controller, a shared module below them, not an API, to find the worker pod of an appId. 2: the controller reads placement:appId in Redis; if it names a worker pod that is still alive, that pod is used. 3: if there is none or the pod is gone, it reads every pods:name stats entry, picks the worker pod with the most headroom and sets placement:appId with NX, so an app's preview and sessions stay on one worker pod. 4: the API forwards the call to the internal API of the assigned worker pod, at the address in its pods entry. The worker pods are a StatefulSet, so each keeps its name, worker-0, worker-1 and so on, across restarts. On that worker pod, the internal API drives the sandbox, which runs the app's preview dev server on localhost:port, and Chromium, which holds one page per session. 5: because both run on the same pod, Chromium reaches the app's preview on localhost. 6: every worker pod's stats reporter writes pods:name with cpu, memory, previews, sessions and its address every 10 seconds, expiring after 30 seconds. The preview proxy sends preview traffic to the assigned worker's port forwarder on port 4002, which hands it to the sandbox on localhost:port, so sandbox ports never leave the pod. worker-1, worker-2 and more have the same parts as worker-0.">
+              <svg class="c4" viewBox="0 0 1120 870" role="img" aria-label="preview-runner as one server pod and many worker pods. 1: appx starts a preview, creates a browser session or makes a browser call on the server pod. In the server pod, a stateless Deployment, the preview and browser API reads the rows in Postgres, which the worker pods write with host set to their name, and maps a sessionId to its row and appId. Beside it, the preview proxy, a reverse proxy for requests carrying the signed preview cookie, serves the app preview to the user's browser over HTTP and WebSocket. Both use the placement controller, a shared module below them, not an API, to find the worker pod of an appId. 2: the controller reads the workspace's or session's placement key in Redis; if it names a worker pod that is still live, that pod is used. 3: if there is none or the pod is gone, it reads every pods:name stats entry and picks the live worker pod with the most free sandbox slots; the worker pod writes the placement key when it starts the sandbox or opens the tab, so a workspace's preview and sessions stay on one worker pod. 4: the API forwards the call to the internal API of the assigned worker pod, at the address in its pods entry. The worker pods are a StatefulSet, so each keeps its name, worker-0, worker-1 and so on, across restarts. On that worker pod, the internal API drives the sandbox, which runs the app's preview dev server on localhost:port, and Chromium, which holds one page per session. 5: because both run on the same pod, Chromium reaches the app's preview on localhost. 6: every worker pod's stats reporter writes pods:name with cpu, memory, previews, sessions and its address every 10 seconds, expiring after 30 seconds. The preview proxy sends preview traffic to the assigned worker's port forwarder on port 4002, which hands it to the sandbox on localhost:port, so sandbox ports never leave the pod. worker-1, worker-2 and more have the same parts as worker-0.">
                 <defs>
                   <marker id="rp-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
                     <path d="M0 0L10 5L0 10z" class="arrowhead"/>
@@ -56,8 +56,8 @@
                 <rect class="component" x="240" y="350" width="360" height="110" rx="8"/>
                 <text class="on-light name" x="420" y="372" text-anchor="middle">placement controller</text>
                 <text class="on-light type" x="420" y="389" text-anchor="middle">[shared module, not an API · by appId]</text>
-                <text class="on-light type" x="256" y="412"><tspan font-weight="600">2.</tspan> GET placement:&lt;appId&gt; → its worker pod, if alive</text>
-                <text class="on-light type" x="256" y="429"><tspan font-weight="600">3.</tspan> else most headroom in pods:*, SET NX</text>
+                <text class="on-light type" x="256" y="412"><tspan font-weight="600">2.</tspan> GETEX placement:* → its worker pod, if live</text>
+                <text class="on-light type" x="256" y="429"><tspan font-weight="600">3.</tspan> else the most free sandbox slots in pods:*</text>
                 <text class="on-light type" x="256" y="446">sticky: an app's preview and sessions on one worker pod</text>
 
                 <rect class="external" x="840" y="215" width="260" height="70" rx="8"/>
@@ -71,7 +71,7 @@
                 <text class="on-dark type" x="970" y="396" text-anchor="middle">pods:&lt;name&gt; → cpu, memory,</text>
                 <text class="on-dark type" x="970" y="412" text-anchor="middle">previews, sessions, address</text>
                 <text class="on-dark type" x="970" y="428" text-anchor="middle">expires 30 s after its last write</text>
-                <text class="on-dark type" x="970" y="452" text-anchor="middle">placement:&lt;appId&gt; → worker pod name</text>
+                <text class="on-dark type" x="970" y="452" text-anchor="middle">placement:* → &lt;name&gt;:&lt;bootId&gt;</text>
 
                 <rect class="boundary" x="20" y="520" width="936" height="330" rx="10"/>
                 <text class="label name" x="940" y="826" text-anchor="end">worker pods</text>
@@ -176,7 +176,8 @@
             </thead>
             <tbody>
               <tr><td><code>pods:&lt;name&gt;</code></td><td>cpu, memory, previews, sessions, address</td><td>The server at registration (hostname, address); the worker's stats reporter (the rest)</td><td>Expires 30 s after its last write.</td></tr>
-              <tr><td><code>placement:&lt;appId&gt;</code></td><td>Worker pod name</td><td>Placement controller, <code>SET NX</code></td><td>Until that worker's <code>pods</code> key is gone; then the next call replaces it.</td></tr>
+              <tr><td><code>placement:workspace:&lt;workspaceId&gt;</code></td><td><code>&lt;name&gt;:&lt;bootId&gt;</code> of the worker pod running its sandbox</td><td>The worker's sandbox manager, <code>SET NX</code></td><td><code>SANDBOX_IDLE_MS</code> from the claim or the server's last lookup. Deleted when the sandbox stops.</td></tr>
+              <tr><td><code>placement:session:&lt;sessionId&gt;</code></td><td><code>&lt;name&gt;:&lt;bootId&gt;</code> of the worker pod holding its tab</td><td>The worker's chromium manager</td><td><code>BROWSER_IDLE_MS</code> from the claim or the server's last lookup. Deleted when the tab closes.</td></tr>
               <tr><td><code>logs:&lt;name&gt;</code></td><td>Stream of the worker's log lines</td><td>A worker's logger</td><td>Capped at <code>LOG_MAX_LINES</code>; expires 24 h after its last write. See <a href="#logging">Logging</a>.</td></tr>
             </tbody>
           </table>
@@ -187,10 +188,11 @@
               <tr><th>When</th><th>What happens</th></tr>
             </thead>
             <tbody>
-              <tr><td>A worker pod is added</td><td>It starts reporting and takes new apps by headroom. Apps already placed stay where they are.</td></tr>
-              <tr><td>A worker pod dies</td><td>Its <code>pods</code> key expires within 30 s. The next call for each of its apps places the app on another worker; the preview restarts there. Its browser sessions are gone; each one's next call closes it and answers <code>404</code>.</td></tr>
+              <tr><td>A worker pod is added</td><td>It starts reporting and takes workspaces with nothing running when it has the most free sandbox slots. Workspaces already running stay where they are.</td></tr>
+              <tr><td>A worker pod dies</td><td>Its <code>pods</code> key expires within 30 s, and its placement keys stop counting. The next call for each of its workspaces goes to another worker; app traffic restarts the preview there. Each of its browser sessions reopens its tab where its row left off on the worker its next call goes to.</td></tr>
+              <tr><td>A worker pod restarts under the same name</td><td>It reports a new <code>bootId</code>, so the keys it held before stop counting at once, as when it dies.</td></tr>
               <tr><td>The server pod restarts</td><td>Rows are in Postgres and placements in Redis, so nothing is lost. Previews and pages on the workers keep running.</td></tr>
-              <tr><td>Two calls place one app at once</td><td><code>SET NX</code> lets one win; the other reads the winner.</td></tr>
+              <tr><td>Two workers start one workspace at once</td><td>The claim's <code>SET NX</code> lets one win; the other answers <code>409</code> before taking a port.</td></tr>
               <tr><td>Network</td><td>A NetworkPolicy lets only the server pod reach the workers' port 4002. Sandbox ports bind to 127.0.0.1 and never leave the pod.</td></tr>
             </tbody>
           </table>
@@ -1238,6 +1240,7 @@
             </thead>
             <tbody>
               <tr><td><code>hostname</code>, <code>address</code></td><td>The worker's name and <code>ip:port</code></td><td>Registration</td></tr>
+              <tr><td><code>bootId</code></td><td>A random id the worker makes when it starts, in the value of every placement key it writes; a new one after a restart makes its old keys stop counting</td><td>The worker's boot</td></tr>
               <tr><td><code>reportedAt</code></td><td>Time of the report, ms since the epoch</td><td>The clock</td></tr>
               <tr><td><code>cpuPercent</code></td><td>CPU used since the last report, % of one core</td><td>The change in <code>usage_usec</code> in the worker's <code>cpu.stat</code></td></tr>
               <tr><td><code>memoryBytes</code>, <code>memoryLimitBytes</code></td><td>Memory in use and the worker's limit; no limit is left out</td><td>The worker's <code>memory.current</code> and <code>memory.max</code></td></tr>
@@ -1248,11 +1251,154 @@
           <p>The cgroup files are the worker's own, at <code>/sys/fs/cgroup</code>. Where there are none, as with <code>SANDBOX_MODE=none</code> on a laptop, the cpu and memory fields are left out.</p>
 
           <h3 id="placement-controller">Placement controller</h3>
-          <p>A module on the server pod, not a worker part, but it is the reader of the stats reporter. It keeps each workspace on one worker: a placement key in Redis names the worker, and the first call for a workspace with no live placement claims the worker with the most headroom in <code>pods:*</code> with <code>SET NX</code>. See <a href="#overview">Overview</a>.</p>
-          <div class="pending">
-            <span class="badge tbd">TBD</span>
-            <p>How headroom is computed from the stats, how the sandbox manager's stop and idle sweep remove a placement, and what happens to a placement when its worker comes back under the same name.</p>
-          </div>
+          <p>A module both pods run, <code>services/placement</code>. A worker writes a key to Redis for each sandbox and browser session it holds, and the server reads those keys to pick the worker for each call. A workspace's sandbox, execs, app traffic and browser sessions stay on one worker, so they share its localhost.</p>
+          <figure>
+            <div class="diagram">
+              <svg class="c4" viewBox="0 0 1120 780" role="img" aria-label="Placement across the server pod, Redis and a worker pod. On the server pod, the workspace API, for launch, exec, logs and stop, the preview proxy, for app traffic, and the browser API, for create, calls and close, each ask the placement controller, server side, for a worker. 1: they call workspace with the workspaceId and what the call needs, new, running or any, or session with the sessionId and workspaceId. 2: the controller reads the placement key with GETEX, which renews its TTL, and the named worker's pods key; a key whose worker is not live is deleted, and with no live key it picks the most free live worker from pods keys. 3: the API or the proxy calls the internal API of the worker it returns, over mTLS, or sends app traffic to its port 4002. On the worker pod, the internal API drives the sandbox manager and the chromium manager. 4: the sandbox manager claims the workspace's key when it starts a sandbox and releases it on stop or when the sandbox exits. 5: the chromium manager claims the session's key when it opens a tab and releases it when the tab closes. 6: the placement controller, worker side, claims with SET NX and the idle TTL, the value being the worker's name and bootId, and releases by deleting the key if it holds that value. 7: the stats reporter writes pods name with its bootId and stats every 10 seconds. In Redis, placement:workspace:workspaceId and placement:session:sessionId hold name:bootId with the idle TTL, and pods:name holds bootId, reportedAt, address, sandboxes, sandboxSlots and sessions.">
+                <defs>
+                  <marker id="pl-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                    <path d="M0 0L10 5L0 10z" class="arrowhead"/>
+                  </marker>
+                </defs>
+
+                <rect class="boundary" x="20" y="20" width="760" height="330" rx="10"/>
+                <text class="label name" x="400" y="44" text-anchor="middle">server pod</text>
+
+                <rect class="component" x="40" y="70" width="220" height="90" rx="8"/>
+                <text class="on-light name" x="150" y="94" text-anchor="middle">Workspace API</text>
+                <text class="on-light type" x="150" y="111" text-anchor="middle">[launch · exec · logs · stop]</text>
+                <text class="on-light type" x="150" y="134" text-anchor="middle">launch: new · exec: any</text>
+                <text class="on-light type" x="150" y="150" text-anchor="middle">logs · stop: running</text>
+
+                <rect class="component" x="280" y="70" width="220" height="90" rx="8"/>
+                <text class="on-light name" x="390" y="94" text-anchor="middle">Preview proxy</text>
+                <text class="on-light type" x="390" y="111" text-anchor="middle">[app traffic · HTTP + WS]</text>
+                <text class="on-light type" x="390" y="134" text-anchor="middle">any: wakes the workspace</text>
+
+                <rect class="component" x="520" y="70" width="240" height="90" rx="8"/>
+                <text class="on-light name" x="640" y="94" text-anchor="middle">Browser API</text>
+                <text class="on-light type" x="640" y="111" text-anchor="middle">[create · calls · close]</text>
+                <text class="on-light type" x="640" y="134" text-anchor="middle">create: any for its workspace</text>
+                <text class="on-light type" x="640" y="150" text-anchor="middle">calls · close: session</text>
+
+                <rect class="component" x="140" y="220" width="520" height="110" rx="8"/>
+                <text class="on-light name" x="400" y="242" text-anchor="middle">placement controller</text>
+                <text class="on-light type" x="400" y="259" text-anchor="middle">[services/placement · server side]</text>
+                <text class="on-light type" x="156" y="282"><tspan font-weight="600">1.</tspan> workspace(id, new | running | any) · session(id, workspaceId)</text>
+                <text class="on-light type" x="156" y="299"><tspan font-weight="600">2.</tspan> GETEX the key, renewing its TTL · HGETALL pods:&lt;name&gt;</text>
+                <text class="on-light type" x="156" y="316">no live key: delete it · most free live worker</text>
+
+                <rect class="external" x="820" y="180" width="280" height="280" rx="8"/>
+                <text class="on-dark name" x="960" y="206" text-anchor="middle">Redis</text>
+                <text class="on-dark type" x="960" y="223" text-anchor="middle">[shared by both pods]</text>
+                <text class="on-dark type" x="960" y="252" text-anchor="middle">placement:workspace:&lt;workspaceId&gt;</text>
+                <text class="on-dark type" x="960" y="268" text-anchor="middle">placement:session:&lt;sessionId&gt;</text>
+                <text class="on-dark type" x="960" y="284" text-anchor="middle">→ &lt;name&gt;:&lt;bootId&gt; · idle TTL</text>
+                <text class="on-dark type" x="960" y="316" text-anchor="middle">pods:&lt;name&gt;</text>
+                <text class="on-dark type" x="960" y="332" text-anchor="middle">→ bootId · reportedAt · address</text>
+                <text class="on-dark type" x="960" y="348" text-anchor="middle">sandboxes · sandboxSlots · sessions</text>
+
+                <rect class="boundary" x="20" y="410" width="760" height="350" rx="10"/>
+                <text class="label name" x="764" y="750" text-anchor="end">worker pod</text>
+
+                <rect class="component" x="40" y="440" width="720" height="46" rx="6"/>
+                <text class="on-light name" x="400" y="459" text-anchor="middle">internal API</text>
+                <text class="on-light type" x="400" y="475" text-anchor="middle">[/internal/sandbox/* · /internal/chromium/* · app traffic on :4002]</text>
+
+                <rect class="component" x="40" y="520" width="240" height="90" rx="6"/>
+                <text class="on-light name" x="160" y="543" text-anchor="middle">Sandbox manager</text>
+                <text class="on-light type" x="160" y="560" text-anchor="middle">[services/sandbox]</text>
+                <text class="on-light type" x="160" y="583" text-anchor="middle"><tspan font-weight="600">4.</tspan> start a sandbox → claim</text>
+                <text class="on-light type" x="160" y="599" text-anchor="middle">stop · exit → release</text>
+
+                <rect class="component" x="300" y="520" width="240" height="90" rx="6"/>
+                <text class="on-light name" x="420" y="543" text-anchor="middle">Chromium manager</text>
+                <text class="on-light type" x="420" y="560" text-anchor="middle">[services/chromium]</text>
+                <text class="on-light type" x="420" y="583" text-anchor="middle"><tspan font-weight="600">5.</tspan> open a tab → claim</text>
+                <text class="on-light type" x="420" y="599" text-anchor="middle">close a tab → release</text>
+
+                <rect class="component" x="560" y="520" width="200" height="90" rx="6"/>
+                <text class="on-light name" x="660" y="543" text-anchor="middle">Stats reporter</text>
+                <text class="on-light type" x="660" y="560" text-anchor="middle">[every 10 s]</text>
+                <text class="on-light type" x="660" y="583" text-anchor="middle">bootId · load</text>
+
+                <rect class="component" x="40" y="650" width="500" height="70" rx="6"/>
+                <text class="on-light name" x="290" y="673" text-anchor="middle">placement controller</text>
+                <text class="on-light type" x="290" y="690" text-anchor="middle">[services/placement · worker side]</text>
+                <text class="on-light type" x="290" y="709" text-anchor="middle">claim: SET NX PX idle TTL · release: DEL if it holds own value</text>
+
+                <line class="edge" x1="150" y1="160" x2="150" y2="218" marker-end="url(#pl-arrow)"/>
+                <line class="edge" x1="390" y1="160" x2="390" y2="218" marker-end="url(#pl-arrow)"/>
+                <line class="edge" x1="640" y1="160" x2="640" y2="218" marker-end="url(#pl-arrow)"/>
+
+                <line class="edge" x1="660" y1="275" x2="818" y2="275" marker-end="url(#pl-arrow)"/>
+                <text class="edge-label" x="740" y="267" text-anchor="middle"><tspan font-weight="600">2.</tspan> lookups</text>
+
+                <line class="edge" x1="720" y1="160" x2="720" y2="438" marker-end="url(#pl-arrow)"/>
+                <text class="edge-label" x="712" y="380" text-anchor="end"><tspan font-weight="600">3.</tspan> call the worker it returns</text>
+                <text class="note" x="712" y="394" text-anchor="end">mTLS · app traffic to :4002</text>
+
+                <line class="edge" x1="160" y1="486" x2="160" y2="518" marker-end="url(#pl-arrow)"/>
+                <line class="edge" x1="420" y1="486" x2="420" y2="518" marker-end="url(#pl-arrow)"/>
+
+                <line class="edge" x1="160" y1="610" x2="160" y2="648" marker-end="url(#pl-arrow)"/>
+                <line class="edge" x1="420" y1="610" x2="420" y2="648" marker-end="url(#pl-arrow)"/>
+
+                <polyline class="edge" points="540,685 960,685 960,462" marker-end="url(#pl-arrow)"/>
+                <text class="edge-label" x="660" y="677" text-anchor="middle"><tspan font-weight="600">6.</tspan> SET NX PX · DEL</text>
+                <text class="note" x="660" y="700" text-anchor="middle">&lt;name&gt;:&lt;bootId&gt;</text>
+
+                <polyline class="edge" points="760,565 900,565 900,462" marker-end="url(#pl-arrow)"/>
+                <text class="edge-label" x="908" y="520"><tspan font-weight="600">7.</tspan> HSET pods:&lt;name&gt;</text>
+                <text class="note" x="908" y="534">bootId · stats</text>
+              </svg>
+            </div>
+            <figcaption>C4 component diagram: the server's callers read placement from Redis, and the worker's managers write it. Numbers follow one call. Solid arrows are calls. Grey boxes are outside preview-runner.</figcaption>
+          </figure>
+          <table>
+            <thead>
+              <tr><th>Key</th><th>Value</th><th>Lifetime</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>placement:workspace:&lt;workspaceId&gt;</code></td><td><code>&lt;name&gt;:&lt;bootId&gt;</code> of the worker running its sandbox</td><td><code>SANDBOX_IDLE_MS</code>, 15 min, from the claim or the last lookup</td></tr>
+              <tr><td><code>placement:session:&lt;sessionId&gt;</code></td><td><code>&lt;name&gt;:&lt;bootId&gt;</code> of the worker holding its tab</td><td><code>BROWSER_IDLE_MS</code>, 5 min, from the claim or the last lookup</td></tr>
+            </tbody>
+          </table>
+
+          <table>
+            <thead>
+              <tr><th>Worker side</th><th>When</th><th>What it does</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Claim a workspace</td><td>The sandbox manager starts a sandbox, on launch or on a wake</td><td><code>SET NX</code> with the TTL. A key holding this worker's <code>&lt;name&gt;:&lt;bootId&gt;</code> counts as claimed; one holding another's fails the request with <code>409</code> before a port is taken.</td></tr>
+              <tr><td>Release a workspace</td><td><code>stop</code>, or the sandbox exits: the idle sweep, shutdown, or exiting on its own</td><td>Deletes the key if it holds this worker's value. An exit releases only if its sandbox is still the workspace's current one.</td></tr>
+              <tr><td>Claim a session</td><td>The chromium manager opens the session's tab, on create or on a reopen</td><td><code>SET</code> with the TTL.</td></tr>
+              <tr><td>Release a session</td><td>The tab closes: <code>close</code>, the idle sweep or shutdown</td><td>Deletes the key if it holds this worker's value.</td></tr>
+            </tbody>
+          </table>
+
+          <p>On the server, a call names what it needs from the workspace, and the controller returns the worker to call. Each lookup is a <code>GETEX</code> that renews the key's TTL, so a key in use lives as long as its sandbox or tab and a key nobody looks up expires with the idle sweep. A key whose worker is not live is deleted and treated as no key.</p>
+          <table>
+            <thead>
+              <tr><th>Needs</th><th>Calls</th><th>Key names a live worker</th><th>No live key</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>new</code></td><td><code>launch</code></td><td><code>409</code>, one launch per workspace</td><td>The most free worker</td></tr>
+              <tr><td><code>running</code></td><td><code>logs</code>, <code>stop</code></td><td>That worker</td><td><code>409</code>, nothing is running</td></tr>
+              <tr><td><code>any</code></td><td><code>exec</code>, app traffic from the preview proxy, a new browser session with a <code>workspaceId</code></td><td>That worker</td><td>The most free worker; app traffic wakes the workspace there</td></tr>
+              <tr><td>session</td><td>Any call on a browser session</td><td>That worker</td><td>As <code>any</code> for the session's <code>workspaceId</code>; the most free worker for a session without one. The tab reopens there from its row.</td></tr>
+            </tbody>
+          </table>
+
+          <table>
+            <thead>
+              <tr><th>Term</th><th>Meaning</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Live worker</td><td><code>pods:&lt;name&gt;</code> holds <code>reportedAt</code> and the same <code>bootId</code> as the key. A worker that stops reporting expires in 30 s; one that restarts under the same name reports a new <code>bootId</code>. Either way its sandboxes and tabs are gone, and so are its keys.</td></tr>
+              <tr><td>Most free worker</td><td>Among live workers, the most free sandbox slots, <code>sandboxSlots − sandboxes</code>; then the lower <code>memoryBytes / memoryLimitBytes</code>; then the fewer <code>sessions</code>. <code>503</code> when no worker is live.</td></tr>
+            </tbody>
+          </table>
 
           <h3 id="logging">Logging</h3>
           <p>Each worker writes its logs to two places: stdout, for the container runtime, and a Redis stream named after the pod, <code>logs:&lt;name&gt;</code>, for the server's machines page. The server reads any worker's logs from Redis without calling the worker, and the logs of a worker that has died can still be read.</p>

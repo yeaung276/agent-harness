@@ -16,6 +16,9 @@ const startWorker = async () => {
     loadConfig({ DATABASE_URL: 'postgres://unused', REDIS_URL: 'redis://unused', DATA_ENCRYPTION_KEY: '0'.repeat(64) })
   )
   await app.register(fp(async app => void app.decorate('redis', redis), { name: 'redis' }))
+  await app.register(
+    fp(async app => void app.decorate('services', { placement: { bootId: 'boot-1' } } as never), { name: 'services' })
+  )
   await app.register(fp(async app => void app.decorate('sandbox', { count: () => 2 } as never), { name: 'sandbox' }))
   await app.register(fp(async app => void app.decorate('chromium', { count: () => 3 } as never), { name: 'chromium' }))
   await app.register(createStatsReporter({ statsKey: 'pods:worker-0', hostname: 'worker-0', address: '10.0.0.5:3000' }))
@@ -31,6 +34,7 @@ describe('the stats reporter', () => {
     expect(await redis.hgetall('pods:worker-0')).toMatchObject({
       hostname: 'worker-0',
       address: '10.0.0.5:3000',
+      bootId: 'boot-1',
       sandboxes: '2',
       sandboxSlots: '50',
       sessions: '3',

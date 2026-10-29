@@ -3,12 +3,19 @@ import fp from 'fastify-plugin'
 
 import { createActivityService } from '../services/activities/index.ts'
 import { createBrowserSessionService } from '../services/browser-sessions/index.ts'
+import { createPlacementService } from '../services/placement/index.ts'
 import { createTokenService } from '../services/tokens/index.ts'
 import { createWorkspaceService } from '../services/workspaces/index.ts'
 
 const createServices = (app: FastifyInstance) => ({
   activities: createActivityService({ db: app.db }),
   browserSessions: createBrowserSessionService({ db: app.db }),
+  placement: createPlacementService({
+    redis: app.redis,
+    workerName: app.config.WORKER_NAME,
+    sandboxIdleMs: app.config.SANDBOX_IDLE_MS,
+    browserIdleMs: app.config.BROWSER_IDLE_MS,
+  }),
   tokens: createTokenService({ db: app.db }),
   workspaces: createWorkspaceService({
     db: app.db,

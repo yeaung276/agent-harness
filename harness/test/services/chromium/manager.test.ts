@@ -128,8 +128,23 @@ const fakeBrowserSessions = () => {
   }
 }
 
+const fakePlacement = () => {
+  const told: string[] = []
+
+  return {
+    told,
+    claimSession: async (id: string) => {
+      told.push(`claim ${id}`)
+    },
+    releaseSession: async (id: string) => {
+      told.push(`release ${id}`)
+    },
+  }
+}
+
 const hostPorts = new Map<string, number>()
 let browserSessions: ReturnType<typeof fakeBrowserSessions>
+let placement: ReturnType<typeof fakePlacement>
 let manager: ReturnType<typeof createChromiumManager>
 
 const tabOf = (index: number) => tabs[index]!
@@ -143,6 +158,7 @@ beforeEach(async () => {
   tabs = []
   hostPorts.clear()
   browserSessions = fakeBrowserSessions()
+  placement = fakePlacement()
 
   manager = createChromiumManager({
     workspaces: {
@@ -153,6 +169,7 @@ beforeEach(async () => {
     } as unknown as Deps['workspaces'],
     sandboxes: { hostPort: (id: string) => hostPorts.get(id) ?? null } as unknown as Deps['sandboxes'],
     browserSessions: browserSessions as unknown as Deps['browserSessions'],
+    placement: placement as unknown as Deps['placement'],
     mode: 'none',
     portMin: 4100,
     portMax: 4149,
@@ -361,6 +378,81 @@ describe('closing', () => {
     expect(browserSessions.rows.get(id)?.status).toBe('closed')
     expect(tabOf(0).exportedTo).toHaveLength(1)
     expect(connected).toBe(false)
+  })
+})
+
+describe('placement', () => {
+  test('creating a session claims it', async () => {
+    const { id } = await manager.create('user-1', { workspaceId: null, record: false })
+
+    expect(placement.told).toEqual([`claim ${id}`])
+  })
+
+  test('a call on an open tab neither claims nor releases', async () => {
+    const { id } = await manager.create('user-1', { workspaceId: null, record: false })
+
+    await manager.read(id)
+
+    expect(placement.told).toEqual([`claim ${id}`])
+  })
+
+  test('close releases', async () => {
+    const { id } = await manager.create('user-1', { workspaceId: null, record: false })
+
+    await manager.close(id)
+
+    expect(placement.told).toEqual([`claim ${id}`, `release ${id}`])
+  })
+
+  test('a call on a closed session claims it again', async () => {
+    const { id } = await manager.create('user-1', { workspaceId: null, record: false })
+    await manager.close(id)
+
+    await manager.read(id)
+
+    expect(placement.told).toEqual([`claim ${id}`, `release ${id}`, `claim ${id}`])
+  })
+
+  test('a tab that closed on its own releases, and claims again as it reopens', async () => {
+    const { id } = await manager.create('user-1', { workspaceId: null, record: false })
+    tabOf(0).open = false
+
+    await manager.read(id)
+
+    expect(placement.told).toEqual([`claim ${id}`, `release ${id}`, `claim ${id}`])
+  })
+
+  test('the idle sweep releases only the idle sessions', async () => {
+    const idle = await manager.create('user-1', { workspaceId: null, record: false })
+    const busy = await manager.create('user-1', { workspaceId: null, record: false })
+    tabOf(0).idle = true
+
+    await manager.stopIdle()
+
+    expect(placement.told).toEqual([`claim ${idle.id}`, `claim ${busy.id}`, `release ${idle.id}`])
+  })
+
+  test('shutting down releases every session', async () => {
+    const first = await manager.create('user-1', { workspaceId: null, record: false })
+    const second = await manager.create('user-1', { workspaceId: null, record: false })
+
+    await manager.stopAll()
+
+    expect(placement.told.filter(entry => entry.startsWith('release')).sort()).toEqual(
+      [`release ${first.id}`, `release ${second.id}`].sort()
+    )
+  })
+
+  test('Chromium exiting releases every session it held', async () => {
+    const first = await manager.create('user-1', { workspaceId: null, record: false })
+    const second = await manager.create('user-1', { workspaceId: null, record: false })
+
+    connected = false
+    for (const handler of onExit) handler()
+
+    expect(placement.told.filter(entry => entry.startsWith('release')).sort()).toEqual(
+      [`release ${first.id}`, `release ${second.id}`].sort()
+    )
   })
 })
 

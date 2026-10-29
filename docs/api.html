@@ -778,7 +778,7 @@
 }</code></pre>
 <p><code>tail</code> is how many of the last lines to return, 5,000 at most.</p>
 <h4>Response 200</h4>
-<p>stdout and stderr together, in the order they were written. After a stop or a crash, its lines stay until the next launch. Stopping it for being idle deletes them. Before any launch, <code>lines</code> is empty.</p>
+<p>stdout and stderr together, in the order they were written, while the background process runs.</p>
 <pre class="schema"><code>{
   &quot;type&quot;: &quot;object&quot;,
   &quot;required&quot;: [
@@ -795,6 +795,8 @@
 }</code></pre>
 <h4>Errors · 404</h4>
 <p>No workspace has this id.</p>
+<h4>Errors · 409</h4>
+<p>Nothing is running in this workspace: no background process has been launched, or it was stopped, crashed, or stopped for being idle.</p>
   </div>
 </details>
 </div>

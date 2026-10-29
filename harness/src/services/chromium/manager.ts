@@ -6,6 +6,7 @@ import type { Browser } from 'playwright-core'
 import { logger } from '../../logger.ts'
 import type { createBrowserSessionService } from '../browser-sessions/index.ts'
 import { HttpError } from '../http-error.ts'
+import type { createPlacementService } from '../placement/index.ts'
 import type { createSandboxManager } from '../sandbox/manager.ts'
 import type { createWorkspaceService } from '../workspaces/index.ts'
 import { createChromium } from './chromium.ts'
@@ -24,6 +25,7 @@ export const createChromiumManager = ({
   workspaces,
   sandboxes,
   browserSessions,
+  placement,
   mode,
   portMin,
   portMax,
@@ -32,6 +34,7 @@ export const createChromiumManager = ({
   workspaces: ReturnType<typeof createWorkspaceService>
   sandboxes: ReturnType<typeof createSandboxManager>
   browserSessions: ReturnType<typeof createBrowserSessionService>
+  placement: ReturnType<typeof createPlacementService>
   mode: 'bwrap' | 'none'
   portMin: number
   portMax: number
@@ -82,6 +85,7 @@ export const createChromiumManager = ({
       storageState,
     })
     tabs.set(id, tab)
+    await placement.claimSession(id)
 
     return tab
   }
@@ -89,6 +93,7 @@ export const createChromiumManager = ({
   const closeTab = async ({ id, workspaceId, record }: BrowserSession) => {
     const tab = tabs.get(id)
     tabs.delete(id)
+    await placement.releaseSession(id)
     // keep where the tab is, so it reopens there
     const state = tab?.isOpen() ? await tab.state().catch(() => ({})) : {}
     await tab?.close()
@@ -132,6 +137,10 @@ export const createChromiumManager = ({
     start: async () => {
       chromium.onExit(() => {
         log.error({ lostTabs: tabs.size }, 'chromium exited unexpectedly, restarting')
+        for (const sessionId of tabs.keys())
+          void placement
+            .releaseSession(sessionId)
+            .catch(err => log.warn({ err, sessionId }, 'placement release failed'))
         tabs.clear()
         connection = undefined
         void restart()

@@ -12,14 +12,14 @@
     <main>
       <div class="content">
         <h1>Commands</h1>
-        <p class="lede">Commands run from a shell where the server runs: a checkout with its <code>.env</code>, or <code>docker compose exec app</code>. They read the same config as the server and talk to Postgres directly.</p>
+        <p class="lede">Commands run with <code>bun run</code> from the root of a checkout. <code>ca:create</code> writes <code>harness/.env</code>; <code>migrate:harness</code> reads it, as the server does; <code>user:create</code> reads <code>DATABASE_URL</code> from its environment. They talk to Postgres directly.</p>
 
         <section class="doc-section" id="authentication">
           <h2>Authentication</h2>
           <p>There is no register page. A user exists only after <code>user:create</code> adds them, and logs in on the web with that email and password. Passwords can&#x27;t be changed for now.</p>
 
           <h3>user:create</h3>
-          <pre class="schema"><code>bun run user:create &lt;email&gt;</code></pre>
+          <pre class="schema"><code>DATABASE_URL=postgres://… bun run user:create &lt;email&gt;</code></pre>
           <table>
             <thead>
               <tr><th>Step</th><th>What happens</th></tr>
@@ -35,10 +35,10 @@
 
         <section class="doc-section" id="database">
           <h2>Database</h2>
-          <p>Migrations are SQL files in <code>drizzle/</code>, committed with the code. <code>bun run db:generate</code> writes a new one from the changes in <code>src/db/schema.ts</code>. The server never migrates; run <code>db:migrate</code> by hand before starting a version with new migrations.</p>
+          <p>Migrations are SQL files in <code>harness/drizzle/</code>, committed with the code. <code>bun run db:generate</code> in <code>harness/</code> writes a new one from the changes in <code>src/db/schema.ts</code>. The server never migrates; run <code>migrate:harness</code> by hand before starting a version with new migrations.</p>
 
-          <h3>db:migrate</h3>
-          <pre class="schema"><code>bun run db:migrate</code></pre>
+          <h3>migrate:harness</h3>
+          <pre class="schema"><code>bun run migrate:harness</code></pre>
           <table>
             <thead>
               <tr><th>Step</th><th>What happens</th></tr>
@@ -47,6 +47,40 @@
               <tr><td>Read</td><td>The migrations in <code>drizzle/</code>, and the last one applied, from <code>drizzle.__drizzle_migrations</code>.</td></tr>
               <tr><td>Apply</td><td>Every newer one, in order, in one transaction, each recorded in <code>drizzle.__drizzle_migrations</code>. One fails → all roll back, exit 1.</td></tr>
               <tr><td>Done</td><td>Exit 0. Nothing newer → nothing changes.</td></tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section class="doc-section" id="workers">
+          <h2>Workers</h2>
+
+          <h3>ca:create</h3>
+          <pre class="schema"><code>bun run ca:create</code></pre>
+          <table>
+            <thead>
+              <tr><th>Step</th><th>What happens</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Join secret</td><td><code>harness/.env</code> has no <code>WORKER_JOIN_SECRET</code> → adds 32 random bytes, hex.</td></tr>
+              <tr><td>CA</td><td><code>harness/.env</code> has neither <code>WORKER_CA_KEY</code> nor <code>WORKER_CA_CERT</code> → makes a P-256 key and a self-signed certificate, CN <code>worker-ca</code>, valid 10 years, with <code>openssl</code>, and adds both.</td></tr>
+              <tr><td>Done</td><td>Prints the names it wrote. All three are there → prints that nothing was written, and the file is unchanged.</td></tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section class="doc-section" id="development">
+          <h2>Development</h2>
+          <table>
+            <thead>
+              <tr><th>Command</th><th>What it does</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>bun run dev:harness</code></td><td>The server on <code>http://localhost:3000</code>, restarting on changes, and the CSS build. With <code>APP_MODE=worker</code> and <code>NODE_ENV=development</code>, a worker that skips registration and serves plain HTTP.</td></tr>
+              <tr><td><code>bun run --filter harness test</code></td><td>The unit tests; those that need bubblewrap are skipped.</td></tr>
+              <tr><td><code>bun run test:harness</code></td><td>Every test, inside a privileged Linux container.</td></tr>
+              <tr><td><code>bun run format</code></td><td>Prettier on every <code>.ts</code> file.</td></tr>
+              <tr><td><code>bun run docs</code></td><td>These docs on <code>http://127.0.0.1:8000</code>.</td></tr>
+              <tr><td><code>bun install</code></td><td>Also sets <code>core.hooksPath</code> to <code>.githooks</code>. Its pre-commit hook formats the staged <code>.ts</code> files, stages them again, and runs the unit tests; a failing test stops the commit.</td></tr>
             </tbody>
           </table>
         </section>

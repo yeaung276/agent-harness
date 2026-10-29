@@ -47,6 +47,7 @@ export const createStatsReporter = ({
         return {
           hostname,
           address,
+          bootId: app.services.placement.bootId,
           reportedAt: now,
           cpuPercent,
           memoryBytes: memory,
@@ -73,5 +74,5 @@ export const createStatsReporter = ({
         await app.redis.del(statsKey)
       })
     },
-    { name: 'stats-reporter', dependencies: ['redis', 'sandbox', 'chromium'] }
+    { name: 'stats-reporter', dependencies: ['redis', 'services', 'sandbox', 'chromium'] }
   )
