@@ -21,10 +21,8 @@ export const workspaces: FastifyPluginAsyncTypebox = async app => {
         .send(await app.services.workspaces.create(request.userId, request.body.name, request.body.defaultEnv))
   )
 
-  app.get(
-    '/workspaces/:id',
-    { schema: { params: WorkspaceParams, response: { 200: Workspace } } },
-    async request => app.services.workspaces.get(request.params.id)
+  app.get('/workspaces/:id', { schema: { params: WorkspaceParams, response: { 200: Workspace } } }, async request =>
+    app.services.workspaces.get(request.params.id)
   )
 
   app.patch(

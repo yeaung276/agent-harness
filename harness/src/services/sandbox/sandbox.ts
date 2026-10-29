@@ -234,7 +234,13 @@ export const createSandbox = (
       if (mode === 'bwrap') {
         void (async () => {
           for (let attempt = 0; attempt < 20; attempt++) {
-            if (await rmdir(cgroup).then(() => true, error => error.code === 'ENOENT')) return
+            if (
+              await rmdir(cgroup).then(
+                () => true,
+                error => error.code === 'ENOENT'
+              )
+            )
+              return
             await Bun.sleep(100)
           }
         })()
@@ -310,7 +316,8 @@ export const assertSandboxUsable = (config: Config) => {
     controllers = readFileSync(join(CGROUP_ROOT, 'cgroup.controllers'), 'utf8').split(/\s+/)
   } catch {}
   const absent = CGROUP_CONTROLLERS.filter(controller => !controllers.includes(controller))
-  if (absent.length > 0) throw new Error(`SANDBOX_MODE=bwrap needs cgroup v2 with ${absent.join(', ')} at ${CGROUP_ROOT}.`)
+  if (absent.length > 0)
+    throw new Error(`SANDBOX_MODE=bwrap needs cgroup v2 with ${absent.join(', ')} at ${CGROUP_ROOT}.`)
 
   for (const file of ['cgroup.procs', 'cgroup.subtree_control']) {
     try {

@@ -160,7 +160,12 @@ export const createWorkspaceService = ({
 
       mkdir(target, { recursive: true })
         .then(() => extractZip(zip, target))
-        .then(() => db.update(workspaces).set({ updatedAt: sql`now()` }).where(eq(workspaces.id, id)))
+        .then(() =>
+          db
+            .update(workspaces)
+            .set({ updatedAt: sql`now()` })
+            .where(eq(workspaces.id, id))
+        )
         .then(() => log.info({ workspaceId: id, path: relativePath, files }, 'upload extracted'))
         .catch(err => log.error({ err, id }, 'failed to extract upload'))
         .then(() => rm(zip, { force: true }))
@@ -233,11 +238,13 @@ export const createWorkspaceService = ({
         })
       )
       await Promise.all(
-        leftovers.flat().map(leftover =>
-          rm(leftover, { recursive: true, force: true }).catch(err =>
-            log.error({ err, leftover }, 'failed to remove leftover workspace files')
+        leftovers
+          .flat()
+          .map(leftover =>
+            rm(leftover, { recursive: true, force: true }).catch(err =>
+              log.error({ err, leftover }, 'failed to remove leftover workspace files')
+            )
           )
-        )
       )
     },
 

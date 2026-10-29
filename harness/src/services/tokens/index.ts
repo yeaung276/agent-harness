@@ -62,7 +62,9 @@ export const createTokenService = ({ db }: { db: Db }) => ({
     const [row] = await db
       .select({ userId: apiTokens.userId })
       .from(apiTokens)
-      .where(and(eq(apiTokens.tokenHash, tokenHash), or(isNull(apiTokens.expiresAt), gt(apiTokens.expiresAt, sql`now()`))))
+      .where(
+        and(eq(apiTokens.tokenHash, tokenHash), or(isNull(apiTokens.expiresAt), gt(apiTokens.expiresAt, sql`now()`)))
+      )
     if (!row) return null
 
     // at most one write a minute per token, not one per call

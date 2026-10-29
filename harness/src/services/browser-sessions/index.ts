@@ -38,12 +38,10 @@ export const createBrowserSessionService = ({ db }: { db: Db }) => ({
     return { items, total }
   },
 
-  update: async (
-    id: string,
-    { url, storageState, status }: Partial<SessionState & { status: 'alive' | 'closed' }>
-  ) => {
+  update: async (id: string, { url, storageState, status }: Partial<SessionState & { status: 'alive' | 'closed' }>) => {
     await db
       .update(browserSessions)
       .set({ url, storageState, status, lastUsedAt: new Date() })
       .where(eq(browserSessions.id, id))
-  },})
+  },
+})

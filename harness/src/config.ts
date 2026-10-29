@@ -26,7 +26,6 @@ export const ConfigSchema = Type.Object({
   REDIS_URL: Type.String({ minLength: 1 }),
   WORKSPACES_DIR: Type.String({ minLength: 1, default: '/workspaces' }),
 
-  
   SANDBOX_MODE: Type.Union([Type.Literal('bwrap'), Type.Literal('none')], { default: 'none' }),
   SANDBOX_DEPS_ROOT: Type.String({ default: '/tmp/workspace-deps' }),
   SANDBOX_IDLE_MS: Type.Number({ default: 15 * 60 * 1000 }),
@@ -35,9 +34,9 @@ export const ConfigSchema = Type.Object({
   SANDBOX_PIDS_MAX: Type.Number({ default: 512 }),
   SANDBOX_PORT_MIN: Type.Number({ default: 4100 }),
   SANDBOX_PORT_MAX: Type.Number({ default: 4149 }),
-  
+
   BROWSER_IDLE_MS: Type.Number({ default: 5 * 60 * 1000 }),
-  
+
   DATA_ENCRYPTION_KEY: Type.String({ pattern: '^[0-9a-f]{64}$' }),
   WORKER_JOIN_SECRET: Type.Optional(Type.String({ minLength: 32 })),
   // the server only; PEM, EC P-256

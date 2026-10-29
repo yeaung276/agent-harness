@@ -23,7 +23,8 @@ export const sandbox = fp(
     }
 
     assertSandboxUsable(app.config)
-    if (app.config.SANDBOX_MODE === 'none') app.log.warn('SANDBOX_MODE=none: workspace code runs unconfined on this machine')
+    if (app.config.SANDBOX_MODE === 'none')
+      app.log.warn('SANDBOX_MODE=none: workspace code runs unconfined on this machine')
     await setupCgroups(app.config.SANDBOX_MODE)
     await removeLeftoverLogs()
 

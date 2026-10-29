@@ -49,10 +49,7 @@ const updateWorkspace = (id: string, payload: { defaultEnv: Record<string, strin
   app.inject({ method: 'PATCH', url: `/api/v1/workspaces/${id}`, headers, payload })
 
 const storedEnv = async (id: string) => {
-  const [row] = await app.db
-    .select({ defaultEnv: workspaces.defaultEnv })
-    .from(workspaces)
-    .where(eq(workspaces.id, id))
+  const [row] = await app.db.select({ defaultEnv: workspaces.defaultEnv }).from(workspaces).where(eq(workspaces.id, id))
   return row!.defaultEnv
 }
 

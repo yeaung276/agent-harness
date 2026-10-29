@@ -28,7 +28,8 @@ export const workerRoutes: FastifyPluginAsyncTypebox = async app => {
       throw new HttpError(401, 'the registration is not sealed with the join secret')
     }
     if (!Value.Check(Registration, registration)) throw new HttpError(400, 'the registration is malformed')
-    if (Math.abs(Date.now() - registration.time) > MAX_CLOCK_DRIFT_MS) throw new HttpError(401, 'the registration is too old')
+    if (Math.abs(Date.now() - registration.time) > MAX_CLOCK_DRIFT_MS)
+      throw new HttpError(401, 'the registration is too old')
 
     return seal(secret, { ...(await app.workers.register(registration)), nonce: request.body.nonce })
   })

@@ -116,7 +116,10 @@ export const createChromiumManager = ({
       const release = tab.use()
       try {
         const ran = await runner.exec(tab.targetId, code, timeoutMs)
-        log.info({ sessionId, durationMs: ran.durationMs, timedOut: ran.timedOut, error: ran.error }, 'browser call finished')
+        log.info(
+          { sessionId, durationMs: ran.durationMs, timedOut: ran.timedOut, error: ran.error },
+          'browser call finished'
+        )
         await browserSessions.update(sessionId, await tab.state())
 
         return ran

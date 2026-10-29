@@ -275,7 +275,13 @@ describe('launch', () => {
 
     await manager.launch('ws-1', { ...devServer, network })
 
-    expect(latestLaunch('ws-1').options).toMatchObject({ mode: 'none', memoryMaxMb: 512, cpuMax: 1, pidsMax: 64, network })
+    expect(latestLaunch('ws-1').options).toMatchObject({
+      mode: 'none',
+      memoryMaxMb: 512,
+      cpuMax: 1,
+      pidsMax: 64,
+      network,
+    })
   })
 
   test("sets PORT to the port it listens on, with the workspace's env and then the launch's env on top", async () => {
@@ -468,7 +474,11 @@ describe('exec', () => {
     execsOf('ws-1')[0]!.finish(0)
 
     expect(await pending).toEqual({ exitCode: 0, output: 'package.json\nsrc', timedOut: false })
-    expect(execsOf('ws-1')[0]!.options).toMatchObject({ dir: workspaceDir('ws-1'), command: 'ls', env: { A: '1', B: '2' } })
+    expect(execsOf('ws-1')[0]!.options).toMatchObject({
+      dir: workspaceDir('ws-1'),
+      command: 'ls',
+      env: { A: '1', B: '2' },
+    })
   })
 
   test('mounts the same deps as the launch, with their env', async () => {

@@ -173,14 +173,14 @@ describe('create', () => {
   })
 
   test('refuses record without a workspace, an unknown workspace, and a browser that is down', async () => {
-    await expect(manager.create('user-1', { workspaceId: null, record: true })).rejects.toMatchObject({ status:400 })
+    await expect(manager.create('user-1', { workspaceId: null, record: true })).rejects.toMatchObject({ status: 400 })
     await expect(manager.create('user-1', { workspaceId: 'ws-9', record: false })).rejects.toMatchObject({
-      status:404,
+      status: 404,
     })
 
     connected = false
     await expect(manager.create('user-1', { workspaceId: null, record: false })).rejects.toMatchObject({
-      status:503,
+      status: 503,
     })
     expect(tabs).toHaveLength(0)
     expect(browserSessions.rows.size).toBe(0)
@@ -234,7 +234,7 @@ describe('a call', () => {
     expect(runs[0]?.code).toContain('http://127.0.0.1:4120/orders')
   })
 
-  test("gives the call 60 s plus what waitFor may wait", async () => {
+  test('gives the call 60 s plus what waitFor may wait', async () => {
     const { id } = await manager.create('user-1', { workspaceId: null, record: false })
 
     await manager.read(id)
@@ -248,13 +248,13 @@ describe('a call', () => {
     const { id } = await manager.create('user-1', { workspaceId: null, record: false })
 
     next.push(failed('wait_for_timed_out'))
-    await expect(manager.read(id, undefined, { text: 'x', timeoutMs: 1 })).rejects.toMatchObject({ status:504 })
+    await expect(manager.read(id, undefined, { text: 'x', timeoutMs: 1 })).rejects.toMatchObject({ status: 504 })
 
     next.push(failed('ref_not_found'))
-    await expect(manager.click(id, 9)).rejects.toMatchObject({ status:404 })
+    await expect(manager.click(id, 9)).rejects.toMatchObject({ status: 404 })
 
     next.push(failed('element is not visible'))
-    await expect(manager.click(id, 1)).rejects.toMatchObject({ status:400, message: 'element is not visible' })
+    await expect(manager.click(id, 1)).rejects.toMatchObject({ status: 400, message: 'element is not visible' })
 
     next.push(failed('boom'))
     expect(await manager.run(id, 'throw 1', 30_000)).toEqual({ result: null, error: 'boom', durationMs: 1 })
@@ -264,7 +264,7 @@ describe('a call', () => {
     const { id } = await manager.create('user-1', { workspaceId: null, record: false })
 
     next.push(timedOut)
-    await expect(manager.read(id)).rejects.toMatchObject({ status:504 })
+    await expect(manager.read(id)).rejects.toMatchObject({ status: 504 })
     expect(tabOf(0).closes).toBe(0)
 
     next.push(timedOut)
@@ -272,7 +272,7 @@ describe('a call', () => {
   })
 
   test('says 404 for a session that does not exist', async () => {
-    await expect(manager.read(crypto.randomUUID())).rejects.toMatchObject({ status:404 })
+    await expect(manager.read(crypto.randomUUID())).rejects.toMatchObject({ status: 404 })
     expect(runs).toEqual([])
   })
 
@@ -291,10 +291,10 @@ describe('a call', () => {
 })
 
 describe('screenshot', () => {
-  test("is refused on a session created without record", async () => {
+  test('is refused on a session created without record', async () => {
     const { id } = await manager.create('user-1', { workspaceId: 'ws-1', record: false })
 
-    await expect(manager.screenshot(id, false)).rejects.toMatchObject({ status:409 })
+    await expect(manager.screenshot(id, false)).rejects.toMatchObject({ status: 409 })
     expect(runs).toEqual([])
   })
 
@@ -317,7 +317,7 @@ describe('closing', () => {
 
     expect(tabOf(0).closes).toBe(1)
     expect(browserSessions.rows.get(id)).toMatchObject({ status: 'closed', url: 'http://127.0.0.1:4120/orders' })
-    await expect(manager.close(id)).rejects.toMatchObject({ status:404 })
+    await expect(manager.close(id)).rejects.toMatchObject({ status: 404 })
   })
 
   test('a call on a closed session reopens it where it was', async () => {
@@ -370,7 +370,7 @@ describe('Chromium exiting', () => {
 
     connected = false
     for (const handler of onExit) handler()
-    await expect(manager.read(id)).rejects.toMatchObject({ status:503 })
+    await expect(manager.read(id)).rejects.toMatchObject({ status: 503 })
 
     await Bun.sleep(1100)
     expect(starts).toBe(2)

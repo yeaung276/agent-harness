@@ -31,7 +31,8 @@ export const depsCache = (root: string) => ({
       if (depth === MAX_DEPTH) return
 
       for (const entry of entries) {
-        if (!entry.isDirectory() || entry.name.startsWith('.') || RULES.some(({ deps }) => deps === entry.name)) continue
+        if (!entry.isDirectory() || entry.name.startsWith('.') || RULES.some(({ deps }) => deps === entry.name))
+          continue
 
         await visit(join(path, entry.name), depth + 1)
       }

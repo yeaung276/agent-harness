@@ -11,7 +11,8 @@ declare module 'fastify' {
 export const workers = fp(
   async app => {
     const { WORKER_CA_KEY, WORKER_CA_CERT } = app.config
-    if (!WORKER_CA_KEY || !WORKER_CA_CERT) throw new Error('the server needs WORKER_CA_KEY and WORKER_CA_CERT for its workers')
+    if (!WORKER_CA_KEY || !WORKER_CA_CERT)
+      throw new Error('the server needs WORKER_CA_KEY and WORKER_CA_CERT for its workers')
 
     app.decorate(
       'workers',

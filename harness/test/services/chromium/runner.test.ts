@@ -5,12 +5,7 @@ import { join } from 'node:path'
 import type { Browser, BrowserContext } from 'playwright-core'
 
 import { type Chromium, createChromium } from '../../../src/services/chromium/chromium.ts'
-import {
-  type NavigatedContent,
-  ops,
-  type PageContent,
-  type PageRef,
-} from '../../../src/services/chromium/ops.ts'
+import { type NavigatedContent, ops, type PageContent, type PageRef } from '../../../src/services/chromium/ops.ts'
 import { createRunner, type Runner } from '../../../src/services/chromium/runner.ts'
 import { setupCgroups } from '../../../src/services/sandbox/sandbox.ts'
 
@@ -329,7 +324,9 @@ describe.if(linux)('ops', () => {
     const { op } = await session()
     await op(ops.navigate('/', APP_PORT))
 
-    const { result } = await op<string[]>(ops.arbitrary(`return await page.$$eval('a', as => as.map(a => a.textContent))`))
+    const { result } = await op<string[]>(
+      ops.arbitrary(`return await page.$$eval('a', as => as.map(a => a.textContent))`)
+    )
 
     expect(result).toEqual(['Orders', 'Hidden'])
   }, 60_000)
@@ -337,7 +334,9 @@ describe.if(linux)('ops', () => {
   test('navigate waits after the load until the page shows what until names', async () => {
     const { op } = await session()
 
-    const { result } = await op<NavigatedContent>(ops.navigate('/late', APP_PORT, { selector: '#late', text: 'Loaded' }))
+    const { result } = await op<NavigatedContent>(
+      ops.navigate('/late', APP_PORT, { selector: '#late', text: 'Loaded' })
+    )
 
     expect(result).toMatchObject({ title: 'Late', status: 200, error: null })
     expect(result.text).toContain('Loaded')

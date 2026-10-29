@@ -65,7 +65,8 @@ describe('API tokens page', () => {
     const { cookies } = await signIn()
     const { name, token } = await createToken(cookies)
     // the token expires in 30 days, so 'Never' in its row can only be Last used
-    const row = async () => (await app.inject({ url: '/tokens', cookies })).body.match(new RegExp(`${name}</td>[\\s\\S]*?</tr>`))![0]
+    const row = async () =>
+      (await app.inject({ url: '/tokens', cookies })).body.match(new RegExp(`${name}</td>[\\s\\S]*?</tr>`))![0]
     expect(await row()).toContain('Never')
 
     await callMe(token!)
@@ -90,7 +91,11 @@ describe('API tokens page', () => {
     const { name, token } = await createToken(alice.cookies)
     const { items } = await app.services.tokens.list({ limit: 20, offset: 0 })
 
-    await app.inject({ method: 'POST', url: `/tokens/${items.find(item => item.name === name)!.id}/delete`, cookies: bob.cookies })
+    await app.inject({
+      method: 'POST',
+      url: `/tokens/${items.find(item => item.name === name)!.id}/delete`,
+      cookies: bob.cookies,
+    })
 
     expect((await callMe(token!)).statusCode).toBe(401)
   })

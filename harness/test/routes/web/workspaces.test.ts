@@ -295,7 +295,13 @@ describe('workspace page', () => {
     const second = (await app.inject({ url: `/workspaces/${id}/activities?page=2`, cookies })).json()
 
     expect(first.items).toHaveLength(20)
-    expect(first.items[0]).toMatchObject({ kind: 'exec', command: 'command 25', status: 'succeeded', exitCode: 0, output: 'output 25' })
+    expect(first.items[0]).toMatchObject({
+      kind: 'exec',
+      command: 'command 25',
+      status: 'succeeded',
+      exitCode: 0,
+      output: 'output 25',
+    })
     expect(first.pagination).toEqual({ from: 1, to: 20, total: 25, prev: null, next: 2 })
     expect(second.items.map((item: { command: string }) => item.command)).toEqual([
       'command 5',

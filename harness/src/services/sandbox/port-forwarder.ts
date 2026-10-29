@@ -36,7 +36,13 @@ export const portForwarder = (manager: ReturnType<typeof createSandboxManager>) 
       const startedAt = Date.now()
       res.once('close', () =>
         log.debug(
-          { workspaceId, method: req.method, url: req.url, statusCode: res.statusCode, durationMs: Date.now() - startedAt },
+          {
+            workspaceId,
+            method: req.method,
+            url: req.url,
+            statusCode: res.statusCode,
+            durationMs: Date.now() - startedAt,
+          },
           'workspace app request forwarded'
         )
       )
@@ -78,7 +84,8 @@ export const portForwarder = (manager: ReturnType<typeof createSandboxManager>) 
       const release = found.launched.use()
       const upstream = net.connect(found.port, '127.0.0.1', () => {
         const headers = []
-        for (let i = 0; i < req.rawHeaders.length; i += 2) headers.push(`${req.rawHeaders[i]}: ${req.rawHeaders[i + 1]}`)
+        for (let i = 0; i < req.rawHeaders.length; i += 2)
+          headers.push(`${req.rawHeaders[i]}: ${req.rawHeaders[i + 1]}`)
 
         upstream.write(`${req.method} ${req.url} HTTP/${req.httpVersion}\r\n${headers.join('\r\n')}\r\n\r\n`)
         if (head.length > 0) upstream.write(head)

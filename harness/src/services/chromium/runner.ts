@@ -108,7 +108,8 @@ export const createRunner = ({ mode, chromium }: { mode: 'bwrap' | 'none'; chrom
 
     const durationMs = Date.now() - startedAt
     if (timedOut) return { result: null, error: `timed out after ${timeoutMs / 1000} s`, timedOut, durationMs }
-    if (output.length > MAX_RESULT_BYTES) return { result: null, error: 'the result is over 32 MB', timedOut, durationMs }
+    if (output.length > MAX_RESULT_BYTES)
+      return { result: null, error: 'the result is over 32 MB', timedOut, durationMs }
 
     try {
       const { result, error } = JSON.parse(output)

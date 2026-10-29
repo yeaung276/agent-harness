@@ -3,7 +3,15 @@ import { Type } from 'typebox'
 
 import { HttpError } from '../../services/http-error.ts'
 import { isBinary } from '../../services/workspaces/files.ts'
-import { EditFileBody, FileContent, FileParams, ReadFileQuery, Tree, TreeQuery, WriteFileBody } from './schemas/files.ts'
+import {
+  EditFileBody,
+  FileContent,
+  FileParams,
+  ReadFileQuery,
+  Tree,
+  TreeQuery,
+  WriteFileBody,
+} from './schemas/files.ts'
 import { WorkspaceParams } from './schemas/workspaces.ts'
 
 export const files: FastifyPluginAsyncTypebox = async app => {

@@ -49,11 +49,15 @@ export const chromiumRoutes: FastifyPluginAsyncTypebox = async app => {
     return app.chromium.type(sessionId, ref, text, submit, waitFor)
   })
 
-  app.post('/screenshot', { schema: { body: ScreenshotBody, response: { 201: Screenshot } } }, async (request, reply) => {
-    const { sessionId, fullPage, waitFor } = request.body
+  app.post(
+    '/screenshot',
+    { schema: { body: ScreenshotBody, response: { 201: Screenshot } } },
+    async (request, reply) => {
+      const { sessionId, fullPage, waitFor } = request.body
 
-    return reply.status(201).send(await app.chromium.screenshot(sessionId, fullPage, waitFor))
-  })
+      return reply.status(201).send(await app.chromium.screenshot(sessionId, fullPage, waitFor))
+    }
+  )
 
   app.post('/run', { schema: { body: RunBody, response: { 200: RunResult } } }, async request => {
     const { sessionId, code, timeoutMs } = request.body

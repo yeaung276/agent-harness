@@ -129,7 +129,8 @@ export const createSandboxManager = ({
         const options = { command, port, network, env: { ...(await getDefaultEnv(workspaceId, port)), ...env } }
 
         const status = sandboxes.get(workspaceId)?.status()
-        if (status === 'starting' || status === 'running') throw new HttpError(409, 'A background process is already running')
+        if (status === 'starting' || status === 'running')
+          throw new HttpError(409, 'A background process is already running')
         if (!(await start(workspaceId, options))) throw new HttpError(503, 'No free port on this worker')
 
         await workspaces.setLaunchOptions(workspaceId, options)

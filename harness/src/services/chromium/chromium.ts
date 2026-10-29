@@ -15,7 +15,15 @@ export const CDP_PORT = 9222
 
 const READY_TIMEOUT_MS = 30_000
 
-export const createChromium = ({ mode, portMin, portMax }: { mode: 'bwrap' | 'none'; portMin: number; portMax: number }) => {
+export const createChromium = ({
+  mode,
+  portMin,
+  portMax,
+}: {
+  mode: 'bwrap' | 'none'
+  portMin: number
+  portMax: number
+}) => {
   let sandbox: ReturnType<typeof createSandbox> | undefined
   let stopping = false
   let cleanup: Promise<unknown> = Promise.resolve()

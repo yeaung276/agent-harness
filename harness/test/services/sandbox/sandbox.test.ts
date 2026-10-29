@@ -42,7 +42,16 @@ const workspace = async (files: Record<string, string> = {}): Promise<Workspace>
 }
 
 const start = ({ id, dir }: Workspace, options: Partial<SandboxOptions> & { command: string }) => {
-  const sandbox = createSandbox(id, { dir, mounts: [], mode, memoryMaxMb: 256, cpuMax: 1, pidsMax: 128, env: {}, ...options })
+  const sandbox = createSandbox(id, {
+    dir,
+    mounts: [],
+    mode,
+    memoryMaxMb: 256,
+    cpuMax: 1,
+    pidsMax: 128,
+    env: {},
+    ...options,
+  })
   sandboxes.push(sandbox)
   return sandbox
 }
@@ -116,9 +125,12 @@ describe('assertSandboxUsable', () => {
     expect(() => assertSandboxUsable(config({ SANDBOX_MODE: 'bwrap' }))).toThrow(/needs Linux/)
   })
 
-  test.if(linux)('accepts bwrap with its tools, a delegated cgroup tree and the pool outside the ephemeral ports', () => {
-    expect(() => assertSandboxUsable(config({ SANDBOX_MODE: 'bwrap' }))).not.toThrow()
-  })
+  test.if(linux)(
+    'accepts bwrap with its tools, a delegated cgroup tree and the pool outside the ephemeral ports',
+    () => {
+      expect(() => assertSandboxUsable(config({ SANDBOX_MODE: 'bwrap' }))).not.toThrow()
+    }
+  )
 
   test.if(linux)('refuses a pool the kernel could hand out as ephemeral ports', () => {
     expect(() =>
@@ -249,7 +261,10 @@ describe('a piped command', () => {
   }, 30_000)
 
   test('hands back stderr too when the command sends it to stdout', async () => {
-    const sandbox = start(await workspace(), { command: "exec sh -c 'echo out; echo err >&2; echo more' 2>&1", stdout: 'pipe' })
+    const sandbox = start(await workspace(), {
+      command: "exec sh -c 'echo out; echo err >&2; echo more' 2>&1",
+      stdout: 'pipe',
+    })
 
     let output = ''
     sandbox.stdout?.on('data', chunk => (output += chunk))
@@ -402,8 +417,8 @@ describe.if(linux)('network', () => {
     podIp =
       Object.values(networkInterfaces())
         .flat()
-        .find(address => address?.family === 'IPv4' && !address.internal && address.address !== clusterIp)
-        ?.address ?? ''
+        .find(address => address?.family === 'IPv4' && !address.internal && address.address !== clusterIp)?.address ??
+      ''
     servers = [
       Bun.serve({ hostname: '127.0.0.1', port: 4002, fetch: () => new Response('internal api') }),
       Bun.serve({ hostname: podIp, port: 4003, fetch: () => new Response('pod service') }),
@@ -486,7 +501,7 @@ describe.if(linux)('network', () => {
       await workspace(),
       [
         `curl -s -m 3 http://127.0.0.1:${sibling.hostPort}/; echo`,
-        "curl -s -m 3 http://127.0.0.1:4002/ || echo blocked",
+        'curl -s -m 3 http://127.0.0.1:4002/ || echo blocked',
       ].join('; '),
       { outboundPorts: String(sibling.hostPort) }
     )
@@ -495,7 +510,10 @@ describe.if(linux)('network', () => {
   }, 60_000)
 
   test("blocks tools that don't use the proxy", async () => {
-    const { output } = await run(await workspace(), "curl -s -m 5 --noproxy '*' https://www.google.com/ || echo blocked")
+    const { output } = await run(
+      await workspace(),
+      "curl -s -m 5 --noproxy '*' https://www.google.com/ || echo blocked"
+    )
 
     expect(output.trim()).toBe('blocked')
   }, 30_000)

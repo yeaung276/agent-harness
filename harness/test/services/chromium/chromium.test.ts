@@ -122,7 +122,12 @@ describe.if(linux)('chromium', () => {
     const cdp = await (await own.connect()).newBrowserCDPSession()
     await cdp.send('Browser.close').catch(() => undefined)
 
-    expect(await until(async () => exits, count => count > 0)).toBe(1)
+    expect(
+      await until(
+        async () => exits,
+        count => count > 0
+      )
+    ).toBe(1)
     expect(() => own.connectionUrl()).toThrow(/not running/)
 
     await own.start()
@@ -146,16 +151,16 @@ describe.if(linux)('chromium', () => {
     expect(exits).toBe(0)
     expect(await profiles()).toEqual(before)
   }, 60_000)
-
 })
 
 describe.if(linux)('a confined chromium', () => {
   const clusterIp = process.env.TEST_DB_HOST ?? ''
 
-  const cgroupExists = () => access(CGROUP).then(
-    () => true,
-    () => false
-  )
+  const cgroupExists = () =>
+    access(CGROUP).then(
+      () => true,
+      () => false
+    )
 
   test("says why when the pod's CDP port is taken, and leaves nothing running", async () => {
     const squatter = serve('127.0.0.1', CDP_PORT, 'not chromium')

@@ -145,14 +145,22 @@ describe.if(linux)('a session', () => {
     const page = await pageOf((await opened()).targetId)
     await page.goto(`http://127.0.0.1:${WORKSPACE_PORT}/`)
 
-    const fetched = (url: string) => page.evaluate(url => fetch(url).then(r => r.status, () => 'blocked'), url)
+    const fetched = (url: string) =>
+      page.evaluate(
+        url =>
+          fetch(url).then(
+            r => r.status,
+            () => 'blocked'
+          ),
+        url
+      )
 
     expect(await fetched(`http://127.0.0.1:${OTHER_WORKSPACE_PORT}/`)).toBe('blocked')
     expect(await greeting(page, `ws://127.0.0.1:${WORKSPACE_PORT}/`)).toBe('hello')
     expect(await greeting(page, `ws://127.0.0.1:${OTHER_WORKSPACE_PORT}/`)).toBe('blocked')
   }, 60_000)
 
-  test("follows its workspace onto a new port", async () => {
+  test('follows its workspace onto a new port', async () => {
     let port = WORKSPACE_PORT
     const page = await pageOf((await opened({ getWorkspaceAccessPort: () => port })).targetId)
 

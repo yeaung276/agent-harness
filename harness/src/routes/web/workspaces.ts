@@ -120,7 +120,7 @@ export const workspaces: FastifyPluginAsyncTypebox = async app => {
     }
   )
 
-  app.get('/workspaces/:id/logs',{ schema: { params: WorkspaceParams, querystring: LogsQuery } }, async request => {
+  app.get('/workspaces/:id/logs', { schema: { params: WorkspaceParams, querystring: LogsQuery } }, async request => {
     await app.services.workspaces.get(request.params.id)
 
     return { lines: [] as string[] }

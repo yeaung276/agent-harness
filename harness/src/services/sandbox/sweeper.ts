@@ -9,7 +9,10 @@ export const sweeper = (manager: { stopIdle: () => Promise<unknown> }) => {
 
   return {
     start: () => {
-      timer = setInterval(() => void manager.stopIdle().catch(err => log.error({ err }, 'idle sweep failed')), SWEEP_EVERY_MS)
+      timer = setInterval(
+        () => void manager.stopIdle().catch(err => log.error({ err }, 'idle sweep failed')),
+        SWEEP_EVERY_MS
+      )
       timer.unref()
     },
 

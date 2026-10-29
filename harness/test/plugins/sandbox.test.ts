@@ -62,9 +62,7 @@ describe('the sandbox plugin', () => {
 
     app.register(sandbox)
 
-    await expect(app.ready()).rejects.toThrow(
-      "the sandbox plugin runs only with APP_MODE=worker (got 'server')"
-    )
+    await expect(app.ready()).rejects.toThrow("the sandbox plugin runs only with APP_MODE=worker (got 'server')")
     await app.close().catch(() => {})
   })
 })
@@ -91,7 +89,10 @@ describe('a worker', () => {
     expect(await logs.json()).toEqual({ lines: expect.any(Array) })
 
     expect((await post('/stop', { workspaceId })).status).toBe(204)
-    const [row] = await app.db.select({ status: workspaces.status }).from(workspaces).where(eq(workspaces.id, workspaceId))
+    const [row] = await app.db
+      .select({ status: workspaces.status })
+      .from(workspaces)
+      .where(eq(workspaces.id, workspaceId))
     expect(row!.status).toBe('stopped')
   })
 
@@ -141,6 +142,11 @@ describe('closing a worker', () => {
 
     await app.close()
 
-    expect(await fetch(`http://127.0.0.1:${hostPort}/`).then(() => 'answered', () => 'gone')).toBe('gone')
+    expect(
+      await fetch(`http://127.0.0.1:${hostPort}/`).then(
+        () => 'answered',
+        () => 'gone'
+      )
+    ).toBe('gone')
   })
 })
