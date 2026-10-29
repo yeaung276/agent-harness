@@ -68,7 +68,10 @@ export const createStatsReporter = ({
         tick()
         timer = setInterval(tick, REPORT_MS)
       })
-      app.addHook('onClose', async () => clearInterval(timer))
+      app.addHook('onClose', async () => {
+        clearInterval(timer)
+        await app.redis.del(statsKey)
+      })
     },
     { name: 'stats-reporter', dependencies: ['redis', 'sandbox', 'chromium'] }
   )

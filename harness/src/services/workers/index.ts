@@ -17,6 +17,7 @@ const ALGORITHM = { name: 'ECDSA', namedCurve: 'P-256', hash: 'SHA-256' } as con
 const VALID_MS = 365 * 24 * 60 * 60 * 1000
 const CLOCK_SKEW_MS = 5 * 60 * 1000
 const STATS_TTL_S = 30
+const LOG_PAGE_LINES = 100
 
 const newKeys = () => crypto.subtle.generateKey(ALGORITHM, true, ['sign', 'verify'])
 
@@ -163,6 +164,11 @@ export const createWorkerService = async ({
         sandboxSlots: number('sandboxSlots'),
         sessions: number('sessions'),
       }
+    },
+
+    logs: async (name: string, before?: string) => {
+      const entries = await redis.xrevrange(`logs:${name}`, before ? `(${before}` : '+', '-', 'COUNT', LOG_PAGE_LINES)
+      return entries.map(([id, fields]) => ({ id, line: fields[1] ?? '' }))
     },
 
     call: async (name: string, path: string, init?: RequestInit) => {

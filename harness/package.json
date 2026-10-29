@@ -32,6 +32,7 @@
     "fastify-plugin": "^6.0.1",
     "ioredis": "^6.0.0",
     "pg": "^8.23.1",
+    "pino": "10.4.0",
     "playwright-core": "1.64.1",
     "typebox": "^1.4.2",
     "yauzl": "^3.4.0"

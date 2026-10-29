@@ -13,6 +13,8 @@ describe('loadConfig', () => {
     expect(loadConfig({ ...required, PORT: '8080', UNRELATED: 'x' })).toEqual({
       NODE_ENV: 'development',
       LOG_LEVEL: 'info',
+      LOG_MAX_LINES: 10_000,
+      LOG_TTL_HOURS: 24,
       APP_MODE: 'server',
       HOST: '127.0.0.1',
       PORT: 8080,

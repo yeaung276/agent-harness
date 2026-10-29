@@ -11,7 +11,8 @@
     "test:harness": "bun run --filter harness test:container",
     "user:create": "bun scripts/create-user.ts",
     "ca:create": "bun scripts/worker-ca.ts",
-    "docs": "bun scripts/docs.ts"
+    "docs": "bun scripts/docs.ts",
+    "format": "prettier --write '**/*.ts'"
   },
   "dependencies": {
     "drizzle-orm": "^0.45.4",
@@ -19,6 +20,7 @@
   },
   "devDependencies": {
     "@types/bun": "^1.4.3",
-    "@types/pg": "^8.23.1"
+    "@types/pg": "^8.23.1",
+    "prettier": "3.6.2"
   }
 }

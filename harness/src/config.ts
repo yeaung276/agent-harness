@@ -17,6 +17,8 @@ export const ConfigSchema = Type.Object({
     ],
     { default: 'info' }
   ),
+  LOG_MAX_LINES: Type.Integer({ minimum: 1, default: 10_000 }),
+  LOG_TTL_HOURS: Type.Number({ exclusiveMinimum: 0, default: 24 }),
   APP_MODE: Type.Union([Type.Literal('server'), Type.Literal('worker')], { default: 'server' }),
   HOST: Type.String({ default: '127.0.0.1' }),
   PORT: Type.Integer({ minimum: 0, maximum: 65535, default: 3000 }),
