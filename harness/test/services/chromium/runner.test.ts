@@ -116,6 +116,17 @@ describe.if(linux)('runner', () => {
     expect(ran.error).toMatch(/not JSON/)
   }, 60_000)
 
+  test('says so when the result is a function or a symbol, which JSON would drop', async () => {
+    const { targetId } = await sessionPage()
+
+    for (const code of ['return () => 1', "return Symbol('x')"]) {
+      const ran = await runner.exec(targetId, code, 30_000)
+
+      expect(ran.result).toBeNull()
+      expect(ran.error).toMatch(/not JSON/)
+    }
+  }, 60_000)
+
   test('stops code that runs past its time, and the page takes the next call', async () => {
     const { targetId } = await sessionPage()
 

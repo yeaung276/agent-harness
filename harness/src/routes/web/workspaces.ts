@@ -3,6 +3,8 @@ import { Value } from 'typebox/value'
 
 import { readForm } from '../../plugins/multipart.ts'
 import { HttpError } from '../../services/http-error.ts'
+import { readRedisLog } from '../../services/sandbox/log.ts'
+import { launchLogKey } from '../../services/sandbox/manager.ts'
 import {
   ActivitiesQuery,
   DefaultEnv,
@@ -123,26 +125,8 @@ export const workspaces: FastifyPluginAsyncTypebox = async app => {
   app.get('/workspaces/:id/logs', { schema: { params: WorkspaceParams, querystring: LogsQuery } }, async request => {
     const { id } = request.params
     await app.services.workspaces.get(id)
-    const worker = await app.services.placement.workspace(id, 'running').catch(err => {
-      if (err instanceof HttpError && err.status === 409) return null
-      throw err
-    })
-    if (!worker) return { lines: [] as string[] }
 
-    const res = await app.workers
-      .call(worker, '/internal/sandbox/logs', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ workspaceId: id, tail: request.query.tail }),
-      })
-      .catch(err => {
-        if (err instanceof HttpError) throw err
-        app.log.warn({ worker, err }, 'worker unreachable')
-        throw new HttpError(503, `worker ${worker} can't be reached`)
-      })
-    if (!res.ok) throw new HttpError(res.status, `worker ${worker} answered ${res.status}`)
-
-    return (await res.json()) as { lines: string[] }
+    return { lines: await readRedisLog(app.redis, launchLogKey(id), request.query.tail) }
   })
 
   app.get('/workspaces/:id/files/*', { schema: { params: FileParams } }, async (request, reply) => {

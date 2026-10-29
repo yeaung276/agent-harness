@@ -1,5 +1,5 @@
 import * as fs from 'node:fs/promises'
-import { mkdir, readdir, rename, rm, stat, unlink } from 'node:fs/promises'
+import { lstat, mkdir, readdir, rename, rm, stat, unlink } from 'node:fs/promises'
 import { basename, dirname, join, relative, resolve } from 'node:path'
 
 import { desc, eq, sql } from 'drizzle-orm'
@@ -199,6 +199,12 @@ export const createWorkspaceService = ({
       return fs.readFile(target)
     },
 
+    openFile: async (id: string, path: string) => {
+      const target = await resolvePath(id, path)
+      await ensureFile(target, path)
+      return Bun.file(target)
+    },
+
     writeFile: async (id: string, path: string, content: string) => {
       const target = await resolvePath(id, path)
       if ((await stat(target).catch(() => null))?.isDirectory()) throw new HttpError(400, `${path} is a folder`)
@@ -221,6 +227,10 @@ export const createWorkspaceService = ({
     },
 
     deleteFile: async (id: string, path: string) => {
+      // a symlink inside the workspace goes itself, wherever it points
+      const link = join(await resolvePath(id, dirname(path)), basename(path))
+      if ((await lstat(link).catch(() => null))?.isSymbolicLink()) return unlink(link)
+
       const target = await resolvePath(id, path)
       await ensureFile(target, path)
       await unlink(target)

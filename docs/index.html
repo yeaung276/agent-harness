@@ -370,7 +370,7 @@
           <p>A module both pods run, <code>services/placement</code>. A worker writes a key to Redis for each sandbox and browser session it holds, and the server reads those keys to pick the worker for each call. A workspace's sandbox, execs, app traffic and browser sessions stay on one worker, so they share its localhost.</p>
           <figure>
             <div class="diagram">
-              <svg class="c4" viewBox="0 0 1120 780" role="img" aria-label="Placement across the server pod, Redis and a worker pod. On the server pod, the workspace API, for launch, exec, logs and stop, the proxy, for app traffic, and the browser API, for create, calls and close, each ask the placement controller, server side, for a worker. 1: they call workspace with the workspaceId and what the call needs, new, running or any, or session with the sessionId and workspaceId. 2: the controller reads the placement key with GETEX, which renews its TTL, and the named worker's pods key; a key whose worker is not live is deleted, and with no live key it picks the most free live worker from pods keys. 3: the API or the proxy calls the internal API of the worker it returns, over mTLS, or sends app traffic to its port 4002. On the worker pod, the internal API drives the sandbox manager and the chromium manager. 4: the sandbox manager claims the workspace's key when it starts a sandbox and releases it on stop or when the sandbox exits. 5: the chromium manager claims the session's key when it opens a tab and releases it when the tab closes. 6: the placement controller, worker side, claims with SET NX and the idle TTL, the value being the worker's name and bootId, and releases by deleting the key if it holds that value. 7: the stats reporter writes pods name with its bootId and stats every 10 seconds. In Redis, placement:workspace:workspaceId and placement:session:sessionId hold name:bootId with the idle TTL, and pods:name holds bootId, reportedAt, address, sandboxes, sandboxSlots and sessions.">
+              <svg class="c4" viewBox="0 0 1120 780" role="img" aria-label="Placement across the server pod, Redis and a worker pod. On the server pod, the workspace API, for launch, exec and stop, the proxy, for app traffic, and the browser API, for create, calls and close, each ask the placement controller, server side, for a worker. 1: they call workspace with the workspaceId and what the call needs, new, running or any, or session with the sessionId and workspaceId. 2: the controller reads the placement key with GETEX, which renews its TTL, and the named worker's pods key; a key whose worker is not live is deleted, and with no live key it picks the most free live worker from pods keys. 3: the API or the proxy calls the internal API of the worker it returns, over mTLS, or sends app traffic to its port 4002. On the worker pod, the internal API drives the sandbox manager and the chromium manager. 4: the sandbox manager claims the workspace's key when it starts a sandbox and releases it on stop or when the sandbox exits. 5: the chromium manager claims the session's key when it opens a tab and releases it when the tab closes. 6: the placement controller, worker side, claims with SET NX and the idle TTL, the value being the worker's name and bootId, and releases by deleting the key if it holds that value. 7: the stats reporter writes pods name with its bootId and stats every 10 seconds. In Redis, placement:workspace:workspaceId and placement:session:sessionId hold name:bootId with the idle TTL, and pods:name holds bootId, reportedAt, address, sandboxes, sandboxSlots and sessions.">
                 <defs>
                   <marker id="pl-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
                     <path d="M0 0L10 5L0 10z" class="arrowhead"/>
@@ -382,9 +382,9 @@
 
                 <rect class="component" x="40" y="70" width="220" height="90" rx="8"/>
                 <text class="on-light name" x="150" y="94" text-anchor="middle">Workspace API</text>
-                <text class="on-light type" x="150" y="111" text-anchor="middle">[launch · exec · logs · stop]</text>
+                <text class="on-light type" x="150" y="111" text-anchor="middle">[launch · exec · stop]</text>
                 <text class="on-light type" x="150" y="134" text-anchor="middle">launch: new · exec: any</text>
-                <text class="on-light type" x="150" y="150" text-anchor="middle">logs · stop: running</text>
+                <text class="on-light type" x="150" y="150" text-anchor="middle">stop: running</text>
 
                 <rect class="component" x="280" y="70" width="220" height="90" rx="8"/>
                 <text class="on-light name" x="390" y="94" text-anchor="middle">Proxy</text>
@@ -500,7 +500,7 @@
             </thead>
             <tbody>
               <tr><td><code>new</code></td><td><code>launch</code></td><td><code>409</code>, one launch per workspace</td><td>The most free worker</td></tr>
-              <tr><td><code>running</code></td><td><code>logs</code>, <code>stop</code></td><td>That worker</td><td><code>409</code>, nothing is running</td></tr>
+              <tr><td><code>running</code></td><td><code>stop</code></td><td>That worker</td><td><code>409</code>, nothing is running</td></tr>
               <tr><td><code>any</code></td><td><code>exec</code>, app traffic from the proxy, a new browser session with a <code>workspaceId</code></td><td>That worker</td><td>The most free worker; app traffic wakes the workspace there</td></tr>
               <tr><td>session</td><td>Any call on a browser session</td><td>That worker</td><td>As <code>any</code> for the session's <code>workspaceId</code>; the most free worker for a session without one. The tab reopens there from its row.</td></tr>
             </tbody>
@@ -625,7 +625,7 @@
 
           <figure>
             <div class="diagram">
-              <svg class="c4" viewBox="0 0 1000 720" role="img" aria-label="A sandbox on a worker pod. Calls come from the server pod's sandbox API to the worker's internal API: launch, exec, stop or logs with a workspaceId. App traffic comes from the proxy to the worker's port forwarder on port 4002, the same port as the internal API: a request with the x-workspace-app header is taken over before routing and forwarded, and any other request is an internal API call. The internal API, at /internal/sandbox from services/sandbox/routes, drives the sandbox plugin in plugins/sandbox.ts, app.sandbox. Its sandbox manager maps a workspaceId to its sandbox in memory, runs one launch at a time per workspace, and writes status and the saved launch to the workspace's row in Postgres. It takes a port from the pod's pool, 4100 to 4149, and spawns the sandbox under bubblewrap. The sweeper stops sandboxes idle for 15 minutes. The port forwarder sends a workspace's traffic to 127.0.0.1 on its port, and when the workspace has no running sandbox it wakes it through the manager. Each sandbox has its own network namespace and holds the workspace's launch server, for example npm run dev, with PORT 3000 inside mapped to 127.0.0.1 on the pool port; and exec, sh -c with a 2 minute default and 4 minute maximum, returning the exit code and the last 16 KB of output. A sandbox mounts the workspace's folder from the shared workspace volume at /workspace, and its deps folders, such as node_modules, vendor or .venv, from the deps cache at SANDBOX_DEPS_ROOT. Its only egress is the internet, including the npm registry, through the network controller, which applies each command's allow and deny lists. Other workspaces get one sandbox each on the same pod.">
+              <svg class="c4" viewBox="0 0 1000 720" role="img" aria-label="A sandbox on a worker pod. Calls come from the server pod's sandbox API to the worker's internal API: launch, exec or stop with a workspaceId. App traffic comes from the proxy to the worker's port forwarder on port 4002, the same port as the internal API: a request with the x-workspace-app header is taken over before routing and forwarded, and any other request is an internal API call. The internal API, at /internal/sandbox from services/sandbox/routes, drives the sandbox plugin in plugins/sandbox.ts, app.sandbox. Its sandbox manager maps a workspaceId to its sandbox in memory, runs one launch at a time per workspace, and writes status and the saved launch to the workspace's row in Postgres. It takes a port from the pod's pool, 4100 to 4149, and spawns the sandbox under bubblewrap. The sweeper stops sandboxes idle for 15 minutes. The port forwarder sends a workspace's traffic to 127.0.0.1 on its port, and when the workspace has no running sandbox it wakes it through the manager. Each sandbox has its own network namespace and holds the workspace's launch server, for example npm run dev, with PORT 3000 inside mapped to 127.0.0.1 on the pool port; and exec, sh -c with a 2 minute default and 4 minute maximum, returning the exit code and the last 16 KB of output. A sandbox mounts the workspace's folder from the shared workspace volume at /workspace, and its deps folders, such as node_modules, vendor or .venv, from the deps cache at SANDBOX_DEPS_ROOT. Its only egress is the internet, including the npm registry, through the network controller, which applies each command's allow and deny lists. Other workspaces get one sandbox each on the same pod.">
                 <defs>
                   <marker id="sb-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
                     <path d="M0 0L10 5L0 10z" class="arrowhead"/>
@@ -713,7 +713,7 @@
                 <text class="note" x="66" y="98">header x-workspace-app: &lt;workspaceId&gt;</text>
 
                 <polyline class="edge" points="264,41 390,41 390,118" marker-end="url(#sb-arrow)"/>
-                <text class="edge-label" x="398" y="70">launch · exec · stop · logs</text>
+                <text class="edge-label" x="398" y="70">launch · exec · stop</text>
                 <text class="note" x="398" y="84">from the server pod's sandbox API</text>
                 <text class="note" x="398" y="98">no header</text>
 
@@ -894,47 +894,6 @@
 <pre class="schema"><code>{&quot;type&quot;:&quot;object&quot;,&quot;required&quot;:[&quot;error&quot;],&quot;properties&quot;:{&quot;error&quot;:{&quot;type&quot;:&quot;string&quot;}}}</code></pre>
   </div>
 </details>
-<details class="route">
-  <summary><span class="method post">POST</span><code class="route-path">/internal/sandbox/logs</code><span class="route-summary">The last lines the background process wrote</span></summary>
-  <div class="route-body">
-<h4>Request body</h4>
-<pre class="schema"><code>{
-  &quot;type&quot;: &quot;object&quot;,
-  &quot;required&quot;: [
-    &quot;workspaceId&quot;
-  ],
-  &quot;properties&quot;: {
-    &quot;workspaceId&quot;: {
-      &quot;format&quot;: &quot;uuid&quot;,
-      &quot;type&quot;: &quot;string&quot;
-    },
-    &quot;tail&quot;: {
-      &quot;default&quot;: 200,
-      &quot;minimum&quot;: 1,
-      &quot;maximum&quot;: 5000,
-      &quot;type&quot;: &quot;integer&quot;
-    }
-  }
-}</code></pre>
-<h4>Response 200</h4>
-<pre class="schema"><code>{
-  &quot;type&quot;: &quot;object&quot;,
-  &quot;required&quot;: [
-    &quot;lines&quot;
-  ],
-  &quot;properties&quot;: {
-    &quot;lines&quot;: {
-      &quot;type&quot;: &quot;array&quot;,
-      &quot;items&quot;: {
-        &quot;type&quot;: &quot;string&quot;
-      }
-    }
-  }
-}</code></pre>
-<h4>Errors · 400</h4>
-<pre class="schema"><code>{&quot;type&quot;:&quot;object&quot;,&quot;required&quot;:[&quot;error&quot;],&quot;properties&quot;:{&quot;error&quot;:{&quot;type&quot;:&quot;string&quot;}}}</code></pre>
-  </div>
-</details>
 </div>
 
           <h3>Lifecycle</h3>
@@ -951,11 +910,11 @@
               <tr><td>Exec</td><td><code>sh -c</code> in the workspace's confinement, with the workspace's env and <code>env</code> on top. While the background process runs, it joins that process's network namespace: <code>localhost:&lt;port&gt;</code> reaches it, it gets <code>PORT</code> = that <code>port</code>, and the launch's <code>network</code> applies. With nothing running, its own namespace with open egress and no <code>PORT</code>. Its stdout and stderr go together to its own log, and <code>output</code> is the last 16 KB of it; the log is deleted once read. At <code>timeoutMs</code> (2 min default, 4 min max) the process tree is killed, <code>timedOut</code> is <code>true</code> and <code>exitCode</code> is <code>null</code>.</td></tr>
               <tr><td>Activity</td><td>Every launch, a relaunch woken by a request included, and every exec adds a <code>sandbox_activities</code> row as <code>running</code> before it starts. An exec settles when it ends: <code>succeeded</code> on exit code 0, else <code>failed</code>, with its <code>output</code>. A launch settles at ready: <code>succeeded</code> once it answers on its port, <code>failed</code> if it exits or times out first, with the last 16 KB of its log so far; one with no free pool port is <code>failed</code> at once. Later crashes show in its logs, not here. The workspace page's Sandbox activity tab lists them, newest first, 20 to a page. Kept until the workspace is deleted.</td></tr>
               <tr><td>Stop</td><td>Clear the row's <code>launch_options</code> first, so requests no longer wake it → kill the process tree → free the port → <code>stopped</code>. Nothing running → already <code>stopped</code>.</td></tr>
-              <tr><td>Logs</td><td>The last <code>tail</code> lines of stdout and stderr together, in the order written, with blank lines and terminal colour codes left out. Each process writes to its own file in the pod's temp folder. After a stop or a crash they stay until the next launch. The idle sweep and a pod shutdown delete them, and so does a pod restart.</td></tr>
+              <tr><td>Logs</td><td>The last <code>tail</code> lines, 1,000 at most, of the latest launch's stdout and stderr together, in the order written, with blank lines and terminal colour codes left out. The process writes to its own file in the pod's temp folder, deleted when it ends. Every second, and once more when it ends, the worker copies the file's last 1,000 lines to <code>launch-logs:&lt;workspaceId&gt;</code> in Redis. The server reads them from there without calling a worker, so they stay readable after a stop, a crash, the idle sweep or the worker's death. The last line says how it ended: <code>exited with code &lt;n&gt;</code>, <code>killed by &lt;signal&gt;</code> or <code>stopped</code>, after <code>nothing answered on port &lt;port&gt; within 90 s</code> when it never listened. A new launch clears them.</td></tr>
               <tr><td>Background process exits on its own</td><td>Free the port → <code>failed</code>.</td></tr>
-              <tr><td>Idle, 15 min with no traffic, open WebSocket or running exec</td><td>The sweeper stops it, deletes its logs and keeps the row's <code>launch_options</code>. The next request wakes it. Logs calls don't count as use.</td></tr>
+              <tr><td>Idle, 15 min with no traffic, open WebSocket or running exec</td><td>The sweeper stops it and keeps the row's <code>launch_options</code>. The next request wakes it. Logs calls don't count as use.</td></tr>
               <tr><td>A worker pod dies</td><td>Placement moves the workspace. The next request wakes it on the new worker from the row's <code>launch_options</code>.</td></tr>
-              <tr><td>A worker pod shuts down</td><td>Stop every process and delete its logs → their rows <code>stopped</code>. Their <code>launch_options</code> stay, so the next request wakes them.</td></tr>
+              <tr><td>A worker pod shuts down</td><td>Stop every process → their rows <code>stopped</code>. Their <code>launch_options</code> stay, so the next request wakes them.</td></tr>
             </tbody>
           </table>
 

@@ -64,12 +64,12 @@ describe('browsers page', () => {
       workspaceId,
       record: true,
       status: 'closed',
-      url: 'http://127.0.0.1:4120/orders',
+      url: '/orders',
       lastUsedAt: new Date(Date.UTC(2026, 2, 4, 9, 30)),
     })
 
     const page = await app.inject({ url: '/browsers', cookies: bob.cookies })
-    const row = rowOf(page.body, 'http://127.0.0.1:4120/orders')
+    const row = rowOf(page.body, '/orders')
 
     expect(page.statusCode).toBe(200)
     expect(row).toContain('closed')
@@ -198,5 +198,27 @@ describe('browser activity', () => {
     expect(second.items).toHaveLength(5)
     expect(second.pagination).toEqual({ from: 21, to: 25, total: 25, prev: 1, next: null })
     expect((await app.inject({ url: `/browsers/${crypto.randomUUID()}/activities`, cookies })).statusCode).toBe(404)
+  })
+
+  test("shows a workspace page by its path, and another site's in full", async () => {
+    const { id: userId, cookies } = await signIn()
+    const [browser] = await app.db.insert(browsers).values({ userId }).returning({ id: browsers.id })
+    const id = browser!.id
+    const page = { text: '', refs: [] }
+    await app.services.browserActivities.record(id, 'navigate', '/orders', {
+      result: { ...page, title: 'Orders', url: 'http://127.0.0.1:4120/orders' },
+      error: null,
+    })
+    await app.services.browserActivities.record(id, 'navigate', 'https://example.com/', {
+      result: { ...page, title: 'Example', url: 'https://example.com/' },
+      error: null,
+    })
+
+    const { items } = (await app.inject({ url: `/browsers/${id}/activities`, cookies })).json()
+
+    expect(items.map((item: { output: string }) => item.output).sort()).toEqual([
+      'Example · https://example.com/',
+      'Orders · /orders',
+    ])
   })
 })

@@ -14,6 +14,6 @@ export const TreeQuery = Type.Object({ path: Type.String({ default: '' }) })
 
 export const ActivitiesQuery = Type.Object({ page: Type.Integer({ minimum: 1, default: 1 }) })
 
-export const LogsQuery = Type.Object({ tail: Type.Integer({ default: 200, minimum: 1, maximum: 5000 }) })
+export const LogsQuery = Type.Object({ tail: Type.Integer({ default: 200, minimum: 1, maximum: 1000 }) })
 
 export const FileParams = Type.Object({ id: Type.String({ format: 'uuid' }), '*': Type.String() })

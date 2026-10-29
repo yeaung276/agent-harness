@@ -3,8 +3,10 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
+import { eq } from 'drizzle-orm'
+
 import { loadConfig } from '../../../src/config.ts'
-import { users } from '../../../src/db/schema.ts'
+import { browsers, users } from '../../../src/db/schema.ts'
 import { createPlacementService } from '../../../src/services/placement/index.ts'
 import { buildTestApp } from '../../test-app.ts'
 
@@ -98,16 +100,12 @@ beforeEach(async () => {
 })
 
 describe('opening a session', () => {
-  test('without a workspace goes to the most free worker, and answers the session with who created it', async () => {
+  test('without a workspace goes to the most free worker, and answers the session', async () => {
     const res = await post('/api/v1/browser')
 
     expect(res.statusCode).toBe(201)
-    expect(res.json()).toMatchObject({
-      workspaceId: null,
-      record: false,
-      status: 'alive',
-      createdBy: { id: user!.id, email },
-    })
+    expect(res.json()).toMatchObject({ workspaceId: null, record: false, status: 'alive' })
+    expect(res.json().createdBy).toBeUndefined()
     expect(res.json().userId).toBeUndefined()
     expect(sent).toEqual([
       { worker: 'worker-1', path: '/internal/chromium/session', body: { record: false, userId: user!.id } },
@@ -150,6 +148,30 @@ describe('opening a session', () => {
     const res = await post('/api/v1/browser')
 
     expect(res.statusCode).toBe(503)
+  })
+
+  test('a 6th open session on a workspace is a 429, and calls no worker', async () => {
+    for (let i = 0; i < 5; i++) await openSession(workspaceId)
+
+    const res = await post('/api/v1/browser', { workspaceId })
+
+    expect(res.statusCode).toBe(429)
+    expect(res.json().message).toBe('Too many sessions are open for this workspace')
+    expect(sent).toEqual([])
+  })
+
+  test('a closed session, or one unused for the idle time, no longer counts toward the 5', async () => {
+    const ids = []
+    for (let i = 0; i < 5; i++) ids.push(await openSession(workspaceId))
+    await app.services.browsers.update(ids[0]!, { status: 'closed' })
+    await app.db
+      .update(browsers)
+      .set({ lastUsedAt: new Date(Date.now() - app.config.BROWSER_IDLE_MS - 1000) })
+      .where(eq(browsers.id, ids[1]!))
+
+    expect((await post('/api/v1/browser', { workspaceId })).statusCode).toBe(201)
+    expect((await post('/api/v1/browser', { workspaceId })).statusCode).toBe(201)
+    expect((await post('/api/v1/browser', { workspaceId })).statusCode).toBe(429)
   })
 })
 

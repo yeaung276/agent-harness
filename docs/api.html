@@ -317,7 +317,7 @@
           <p>The tree never lists these folders, so a listing stays small: <code>node_modules</code>, <code>.git</code>, <code>dist</code>, <code>.next</code>, <code>.turbo</code>, <code>coverage</code>. Their files can still be read and changed by path.</p>
 
           <h3>Text and binary</h3>
-          <p>Read and edit work on text. A file with a NUL byte in its first 8 KB is binary, and is refused with <code>400</code>.</p>
+          <p>Read and edit work on text. A file with a NUL byte in its first 8 KB is binary, and is refused with <code>400</code>. A read with <code>raw=true</code> returns any file's bytes, binary or text, so an image or a video is downloaded that way.</p>
 
           <h3>Sizes</h3>
           <p>A read without <code>limit</code> is refused with <code>400</code> when the file is over 512 KB; read it in parts instead. A line over 2,000 characters is cut there and ends in <code>… [truncated]</code>. A write whose body is over 1 MB is refused with <code>413</code>.</p>
@@ -406,12 +406,17 @@
     &quot;limit&quot;: {
       &quot;minimum&quot;: 1,
       &quot;type&quot;: &quot;integer&quot;
+    },
+    &quot;raw&quot;: {
+      &quot;default&quot;: false,
+      &quot;type&quot;: &quot;boolean&quot;
     }
   }
 }</code></pre>
-<p><code>offset</code> is how many lines to skip; without it, reading starts at the first line. <code>limit</code> is how many lines to return; without it, reading goes to the end. <code>offset=10&amp;limit=5</code> returns lines 11 to 15.</p>
+<p><code>offset</code> is how many lines to skip; without it, reading starts at the first line. <code>limit</code> is how many lines to return; without it, reading goes to the end. <code>offset=10&amp;limit=5</code> returns lines 11 to 15. <code>raw=true</code> returns the whole file as it is, and <code>offset</code> and <code>limit</code> are ignored.</p>
 <h4>Response 200</h4>
-<p>The lines asked for, joined by <code>\n</code>, and how many lines the file has. A final newline doesn't count as another line. An <code>offset</code> at or past the end gives empty <code>content</code>. A line over 2,000 characters is cut, as in <a href="#files">Sizes</a>.</p>
+<p>With <code>raw=true</code>: the file's bytes, of any size, with a <code>content-type</code> from its extension, like <code>image/png</code> or <code>video/webm</code>.</p>
+<p>Otherwise: the lines asked for, joined by <code>\n</code>, and how many lines the file has. A final newline doesn't count as another line. An <code>offset</code> at or past the end gives empty <code>content</code>. A line over 2,000 characters is cut, as in <a href="#files">Sizes</a>.</p>
 <pre class="schema"><code>{
   &quot;type&quot;: &quot;object&quot;,
   &quot;required&quot;: [
@@ -428,7 +433,7 @@
   }
 }</code></pre>
 <h4>Errors · 400</h4>
-<p>The path is a folder, the file is binary, or the file is over 512 KB and no <code>limit</code> is given.</p>
+<p>The path is a folder. Without <code>raw=true</code>, also: the file is binary, or the file is over 512 KB and no <code>limit</code> is given.</p>
 <h4>Errors · 404</h4>
 <p>No workspace has this id, or no file is at the path.</p>
   </div>
@@ -625,7 +630,7 @@
     }
   }
 }</code></pre>
-<p><code>port</code> is the port the process listens on, and <code>PORT</code> is set to it unless the workspace's env or <code>env</code> sets it. It can't be <code>3128</code>, which the proxy holds; a process listening there fails to start. <code>env</code> is added to the workspace's env, and wins where a name is in both. <code>network</code> is described in <a href="#sandbox">Network</a>.</p>
+<p><code>port</code> is the port the process listens on, and <code>PORT</code> is set to it unless the workspace's env or <code>env</code> sets it. It can't be <code>3128</code>, which the proxy holds; a launch with it answers <code>400</code>. <code>env</code> is added to the workspace's env, and wins where a name is in both. <code>network</code> is described in <a href="#sandbox">Network</a>.</p>
 <h4>Response 201</h4>
 <p>The public URL that reaches <code>port</code>.</p>
 <pre class="schema"><code>{
@@ -771,14 +776,14 @@
     &quot;tail&quot;: {
       &quot;default&quot;: 200,
       &quot;minimum&quot;: 1,
-      &quot;maximum&quot;: 5000,
+      &quot;maximum&quot;: 1000,
       &quot;type&quot;: &quot;integer&quot;
     }
   }
 }</code></pre>
-<p><code>tail</code> is how many of the last lines to return, 5,000 at most.</p>
+<p><code>tail</code> is how many of the last lines to return, 1,000 at most.</p>
 <h4>Response 200</h4>
-<p>stdout and stderr together, in the order they were written, while the background process runs.</p>
+<p>stdout and stderr together, in the order they were written, of the latest launch: while it runs, and after it is stopped or crashes, until the next launch or 24 hours after its last line. Lines arrive about a second after they're written. Once it ends, the last line says how: <code>exited with code &lt;n&gt;</code>, <code>killed by &lt;signal&gt;</code> or <code>stopped</code>, after <code>nothing answered on port &lt;port&gt; within 90 s</code> when it never listened. <code>lines</code> is empty when nothing has been launched.</p>
 <pre class="schema"><code>{
   &quot;type&quot;: &quot;object&quot;,
   &quot;required&quot;: [
@@ -795,8 +800,6 @@
 }</code></pre>
 <h4>Errors · 404</h4>
 <p>No workspace has this id.</p>
-<h4>Errors · 409</h4>
-<p>Nothing is running in this workspace: no background process has been launched, or it was stopped, crashed, or stopped for being idle.</p>
   </div>
 </details>
 </div>
@@ -804,10 +807,10 @@
 
         <section class="doc-section" id="browser">
           <h2>Browser</h2>
-          <p>A session is one browser tab, kept between calls: its cookies, local storage and URL last until it is closed. Calls read the page as text and numbered refs, click and type by ref, and run Playwright code against the page. A session answers one call at a time; a second call waits for the first.</p>
+          <p>A session is one browser tab, kept between calls: its cookies, local storage and URL last across calls, and across a close. Calls read the page as text and numbered refs, click and type by ref, and run Playwright code against the page. A session answers one call at a time; a second call waits for the first.</p>
           <p>Created with a <code>workspaceId</code>, the session's tab can also reach that workspace's background process, and a URL that is a path, like <code>/orders</code>, opens it. Without one, the tab reaches public hosts only. Private addresses are never reachable, and one workspace's session can't reach another workspace's process.</p>
-          <p>Created with <code>record</code>, the session films its tab and can take screenshots, both saved into the workspace: the video at <code>browser/&lt;sessionId&gt;.webm</code> when the session closes, each screenshot at <code>screenshot/&lt;sessionId&gt;-&lt;time&gt;.png</code>. They are read with the <a href="#files">Files</a> routes. <code>record</code> needs a <code>workspaceId</code>.</p>
-          <p>A session with no call for 5 minutes is closed, the same as closing it: its tab is closed, a recorded session's video is saved, and its <code>status</code> becomes <code>closed</code>. A session whose tab is lost, because the browser restarted or the page closed itself, is closed by its next call. A closed session answers <code>404</code>. Every route here also answers <code>401</code> as described in <a href="#authentication">Authentication</a>.</p>
+          <p>Created with <code>record</code>, the session films its tab and can take screenshots, both saved into the workspace: a video at <code>browser/&lt;sessionId&gt;-&lt;time&gt;.webm</code> each time the session closes, each screenshot at <code>screenshot/&lt;sessionId&gt;-&lt;time&gt;.png</code>. They are read with the <a href="#files">Files</a> routes. <code>record</code> needs a <code>workspaceId</code>.</p>
+          <p>A session with no call for 5 minutes is closed, the same as closing it: its tab is closed, a recorded session's video is saved, and its <code>status</code> becomes <code>closed</code>. A closed session, or one whose tab is lost because the browser restarted or the page closed itself, is opened again by its next call, at the URL it was on and with its cookies, and its <code>status</code> becomes <code>alive</code>. Every route here also answers <code>401</code> as described in <a href="#authentication">Authentication</a>.</p>
 
           <h3>The session object</h3>
 <pre class="schema"><code>{
@@ -817,7 +820,6 @@
     &quot;workspaceId&quot;,
     &quot;record&quot;,
     &quot;status&quot;,
-    &quot;createdBy&quot;,
     &quot;createdAt&quot;,
     &quot;lastUsedAt&quot;
   ],
@@ -846,22 +848,6 @@
         &quot;closed&quot;
       ],
       &quot;type&quot;: &quot;string&quot;
-    },
-    &quot;createdBy&quot;: {
-      &quot;type&quot;: &quot;object&quot;,
-      &quot;required&quot;: [
-        &quot;id&quot;,
-        &quot;email&quot;
-      ],
-      &quot;properties&quot;: {
-        &quot;id&quot;: {
-          &quot;format&quot;: &quot;uuid&quot;,
-          &quot;type&quot;: &quot;string&quot;
-        },
-        &quot;email&quot;: {
-          &quot;type&quot;: &quot;string&quot;
-        }
-      }
     },
     &quot;createdAt&quot;: {
       &quot;format&quot;: &quot;date-time&quot;,
@@ -906,7 +892,7 @@
 <h4>Errors · 404</h4>
 <p>No workspace has this id.</p>
 <h4>Errors · 429</h4>
-<p>Too many sessions are open for this workspace, or on the worker.</p>
+<p>Too many sessions are open: 5 for this workspace, or 30 on the worker. A session counts while it is <code>alive</code> and used in the last 5 minutes.</p>
 <h4>Errors · 503</h4>
 <p>The browser is restarting. Try again shortly.</p>
   </div>
@@ -987,7 +973,7 @@
   }
 }</code></pre>
 <h4>Errors · 404</h4>
-<p>No session has this id, or it is closed.</p>
+<p>No session has this id.</p>
 <h4>Errors · 504</h4>
 <p>The page didn't load in time.</p>
   </div>
@@ -1109,7 +1095,7 @@
 }</code></pre>
 <p><code>text</code> is the page's visible text, cut to 20,000 characters unless <code>maxChars</code> says otherwise. <code>refs</code> numbers what can be clicked or typed into, up to 500, in page order; a ref is good until the next navigate, read, click or type. Password values are left out.</p>
 <h4>Errors · 404</h4>
-<p>No session has this id, or it is closed.</p>
+<p>No session has this id.</p>
 <h4>Errors · 504</h4>
 <p>The call didn't finish in time. <code>waitFor</code> running out also answers <code>504</code>, without acting.</p>
   </div>
@@ -1168,7 +1154,7 @@
 <h4>Errors · 400</h4>
 <p>The click failed, for example the element is covered or disabled.</p>
 <h4>Errors · 404</h4>
-<p>No session has this id, or it is closed, or no element on the page has this ref.</p>
+<p>No session has this id, or no element on the page has this ref.</p>
 <h4>Errors · 504</h4>
 <p>The call didn't finish in time. <code>waitFor</code> running out also answers <code>504</code>, without acting.</p>
   </div>
@@ -1237,7 +1223,7 @@
 <h4>Errors · 400</h4>
 <p>The element can't be typed into.</p>
 <h4>Errors · 404</h4>
-<p>No session has this id, or it is closed, or no element on the page has this ref.</p>
+<p>No session has this id, or no element on the page has this ref.</p>
 <h4>Errors · 504</h4>
 <p>The call didn't finish in time. <code>waitFor</code> running out also answers <code>504</code>, without acting.</p>
   </div>
@@ -1303,7 +1289,7 @@
   }
 }</code></pre>
 <h4>Errors · 404</h4>
-<p>No session has this id, or it is closed.</p>
+<p>No session has this id.</p>
 <h4>Errors · 409</h4>
 <p>The session wasn't created with <code>record</code>.</p>
 <h4>Errors · 504</h4>
@@ -1374,7 +1360,7 @@
   }
 }</code></pre>
 <h4>Errors · 404</h4>
-<p>No session has this id, or it is closed.</p>
+<p>No session has this id.</p>
   </div>
 </details>
 <details class="route">
@@ -1394,7 +1380,7 @@
   }
 }</code></pre>
 <h4>Response 204</h4>
-<p>No body. The tab is closed and the session's <code>status</code> becomes <code>closed</code>. A recorded session's video is saved at <code>browser/&lt;sessionId&gt;.webm</code> before this answers.</p>
+<p>No body. The tab is closed and the session's <code>status</code> becomes <code>closed</code>. A recorded session's video is saved at <code>browser/&lt;sessionId&gt;-&lt;time&gt;.webm</code> before this answers. The next call on the session opens it again.</p>
 <h4>Errors · 404</h4>
 <p>No session has this id, or it is already closed.</p>
   </div>

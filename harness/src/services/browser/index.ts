@@ -1,4 +1,4 @@
-import { desc, eq } from 'drizzle-orm'
+import { and, desc, eq, gt } from 'drizzle-orm'
 
 import { browsers, users } from '../../db/schema.ts'
 import type { Db } from '../../db/type.ts'
@@ -37,6 +37,16 @@ export const createBrowserService = ({ db }: { db: Db }) => ({
     ])
     return { items, total }
   },
+
+  countOpen: (workspaceId: string, usedWithinMs: number) =>
+    db.$count(
+      browsers,
+      and(
+        eq(browsers.workspaceId, workspaceId),
+        eq(browsers.status, 'alive'),
+        gt(browsers.lastUsedAt, new Date(Date.now() - usedWithinMs))
+      )
+    ),
 
   update: async (id: string, { url, storageState, status }: Partial<SessionState & { status: 'alive' | 'closed' }>) => {
     await db.update(browsers).set({ url, storageState, status, lastUsedAt: new Date() }).where(eq(browsers.id, id))

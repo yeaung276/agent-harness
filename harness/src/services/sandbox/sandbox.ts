@@ -28,6 +28,7 @@ export type SandboxOptions = {
   joinPid?: number
   // 'log' (default) writes stdout and stderr to a log file read by logs(); 'pipe' hands stdout back as the sandbox's stdout stream and drops stderr: nothing is written to a log file, and logs() returns nothing
   stdout?: 'log' | 'pipe'
+  log?: ReturnType<typeof createLog> | null
 }
 
 export type SandboxStatus = 'starting' | 'running' | 'failed' | 'stopped'
@@ -49,13 +50,12 @@ export const createSandbox = (
     readyTimeoutMs,
     joinPid,
     stdout = 'log',
+    log = stdout === 'log' ? createLog() : null,
   }: SandboxOptions
 ) => {
   let inUse = 0
   let lastUsedAt = Date.now()
   let status: SandboxStatus = ports ? 'starting' : 'running'
-
-  const log = stdout === 'log' ? createLog() : null
   const cgroup = join(CGROUP_ROOT, `workspace-${workspaceId}`)
   const controller = mode === 'bwrap' && joinPid === undefined ? createNetworkController(network ?? {}) : null
 
@@ -66,6 +66,9 @@ export const createSandbox = (
           '--config-net',
           '--quiet',
           '-4',
+          // outbound goes through the proxy, which resolves names itself
+          '--dns',
+          'none',
           '-t',
           ports ? `127.0.0.1/${ports.host}:${ports.inside}` : 'none',
           '-u',
@@ -218,6 +221,7 @@ export const createSandbox = (
       if (answered && status === 'starting') status = 'running'
       if (status === 'starting' && Date.now() >= deadline) {
         status = 'failed'
+        log?.write(`nothing answered on port ${ports.inside} within ${readyTimeoutMs! / 1000} s\n`)
         await killTree()
       }
 
@@ -228,9 +232,17 @@ export const createSandbox = (
   })
 
   const finished = new Promise<number | null>(resolve =>
-    child.once('close', exitCode => {
+    child.once('close', (exitCode, signal) => {
       controller?.close()
       if (status !== 'stopped') status = ports ? 'failed' : 'stopped'
+      if (ports)
+        log?.write(
+          status === 'stopped'
+            ? 'stopped\n'
+            : exitCode === null
+              ? `killed by ${signal}\n`
+              : `exited with code ${exitCode}\n`
+        )
       if (mode === 'bwrap') {
         void (async () => {
           for (let attempt = 0; attempt < 20; attempt++) {

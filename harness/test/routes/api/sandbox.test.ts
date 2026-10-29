@@ -29,7 +29,6 @@ const answers: Record<string, () => Response> = {
   '/internal/sandbox/launch': () => new Response(null, { status: 204 }),
   '/internal/sandbox/exec': () => Response.json({ exitCode: 0, output: 'ok', timedOut: false }),
   '/internal/sandbox/stop': () => new Response(null, { status: 204 }),
-  '/internal/sandbox/logs': () => Response.json({ lines: ['listening on 3000'] }),
 }
 
 // the worker's internal API, as the server reaches it over mTLS
@@ -190,22 +189,42 @@ describe('exec', () => {
 })
 
 describe('logs', () => {
-  test('while the workspace runs come from its worker, with the tail asked for', async () => {
-    await busy.claimWorkspace(id)
+  test("are the last tail lines of the workspace's launch log in Redis, read without calling a worker", async () => {
+    await app.redis.set(`launch-logs:${id}`, 'listening on 3000\nGET / 200\nexited with code 1')
 
-    const res = await app.inject({ url: `/api/v1/workspaces/${id}/sandbox/logs?tail=50`, headers })
+    const res = await app.inject({ url: `/api/v1/workspaces/${id}/sandbox/logs?tail=2`, headers })
 
     expect(res.statusCode).toBe(200)
-    expect(res.json()).toEqual({ lines: ['listening on 3000'] })
-    expect(sent).toEqual([{ worker: 'worker-0', path: '/internal/sandbox/logs', body: { workspaceId: id, tail: 50 } }])
+    expect(res.json()).toEqual({ lines: ['GET / 200', 'exited with code 1'] })
+    expect(sent).toEqual([])
   })
 
-  test('are a 409 with nothing running, and call no worker', async () => {
+  test('are there when no worker is left', async () => {
+    await app.redis.set(`launch-logs:${id}`, 'Error: Cannot find module express\nexited with code 1')
+    await app.redis.del('pods:worker-0', 'pods:worker-1')
+
     const res = await app.inject({ url: `/api/v1/workspaces/${id}/sandbox/logs`, headers })
 
-    expect(res.statusCode).toBe(409)
-    expect(res.json().message).toBe('Nothing is running in this workspace')
-    expect(sent).toEqual([])
+    expect(res.json()).toEqual({ lines: ['Error: Cannot find module express', 'exited with code 1'] })
+  })
+
+  test('are empty when nothing has been launched', async () => {
+    const res = await app.inject({ url: `/api/v1/workspaces/${id}/sandbox/logs`, headers })
+
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toEqual({ lines: [] })
+  })
+
+  test('take a tail of 1,000 at most', async () => {
+    const res = await app.inject({ url: `/api/v1/workspaces/${id}/sandbox/logs?tail=1001`, headers })
+
+    expect(res.statusCode).toBe(400)
+  })
+
+  test('are a 404 for an unknown workspace', async () => {
+    const res = await app.inject({ url: `/api/v1/workspaces/${crypto.randomUUID()}/sandbox/logs`, headers })
+
+    expect(res.statusCode).toBe(404)
   })
 })
 

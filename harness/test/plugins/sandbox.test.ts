@@ -9,6 +9,7 @@ import { eq } from 'drizzle-orm'
 import { loadConfig } from '../../src/config.ts'
 import { users, workspaces } from '../../src/db/schema.ts'
 import { sandbox } from '../../src/plugins/sandbox.ts'
+import { readRedisLog } from '../../src/services/sandbox/log.ts'
 import { buildTestApp } from '../test-app.ts'
 
 const SERVER =
@@ -45,9 +46,9 @@ const startWorker = async () => {
       body: JSON.stringify(body),
     })
 
-  const launched = async () => {
+  const launched = async (command = SERVER) => {
     const { id } = await app.services.workspaces.create(user!.id, `ws-${crypto.randomUUID().slice(0, 8)}`)
-    expect((await post('/launch', { workspaceId: id, command: SERVER, port: 3000 })).status).toBe(204)
+    expect((await post('/launch', { workspaceId: id, command, port: 3000 })).status).toBe(204)
     return id
   }
 
@@ -76,7 +77,7 @@ describe('a worker', () => {
 
   afterAll(() => worker.app.close())
 
-  test('runs launch, exec, logs and stop through the internal API', async () => {
+  test('runs launch, exec and stop through the internal API', async () => {
     const { app, post, launched } = worker
     const workspaceId = await launched()
 
@@ -84,16 +85,27 @@ describe('a worker', () => {
     expect(exec.status).toBe(200)
     expect(await exec.json()).toEqual({ exitCode: 0, output: 'hi\n', timedOut: false })
 
-    const logs = await post('/logs', { workspaceId })
-    expect(logs.status).toBe(200)
-    expect(await logs.json()).toEqual({ lines: expect.any(Array) })
-
     expect((await post('/stop', { workspaceId })).status).toBe(204)
     const [row] = await app.db
       .select({ status: workspaces.status })
       .from(workspaces)
       .where(eq(workspaces.id, workspaceId))
     expect(row!.status).toBe('stopped')
+  })
+
+  test("puts a launch's log in Redis under launch-logs:<workspaceId>, ending with how it ended", async () => {
+    const { app, launched } = worker
+    const id = await launched('echo "Error: Cannot find module express"; exit 1')
+
+    const deadline = Date.now() + 10_000
+    while ((await readRedisLog(app.redis, `launch-logs:${id}`, 10)).at(-1) !== 'exited with code 1') {
+      if (Date.now() > deadline) throw new Error('timed out waiting for the launch log')
+      await Bun.sleep(100)
+    }
+    expect(await readRedisLog(app.redis, `launch-logs:${id}`, 10)).toEqual([
+      'Error: Cannot find module express',
+      'exited with code 1',
+    ])
   })
 
   test('refuses an internal call with a bad body', async () => {
@@ -105,10 +117,10 @@ describe('a worker', () => {
     const { base, post, launched } = worker
     const workspaceId = await launched()
 
-    const marked = await fetch(`${base}/internal/sandbox/logs`, { headers: { 'x-workspace-app': workspaceId } })
-    const unmarked = await post('/logs', { workspaceId })
+    const marked = await fetch(`${base}/internal/sandbox/exec`, { headers: { 'x-workspace-app': workspaceId } })
+    const unmarked = await post('/exec', { workspaceId, command: 'true' })
 
-    expect(await marked.text()).toBe('app /internal/sandbox/logs')
+    expect(await marked.text()).toBe('app /internal/sandbox/exec')
     expect(unmarked.headers.get('content-type')).toContain('application/json')
   })
 

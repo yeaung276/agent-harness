@@ -1,16 +1,21 @@
+import type { Redis } from 'ioredis'
+
 import { logger } from '../../logger.ts'
 import type { createSandboxActivityService } from '../activities/index.ts'
 import { HttpError } from '../http-error.ts'
 import type { createPlacementService } from '../placement/index.ts'
 import type { createWorkspaceService } from '../workspaces/index.ts'
 import { depsCache } from './deps-cache.ts'
-import type { NetworkRules } from './network-controller.ts'
+import { createRedisLog } from './log.ts'
+import { type NetworkRules, PROXY_PORT } from './network-controller.ts'
 import { portPool } from './port-pool.ts'
 import { createSandbox } from './sandbox.ts'
 
 const log = logger('sandbox-manager')
 
 const READY_TIMEOUT_MS = 90 * 1000
+
+export const launchLogKey = (workspaceId: string) => `launch-logs:${workspaceId}`
 
 export type LaunchOptions = { command: string; port: number; env: Record<string, string>; network: NetworkRules }
 
@@ -20,6 +25,7 @@ export const createSandboxManager = ({
   workspaces,
   activities,
   placement,
+  redis,
   mode,
   memoryMaxMb,
   cpuMax,
@@ -32,6 +38,7 @@ export const createSandboxManager = ({
   workspaces: ReturnType<typeof createWorkspaceService>
   activities: ReturnType<typeof createSandboxActivityService>
   placement: ReturnType<typeof createPlacementService>
+  redis: Redis
   mode: 'bwrap' | 'none'
   memoryMaxMb: number
   cpuMax: number
@@ -93,6 +100,7 @@ export const createSandboxManager = ({
       return null
     }
 
+    await sandboxes.get(workspaceId)?.deleteLogs()
     const launched = createSandbox(workspaceId, {
       dir,
       mounts,
@@ -105,8 +113,8 @@ export const createSandboxManager = ({
       network,
       ports: { inside: port, host: hostPort },
       readyTimeoutMs: READY_TIMEOUT_MS,
+      log: createRedisLog(redis, launchLogKey(workspaceId)),
     })
-    void sandboxes.get(workspaceId)?.deleteLogs()
     sandboxes.set(workspaceId, launched)
     log.info({ workspaceId, port: hostPort }, 'workspace app launching')
 
@@ -124,6 +132,7 @@ export const createSandboxManager = ({
     // every way a sandbox ends, stop, sweep, shutdown or on its own, comes through here
     void launched.exited().then(async exitCode => {
       ports.release(hostPort)
+      await launched.deleteLogs()
       if (sandboxes.get(workspaceId) !== launched) return
 
       await placement.releaseWorkspace(workspaceId)
@@ -139,6 +148,8 @@ export const createSandboxManager = ({
   return {
     launch: (workspaceId: string, { command, port, env, network }: LaunchOptions) =>
       locked(workspaceId, async () => {
+        if (port === PROXY_PORT) throw new HttpError(400, `Port ${PROXY_PORT} is held by the sandbox's proxy`)
+
         const options = { command, port, network, env: { ...(await getDefaultEnv(workspaceId, port)), ...env } }
 
         const status = sandboxes.get(workspaceId)?.status()
@@ -205,8 +216,6 @@ export const createSandboxManager = ({
         await workspaces.setStatus(workspaceId, 'stopped')
         log.info({ workspaceId }, 'workspace app stopped')
       }),
-
-    logs: async (workspaceId: string, tail: number) => (await sandboxes.get(workspaceId)?.logs(tail, true)) ?? [],
 
     count: () => sandboxes.size,
 

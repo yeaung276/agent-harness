@@ -39,7 +39,7 @@ const fakeTab = (options: {
     exportedTo: [] as string[],
 
     isOpen: () => tab.open,
-    state: async () => ({ url: 'http://127.0.0.1:4120/orders', storageState: { cookies: [], origins: [] } }),
+    state: async () => ({ url: '/orders', storageState: { cookies: [], origins: [] } }),
     use: () => () => {},
     isIdle: () => tab.idle,
     close: async () => {
@@ -77,6 +77,7 @@ mock.module('../../../src/services/chromium/runner.ts', () => ({
 }))
 
 mock.module('../../../src/services/chromium/session.ts', () => ({
+  WORKSPACE_ORIGIN: /^http:\/\/127\.0\.0\.1:\d+(?=\/)/,
   createSession: async (_browser: unknown, options: Parameters<typeof fakeTab>[0]) => {
     const tab = fakeTab(options)
     tabs.push(tab)
@@ -222,6 +223,17 @@ describe('create', () => {
     expect(browsers.rows.size).toBe(0)
   })
 
+  test('refuses a 31st tab on the worker with a 429, and makes no row for it', async () => {
+    for (let i = 0; i < 30; i++) await manager.create('user-1', { workspaceId: null, record: false })
+
+    await expect(manager.create('user-1', { workspaceId: null, record: false })).rejects.toMatchObject({
+      status: 429,
+      message: 'Too many sessions are open on this worker',
+    })
+    expect(tabs).toHaveLength(30)
+    expect(browsers.rows.size).toBe(30)
+  })
+
   test("gives the tab its workspace's port as it is at each request, and none without a workspace", async () => {
     await manager.create('user-1', { workspaceId: 'ws-1', record: false })
     await manager.create('user-1', { workspaceId: null, record: false })
@@ -241,7 +253,7 @@ describe('a call', () => {
 
     expect(runs[0]?.targetId).toBe(tabOf(0).targetId)
     expect(browsers.rows.get(id)).toMatchObject({
-      url: 'http://127.0.0.1:4120/orders',
+      url: '/orders',
       storageState: { cookies: [], origins: [] },
     })
   })
@@ -268,6 +280,25 @@ describe('a call', () => {
     await manager.navigate(id, '/orders')
 
     expect(runs[0]?.code).toContain('http://127.0.0.1:4120/orders')
+  })
+
+  test("answers the workspace's pages and links as paths, and other sites as they are", async () => {
+    const { id } = await manager.create('user-1', { workspaceId: 'ws-1', record: false })
+    const page = {
+      title: 'Orders',
+      url: 'http://127.0.0.1:4120/orders?id=7',
+      text: '',
+      refs: [{ href: 'http://127.0.0.1:4120/cart' }, { href: 'https://example.com/' }, { href: '' }],
+    }
+
+    next.push(ok({ ...page, status: 200, error: null }))
+    expect(await manager.navigate(id, '/orders?id=7')).toMatchObject({
+      url: '/orders?id=7',
+      refs: [{ href: '/cart' }, { href: 'https://example.com/' }, { href: '' }],
+    })
+
+    next.push(ok({ ...page, url: 'https://example.com/a' }))
+    expect(await manager.read(id)).toMatchObject({ url: 'https://example.com/a' })
   })
 
   test('gives the call 60 s plus what waitFor may wait', async () => {
@@ -320,7 +351,7 @@ describe('a call', () => {
     await manager.read(id)
 
     expect(tabOf(0).exportedTo).toHaveLength(1)
-    expect(tabOf(1).options).toMatchObject({ record: true, url: 'http://127.0.0.1:4120/orders' })
+    expect(tabOf(1).options).toMatchObject({ record: true, url: '/orders' })
     expect(runs[1]?.targetId).toBe(tabOf(1).targetId)
     expect(browsers.rows.get(id)?.status).toBe('alive')
   })
@@ -383,7 +414,7 @@ describe('closing', () => {
     await manager.close(id)
 
     expect(tabOf(0).closes).toBe(1)
-    expect(browsers.rows.get(id)).toMatchObject({ status: 'closed', url: 'http://127.0.0.1:4120/orders' })
+    expect(browsers.rows.get(id)).toMatchObject({ status: 'closed', url: '/orders' })
     await expect(manager.close(id)).rejects.toMatchObject({ status: 404 })
   })
 
@@ -393,7 +424,7 @@ describe('closing', () => {
 
     await manager.read(id)
 
-    expect(tabOf(1).options.url).toBe('http://127.0.0.1:4120/orders')
+    expect(tabOf(1).options.url).toBe('/orders')
     expect(runs[0]?.targetId).toBe(tabOf(1).targetId)
     expect(browsers.rows.get(id)?.status).toBe('alive')
   })

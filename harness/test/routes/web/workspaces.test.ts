@@ -342,7 +342,7 @@ describe('workspace page', () => {
     expect(badTail.statusCode).toBe(400)
   })
 
-  test('logs of a running workspace come from its worker, with the tail asked for', async () => {
+  test('logs of a running workspace come from its launch log in Redis, with the tail asked for, and call no worker', async () => {
     const { cookies } = await signIn()
     const { id } = await workspaceWithFiles(cookies, {})
     // worker-0's stats reporter writes pods:worker-0, and its sandbox manager claims the workspace
@@ -362,10 +362,11 @@ describe('workspace page', () => {
       sessions: 0,
     })
     await placement.claimWorkspace(id)
+    await app.redis.set(`launch-logs:${id}`, 'listening on 3000\nGET / 200\nGET /about 200')
 
-    const logs = await app.inject({ url: `/workspaces/${id}/logs?tail=50`, cookies })
+    const logs = await app.inject({ url: `/workspaces/${id}/logs?tail=2`, cookies })
 
-    expect(logs.json()).toEqual({ lines: ['listening on 3000'] })
-    expect(sent).toEqual([{ worker: 'worker-0', path: '/internal/sandbox/logs', body: { workspaceId: id, tail: 50 } }])
+    expect(logs.json()).toEqual({ lines: ['GET / 200', 'GET /about 200'] })
+    expect(sent).toEqual([])
   })
 })

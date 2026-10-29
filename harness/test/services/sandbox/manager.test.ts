@@ -46,7 +46,7 @@ const fakeSandbox = (workspaceId: string, options: SandboxOptions) => {
     stdout: null,
     logs: async (tail: number, clean = false) => {
       if (fake.unreadable) throw new Error('log unreadable')
-      if (fake.logsDeleted) return []
+      if (fake.logsDeleted && !options.log) return []
       return fake.lines.filter(line => !clean || line.trim()).slice(-tail)
     },
     deleteLogs: async () => {
@@ -108,6 +108,10 @@ mock.module('../../../src/services/sandbox/sandbox.ts', () => ({
     fakes.push(fake)
     return fake
   },
+}))
+
+mock.module('../../../src/services/sandbox/log.ts', () => ({
+  createRedisLog: (_redis: unknown, key: string) => ({ key }),
 }))
 
 const { createSandboxManager } = await import('../../../src/services/sandbox/manager.ts')
@@ -253,6 +257,7 @@ beforeEach(() => {
     workspaces: workspaces as unknown as Parameters<typeof createSandboxManager>[0]['workspaces'],
     activities: activities as unknown as Parameters<typeof createSandboxManager>[0]['activities'],
     placement: placement as unknown as Parameters<typeof createSandboxManager>[0]['placement'],
+    redis: {} as Parameters<typeof createSandboxManager>[0]['redis'],
     mode: 'none',
     memoryMaxMb: 512,
     cpuMax: 1,
@@ -395,6 +400,13 @@ describe('launch', () => {
     expect(workspaces.saved.has('ws-3')).toBe(false)
   })
 
+  test("is a 400 for the proxy's port 3128, and starts and saves nothing", async () => {
+    await expect(manager.launch('ws-1', { ...devServer, port: 3128 })).rejects.toMatchObject({ status: 400 })
+
+    expect(launchesOf('ws-1')).toHaveLength(0)
+    expect(workspaces.saved.has('ws-1')).toBe(false)
+  })
+
   test('is a 404 for an unknown workspace, before taking a port', async () => {
     await expect(manager.launch('missing', devServer)).rejects.toMatchObject({ status: 404 })
 
@@ -424,7 +436,7 @@ describe('launch', () => {
     expect(latestLaunch('ws-1').hostPort).toBe(4100)
   })
 
-  test('deletes the logs of the launch it replaces, and no others', async () => {
+  test('deletes the log of the launch it replaces, and no others', async () => {
     const first = await bringUp('ws-1')
     const other = await bringUp('ws-2')
     first.crash()
@@ -435,6 +447,16 @@ describe('launch', () => {
     expect(first.logsDeleted).toBe(true)
     expect(latestLaunch('ws-1').logsDeleted).toBe(false)
     expect(other.logsDeleted).toBe(false)
+  })
+
+  test('gives the launch a Redis log under launch-logs:<workspaceId>, and an exec none', async () => {
+    await manager.launch('ws-1', devServer)
+    const { pending, child } = await startExec('ws-1')
+    child.finish(0)
+    await pending
+
+    expect(latestLaunch('ws-1').options.log).toEqual({ key: 'launch-logs:ws-1' } as never)
+    expect(child.options.log).toBeUndefined()
   })
 })
 
@@ -459,15 +481,14 @@ describe('a launch ending on its own', () => {
     expect(calls).not.toContain('status ws-1 running')
   })
 
-  test('keeps its saved launch and its logs', async () => {
+  test('keeps its saved launch and deletes its log', async () => {
     const launched = await bringUp('ws-1')
-    launched.lines.push('Error: listen EADDRINUSE')
 
     launched.crash()
     await until(() => workspaces.statuses.get('ws-1') === 'stopped', 'stopped')
 
     expect(workspaces.saved.get('ws-1')).toMatchObject({ command: 'npm run dev' })
-    expect(await manager.logs('ws-1', 10)).toEqual(['Error: listen EADDRINUSE'])
+    expect(launched.logsDeleted).toBe(true)
   })
 
   test('leaves the status alone when it ends after a newer launch took its place', async () => {
@@ -643,11 +664,9 @@ describe('exec', () => {
     expect(child.kills).toBe(0)
   })
 
-  test("isn't kept: it takes no pool port, adds no logs and doesn't block a launch", async () => {
+  test("isn't kept: it takes no pool port and doesn't block a launch", async () => {
     const { pending, child } = await startExec('ws-1', 'npm install')
-    child.lines.push('added 120 packages')
 
-    expect(await manager.logs('ws-1', 10)).toEqual([])
     await manager.launch('ws-1', devServer)
     expect(latestLaunch('ws-1').hostPort).toBe(4100)
 
@@ -718,17 +737,12 @@ describe('stop', () => {
     expect(workspaces.statuses.get('ws-1')).toBe('stopped')
   })
 
-  test('keeps the logs until the next launch', async () => {
+  test('deletes the log once the launch is killed', async () => {
     const launched = await bringUp('ws-1')
-    launched.lines.push('ready on 3000', 'GET / 200')
 
     await manager.stop('ws-1')
-    expect(await manager.logs('ws-1', 10)).toEqual(['ready on 3000', 'GET / 200'])
-    expect(launched.logsDeleted).toBe(false)
 
-    await manager.launch('ws-1', devServer)
-    expect(await manager.logs('ws-1', 10)).toEqual([])
-    expect(launched.logsDeleted).toBe(true)
+    await until(() => launched.logsDeleted, 'log deleted')
   })
 
   test('holds a launch sent while it is still killing until it is done, and the launch then runs', async () => {
@@ -761,28 +775,6 @@ describe('stop', () => {
 
       await manager.stop('ws-1')
     }
-  })
-})
-
-describe('logs', () => {
-  test('are empty before any launch', async () => {
-    expect(await manager.logs('ws-1', 10)).toEqual([])
-  })
-
-  test("are the last tail lines of the workspace's launch, without blank lines", async () => {
-    const launched = await bringUp('ws-1')
-    launched.lines.push('one', '', 'two', '  ', 'three')
-
-    expect(await manager.logs('ws-1', 2)).toEqual(['two', 'three'])
-    expect(await manager.logs('ws-1', 10)).toEqual(['one', 'two', 'three'])
-  })
-
-  test("keep each workspace's lines apart", async () => {
-    ;(await bringUp('ws-1')).lines.push('from ws-1')
-    ;(await bringUp('ws-2')).lines.push('from ws-2')
-
-    expect(await manager.logs('ws-1', 10)).toEqual(['from ws-1'])
-    expect(await manager.logs('ws-2', 10)).toEqual(['from ws-2'])
   })
 })
 

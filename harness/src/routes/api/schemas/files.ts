@@ -9,9 +9,12 @@ export const FileParams = Type.Object({ id: Type.String({ format: 'uuid' }), '*'
 export const ReadFileQuery = Type.Object({
   offset: Type.Integer({ minimum: 0, default: 0 }),
   limit: Type.Optional(Type.Integer({ minimum: 1 })),
+  raw: Type.Boolean({ default: false }),
 })
 
 export const FileContent = Type.Object({ content: Type.String(), totalLines: Type.Integer() })
+
+export const RawFile = Type.Unsafe<ReadableStream>({ type: 'string', format: 'binary' })
 
 export const WriteFileBody = Type.Object({ content: Type.String() })
 

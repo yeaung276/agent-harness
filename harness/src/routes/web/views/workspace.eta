@@ -54,6 +54,15 @@
 <template id="image">
   <div class="p-4"><img alt="" class="max-w-full"></div>
 </template>
+<template id="video">
+  <div class="p-4"><video controls class="max-w-full"></video></div>
+</template>
+<template id="audio">
+  <div class="p-4"><audio controls></audio></div>
+</template>
+<template id="download">
+  <p class="p-6 text-sm text-gray-500"><span data-reason></span> · <a download class="text-gray-900 underline">Download</a></p>
+</template>
 <template id="note">
   <p class="p-6 text-sm text-gray-500"></p>
 </template>
@@ -146,22 +155,36 @@
       panel.append(image)
       return
     }
+    if (/\.(webm|mp4|mov|ogv)$/i.test(path)) {
+      const video = clone('video')
+      video.querySelector('video').src = url
+      panel.append(video)
+      return
+    }
+    if (/\.(mp3|wav|ogg|oga|m4a|flac)$/i.test(path)) {
+      const audio = clone('audio')
+      audio.querySelector('audio').src = url
+      panel.append(audio)
+      return
+    }
+
+    const download = reason => {
+      const link = clone('download')
+      link.querySelector('[data-reason]').textContent = reason
+      link.querySelector('a').href = url
+      link.querySelector('a').download = button.textContent
+      panel.append(link)
+    }
 
     const note = clone('note')
-    if (Number(size) > 1024 * 1024) {
-      note.textContent = `Too large to show (${(size / 1024 / 1024).toFixed(1)} MB)`
-      return panel.append(note)
-    }
+    if (Number(size) > 1024 * 1024) return download(`Too large to show (${(size / 1024 / 1024).toFixed(1)} MB)`)
     const res = await fetch(url)
     if (!res.ok) {
       note.textContent = (await res.json()).message
       return panel.append(note)
     }
     const text = await res.text()
-    if (text.includes('\0') || text.includes('�')) {
-      note.textContent = 'Binary file, not shown'
-      return panel.append(note)
-    }
+    if (text.includes('\0') || text.includes('�')) return download('Binary file, not shown')
     const pre = clone('text')
     const language = path.split('.').pop()
     if (window.hljs?.getLanguage(language)) pre.firstElementChild.innerHTML = hljs.highlight(text, { language }).value

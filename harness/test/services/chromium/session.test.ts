@@ -101,13 +101,13 @@ describe.if(linux)('a session', () => {
     expect(await session.state()).toEqual({ url: null, storageState: { cookies: [], origins: [] } })
   }, 60_000)
 
-  test('saves where its page is and its cookies, after another CDP client moved it', async () => {
+  test('saves where its page is, a workspace page as its path, and its cookies, after another CDP client moved it', async () => {
     const session = await opened()
 
     await (await pageOf(session.targetId)).goto(`http://127.0.0.1:${WORKSPACE_PORT}/login`)
 
     const state = await session.state()
-    expect(state.url).toBe(`http://127.0.0.1:${WORKSPACE_PORT}/login`)
+    expect(state.url).toBe('/login')
     expect(state.storageState).toMatchObject({ cookies: [expect.objectContaining({ name: 'session', value: 'abc' })] })
   }, 60_000)
 
@@ -117,11 +117,19 @@ describe.if(linux)('a session', () => {
     const saved = await first.state()
     await first.close()
 
-    const again = await opened({ url: `http://127.0.0.1:${WORKSPACE_PORT}/`, storageState: saved.storageState })
+    const again = await opened({ url: '/', storageState: saved.storageState })
     const page = await pageOf(again.targetId)
 
     expect(page.url()).toBe(`http://127.0.0.1:${WORKSPACE_PORT}/`)
     expect(await page.textContent('p')).toBe('cookie=session=abc')
+  }, 60_000)
+
+  test('reopens a workspace path on the port its workspace is on now, and stays blank with none', async () => {
+    const moved = await opened({ url: '/', getWorkspaceAccessPort: () => OTHER_WORKSPACE_PORT })
+    expect((await pageOf(moved.targetId)).url()).toBe(`http://127.0.0.1:${OTHER_WORKSPACE_PORT}/`)
+
+    const stopped = await opened({ url: '/', getWorkspaceAccessPort: () => null })
+    expect((await pageOf(stopped.targetId)).url()).toBe('about:blank')
   }, 60_000)
 
   test("reaches its own workspace's port and public sites, and not another workspace's port or the pod", async () => {

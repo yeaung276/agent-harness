@@ -1,9 +1,6 @@
 import type { FastifyPluginAsyncTypebox } from '@fastify/type-provider-typebox'
-import { eq } from 'drizzle-orm'
 import { type Static, Type } from 'typebox'
 
-import { users } from '../../db/schema.ts'
-import type { Session } from '../../services/chromium/routes/schema.ts'
 import { HttpError } from '../../services/http-error.ts'
 import {
   BrowserSession,
@@ -20,6 +17,8 @@ import {
   SessionParams,
   TypeBody,
 } from './schemas/browser.ts'
+
+const MAX_WORKSPACE_SESSIONS = 5
 
 export const browser: FastifyPluginAsyncTypebox = async app => {
   // calls the worker's internal chromium API; a worker's error answers with its own status
@@ -55,17 +54,16 @@ export const browser: FastifyPluginAsyncTypebox = async app => {
     const { workspaceId, record } = request.body
     if (record && !workspaceId) throw new HttpError(400, 'record needs a workspaceId')
     if (workspaceId) await app.services.workspaces.get(workspaceId)
+    if (
+      workspaceId &&
+      (await app.services.browsers.countOpen(workspaceId, app.config.BROWSER_IDLE_MS)) >= MAX_WORKSPACE_SESSIONS
+    )
+      throw new HttpError(429, 'Too many sessions are open for this workspace')
 
     const worker = await app.services.placement.session(null, workspaceId ?? null)
-    const session = (await forward(worker, 'session', { ...request.body, userId: request.userId })) as Static<
-      typeof Session
-    >
-    const [createdBy] = await app.db
-      .select({ id: users.id, email: users.email })
-      .from(users)
-      .where(eq(users.id, session.userId))
+    const session = await forward(worker, 'session', { ...request.body, userId: request.userId })
 
-    return reply.status(201).send({ ...session, createdBy: createdBy! })
+    return reply.status(201).send(session as Static<typeof BrowserSession>)
   })
 
   app.post(

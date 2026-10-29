@@ -32,6 +32,7 @@ export const sandbox = fp(
       workspaces: app.services.workspaces,
       activities: app.services.sandboxActivities,
       placement: app.services.placement,
+      redis: app.redis,
       mode: app.config.SANDBOX_MODE,
       memoryMaxMb: app.config.SANDBOX_MEMORY_MAX_MB,
       cpuMax: app.config.SANDBOX_CPU_MAX,

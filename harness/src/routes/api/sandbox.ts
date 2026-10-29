@@ -3,6 +3,8 @@ import { type Static, Type } from 'typebox'
 
 import { HttpError } from '../../services/http-error.ts'
 import type { Need } from '../../services/placement/index.ts'
+import { readRedisLog } from '../../services/sandbox/log.ts'
+import { launchLogKey } from '../../services/sandbox/manager.ts'
 import { ExecBody, ExecResult, LaunchBody, Launched, Logs, LogsQuery } from './schemas/sandbox.ts'
 import { WorkspaceParams } from './schemas/workspaces.ts'
 
@@ -85,11 +87,9 @@ export const sandbox: FastifyPluginAsyncTypebox = async app => {
     { schema: { params: WorkspaceParams, querystring: LogsQuery, response: { 200: Logs } } },
     async request => {
       const { id } = request.params
+      await app.services.workspaces.get(id)
 
-      return (await forward(await workerOf(id, 'running'), 'logs', {
-        workspaceId: id,
-        tail: request.query.tail,
-      })) as Static<typeof Logs>
+      return { lines: await readRedisLog(app.redis, launchLogKey(id), request.query.tail) }
     }
   )
 }

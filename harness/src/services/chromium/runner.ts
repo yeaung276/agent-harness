@@ -45,6 +45,9 @@ const main = async () => {
       const AsyncFunction = (async () => {}).constructor
       try {
         const result = await new AsyncFunction('page', code)(page)
+        // JSON.stringify drops these without throwing
+        if (typeof result === 'function' || typeof result === 'symbol')
+          return reply({ result: null, error: 'the result is not JSON: a ' + typeof result })
         return reply({ result: result === undefined ? null : result, error: null })
       } catch (err) {
         return reply({ result: null, error: err instanceof Error ? err.message : String(err) })

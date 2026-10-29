@@ -13,12 +13,13 @@ import type { createWorkspaceService } from '../workspaces/index.ts'
 import { createChromium } from './chromium.ts'
 import { type NavigatedContent, ops, type PageContent, type WaitFor } from './ops.ts'
 import { createRunner } from './runner.ts'
-import { createSession, type Session } from './session.ts'
+import { createSession, type Session, WORKSPACE_ORIGIN } from './session.ts'
 
 const log = logger('chromium-manager')
 
 const CALL_TIMEOUT_MS = 60 * 1000
 const RESTART_DELAY_MS = 1000
+const MAX_SESSIONS = 30
 
 type BrowserSession = NonNullable<Awaited<ReturnType<ReturnType<typeof createBrowserService>['get']>>>
 
@@ -136,6 +137,13 @@ export const createChromiumManager = ({
       }
     })
 
+  // the workspace app's pages go back as paths, like the urls sent in
+  const cleanUrls = <T extends PageContent>(page: T): T => ({
+    ...page,
+    url: page.url.replace(WORKSPACE_ORIGIN, ''),
+    refs: page.refs.map(ref => ({ ...ref, href: ref.href.replace(WORKSPACE_ORIGIN, '') })),
+  })
+
   return {
     start: async () => {
       chromium.onExit(() => {
@@ -157,6 +165,7 @@ export const createChromiumManager = ({
       if (record && !workspaceId) throw new HttpError(400, 'record needs a workspaceId')
       if (workspaceId) await workspaces.get(workspaceId)
       if (!connection?.isConnected()) throw new HttpError(503, 'The browser is restarting. Try again shortly.')
+      if (tabs.size >= MAX_SESSIONS) throw new HttpError(429, 'Too many sessions are open on this worker')
 
       const browserSession = await browsers.create(userId, { workspaceId, record })
       await openTab(browserSession)
@@ -178,7 +187,7 @@ export const createChromiumManager = ({
       if (ran.timedOut) throw new HttpError(504, "The page didn't load in time")
       if (ran.error !== null) throw new HttpError(400, ran.error)
 
-      return ran.result as NavigatedContent
+      return cleanUrls(ran.result as NavigatedContent)
     },
 
     read: async (sessionId: string, maxChars?: number, waitFor?: WaitFor) => {
@@ -189,7 +198,7 @@ export const createChromiumManager = ({
       if (ran.error === 'wait_for_timed_out') throw new HttpError(504, "What waitFor names didn't show up in time")
       if (ran.error !== null) throw new HttpError(400, ran.error)
 
-      return ran.result as PageContent
+      return cleanUrls(ran.result as PageContent)
     },
 
     click: async (sessionId: string, ref: number, waitFor?: WaitFor) => {
@@ -201,7 +210,7 @@ export const createChromiumManager = ({
       if (ran.error === 'ref_not_found') throw new HttpError(404, 'No element on the page has this ref')
       if (ran.error !== null) throw new HttpError(400, ran.error)
 
-      return ran.result as PageContent
+      return cleanUrls(ran.result as PageContent)
     },
 
     type: async (sessionId: string, ref: number, text: string, submit: boolean, waitFor?: WaitFor) => {
@@ -217,7 +226,7 @@ export const createChromiumManager = ({
       if (ran.error === 'ref_not_found') throw new HttpError(404, 'No element on the page has this ref')
       if (ran.error !== null) throw new HttpError(400, ran.error)
 
-      return ran.result as PageContent
+      return cleanUrls(ran.result as PageContent)
     },
 
     screenshot: async (sessionId: string, fullPage: boolean, waitFor?: WaitFor) => {

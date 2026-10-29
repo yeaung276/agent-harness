@@ -29,9 +29,4 @@ export const ExecResult = Type.Object({
 
 export const StopBody = Type.Object({ workspaceId: WorkspaceId })
 
-export const LogsBody = Type.Object({
-  workspaceId: WorkspaceId,
-  tail: Type.Integer({ default: 200, minimum: 1, maximum: 5000 }),
-})
-
 export const Logs = Type.Object({ lines: Type.Array(Type.String()) })

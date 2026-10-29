@@ -7,6 +7,7 @@ import {
   EditFileBody,
   FileContent,
   FileParams,
+  RawFile,
   ReadFileQuery,
   Tree,
   TreeQuery,
@@ -28,10 +29,21 @@ export const files: FastifyPluginAsyncTypebox = async app => {
 
   app.get(
     '/workspaces/:id/files/*',
-    { schema: { params: FileParams, querystring: ReadFileQuery, response: { 200: FileContent } } },
-    async request => {
+    {
+      schema: {
+        params: FileParams,
+        querystring: ReadFileQuery,
+        response: { 200: Type.Union([FileContent, RawFile]) },
+      },
+    },
+    async (request, reply) => {
       const path = request.params['*']
-      const { offset, limit } = request.query
+      const { offset, limit, raw } = request.query
+      if (raw) {
+        const file = await app.services.workspaces.openFile(request.params.id, path)
+        return reply.type(file.type).header('content-length', file.size).send(file.stream())
+      }
+
       const bytes = await app.services.workspaces.readFile(request.params.id, path)
       if (isBinary(bytes)) throw new HttpError(400, `${path} is binary`)
       if (limit === undefined && bytes.length > 512 * 1024)

@@ -105,6 +105,28 @@ describe('reading a file on the API', () => {
     expect((await getFile(id, 'logo.png')).statusCode).toBe(400)
   })
 
+  test('raw gives the bytes of any file, binary or text, whatever its size', async () => {
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0, 0, 0, 13])
+    const big = 'a\n'.repeat(300 * 1024)
+    const id = await workspaceWithFiles({ 'logo.png': png, 'big.txt': big })
+
+    const image = await getFile(id, 'logo.png', '?raw=true')
+    expect(image.statusCode).toBe(200)
+    expect(image.headers['content-type']).toBe('image/png')
+    expect(new Uint8Array(image.rawPayload)).toEqual(png)
+
+    const text = await getFile(id, 'big.txt', '?raw=true')
+    expect(text.headers['content-type']).toStartWith('text/plain')
+    expect(text.body).toBe(big)
+  })
+
+  test('raw on a folder or a missing file is refused like a read', async () => {
+    const id = await workspaceWithFiles({ 'src/app.ts': '' })
+
+    expect((await getFile(id, 'src', '?raw=true')).statusCode).toBe(400)
+    expect((await getFile(id, 'missing.png', '?raw=true')).statusCode).toBe(404)
+  })
+
   test('a file over 512 KB is only read in parts', async () => {
     const id = await workspaceWithFiles({ 'big.txt': 'a\n'.repeat(300 * 1024) })
 

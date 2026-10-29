@@ -3,6 +3,7 @@ import { desc, eq } from 'drizzle-orm'
 import { browserActivities } from '../../db/schema.ts'
 import type { Db } from '../../db/type.ts'
 import type { PageContent } from '../chromium/ops.ts'
+import { WORKSPACE_ORIGIN } from '../chromium/session.ts'
 
 type Kind = (typeof browserActivities.kind.enumValues)[number]
 
@@ -11,7 +12,7 @@ const summary = (kind: Kind, result: unknown) => {
   if (kind === 'run') return (JSON.stringify(result) ?? 'undefined').slice(0, 200)
   if (kind === 'screenshot') return 'saved'
   const page = result as PageContent
-  return `${page.title} · ${page.url}`
+  return `${page.title} · ${page.url.replace(WORKSPACE_ORIGIN, '')}`
 }
 
 export const createBrowserActivityService = ({ db }: { db: Db }) => ({

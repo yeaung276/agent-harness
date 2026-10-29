@@ -30,7 +30,7 @@ RUN apt-get update \
      bubblewrap passt nftables util-linux bash dumb-init \
      openssl ca-certificates git openssh-client \
      curl wget netcat-openbsd iproute2 \
-     build-essential python3 pkg-config \
+     build-essential python3 python3-pip pkg-config nodejs npm \
      unzip zip xz-utils bzip2 procps psmisc lsof \
      jq ripgrep less file tree postgresql-client sqlite3 tzdata \
   && rm -rf /var/lib/apt/lists/*

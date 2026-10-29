@@ -1,7 +1,7 @@
 import type { FastifyPluginAsyncTypebox } from '@fastify/type-provider-typebox'
 import { Type } from 'typebox'
 
-import { ExecBody, ExecResult, LaunchBody, Logs, LogsBody, StopBody } from './schema.ts'
+import { ExecBody, ExecResult, LaunchBody, StopBody } from './schema.ts'
 
 export const sandboxRoutes: FastifyPluginAsyncTypebox = async app => {
   app.post('/launch', { schema: { body: LaunchBody, response: { 204: Type.Null() } } }, async (request, reply) => {
@@ -22,8 +22,4 @@ export const sandboxRoutes: FastifyPluginAsyncTypebox = async app => {
 
     return reply.status(204).send(null)
   })
-
-  app.post('/logs', { schema: { body: LogsBody, response: { 200: Logs } } }, async request => ({
-    lines: await app.sandbox.logs(request.body.workspaceId, request.body.tail),
-  }))
 }

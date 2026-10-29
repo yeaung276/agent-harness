@@ -23,7 +23,6 @@ export const BrowserSession = Type.Object({
   workspaceId: Type.Union([Id, Type.Null()]),
   record: Type.Boolean(),
   status: Type.Union([Type.Literal('alive'), Type.Literal('closed')]),
-  createdBy: Type.Object({ id: Id, email: Type.String() }),
   createdAt: Timestamp,
   lastUsedAt: Timestamp,
 })

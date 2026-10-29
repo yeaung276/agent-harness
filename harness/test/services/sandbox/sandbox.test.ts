@@ -5,8 +5,11 @@ import { createServer } from 'node:net'
 import { networkInterfaces, tmpdir } from 'node:os'
 import { join } from 'node:path'
 
+import RedisMock from 'ioredis-mock'
+
 import { loadConfig } from '../../../src/config.ts'
 import { depsCache } from '../../../src/services/sandbox/deps-cache.ts'
+import { createRedisLog, readRedisLog } from '../../../src/services/sandbox/log.ts'
 import {
   assertSandboxUsable,
   createSandbox,
@@ -190,6 +193,43 @@ describe('a launched process', () => {
     expect(sandbox.status()).toBe('failed')
   }, 30_000)
 
+  test('ends its log with its exit code when it exits on its own', async () => {
+    const sandbox = launch(await workspace(), { command: 'echo boom; exit 3' })
+    await sandbox.exited()
+
+    expect(await sandbox.logs(10, true)).toEqual(['boom', 'exited with code 3'])
+  }, 30_000)
+
+  test('ends its log with stopped when killed', async () => {
+    const sandbox = launch(await workspace())
+    await sandbox.ready()
+
+    await sandbox.kill()
+
+    expect((await sandbox.logs(10, true)).at(-1)).toBe('stopped')
+  }, 30_000)
+
+  test('says in its log that nothing answered when its ready timeout runs out', async () => {
+    const sandbox = launch(await workspace(), { command: 'sleep 60', readyTimeoutMs: 1500 })
+    await sandbox.exited()
+
+    expect(await sandbox.logs(10, true)).toContain('nothing answered on port 3000 within 1.5 s')
+  }, 30_000)
+
+  test('writes to the log it is given, which a Redis log copies for other machines to read', async () => {
+    const redis = new RedisMock()
+    const sandbox = launch(await workspace(), {
+      command: 'echo boom; exit 3',
+      log: createRedisLog(redis, 'launch-logs:ws-1'),
+    })
+    await sandbox.exited()
+
+    await sandbox.deleteLogs()
+
+    expect(await readRedisLog(redis, 'launch-logs:ws-1', 10)).toEqual(['boom', 'exited with code 3'])
+    expect(await sandbox.logs(10, true)).toEqual(['boom', 'exited with code 3'])
+  }, 30_000)
+
   test('is idle only when nothing holds it and its last use ended more than idleMs ago', async () => {
     const sandbox = start(await workspace(), { command: 'sleep 30' })
 
@@ -208,6 +248,13 @@ describe('a launched process', () => {
 })
 
 describe('a command without a port', () => {
+  test('adds no ending line to its log', async () => {
+    const sandbox = start(await workspace(), { command: 'echo hi; exit 3' })
+    await sandbox.exited()
+
+    expect(await sandbox.logs(10, true)).toEqual(['hi'])
+  })
+
   test('is running from the start and stopped when it ends, with its exit code', async () => {
     const sandbox = start(await workspace(), { command: 'exit 7' })
 

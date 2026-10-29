@@ -8,6 +8,7 @@ import { guard } from './guard.ts'
 
 const VIEWPORT = { width: 1280, height: 800 }
 const RECORDINGS_DIR = join(tmpdir(), 'chromium-recordings')
+export const WORKSPACE_ORIGIN = /^http:\/\/127\.0\.0\.1:\d+(?=\/)/
 
 export type SessionState = {
   url: string | null
@@ -39,7 +40,11 @@ export const createSession = async (
   const { targetId } = (await cdp.send('Target.getTargetInfo')).targetInfo
   await cdp.detach()
 
-  if (url) await page.goto(url).catch(() => undefined)
+  // a workspace path loads from the port its app is on now
+  if (url?.startsWith('/')) {
+    const port = getWorkspaceAccessPort?.() ?? null
+    if (port !== null) await page.goto(`http://127.0.0.1:${port}${url}`).catch(() => undefined)
+  } else if (url) await page.goto(url).catch(() => undefined)
 
   let inUse = 0
   let lastUsedAt = Date.now()
@@ -50,7 +55,7 @@ export const createSession = async (
     isOpen: () => !page.isClosed(),
 
     state: async (): Promise<SessionState> => {
-      const pageUrl = page.url()
+      const pageUrl = page.url().replace(WORKSPACE_ORIGIN, '')
 
       return { url: pageUrl === 'about:blank' ? null : pageUrl, storageState: await context.storageState() }
     },
