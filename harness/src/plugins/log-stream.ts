@@ -64,6 +64,7 @@ export const logStream = fp(
       { level: LOG_LEVEL, stream: redisLogs },
     ])
 
+    if (app.redis.status === 'wait') app.redis.connect().catch(() => {})
     const timer = setInterval(() => void flush(), FLUSH_MS)
     app.addHook('onClose', async () => {
       clearInterval(timer)

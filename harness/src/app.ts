@@ -35,7 +35,8 @@ const logger = ({ NODE_ENV, LOG_LEVEL }: Config): FastifyServerOptions['logger']
     : { level: LOG_LEVEL }
 
 export const buildApp = async (config: Config) => {
-  const registration = config.APP_MODE === 'worker' ? await registerWithServer(config) : null
+  const worker = config.APP_MODE === 'worker'
+  const registration = worker && config.NODE_ENV !== 'development' ? await registerWithServer(config) : null
   const app = Fastify({
     logger: logger(config),
     https: registration?.https ?? null,
@@ -47,11 +48,11 @@ export const buildApp = async (config: Config) => {
   await app.register(redis)
   await app.register(services)
 
-  if (registration) {
+  if (worker) {
     await app.register(logStream)
     await app.register(sandbox)
     await app.register(chromium)
-    await app.register(registration.statsReporter)
+    if (registration) await app.register(registration.statsReporter)
     return app
   }
 

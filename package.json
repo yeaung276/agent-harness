@@ -5,6 +5,7 @@
   "packageManager": "bun@1.4.3",
   "workspaces": ["harness"],
   "scripts": {
+    "prepare": "git config core.hooksPath .githooks",
     "dev:harness": "bun run --filter harness dev",
     "build:harness": "bun run --filter harness build",
     "migrate:harness": "bun run --filter harness db:migrate",

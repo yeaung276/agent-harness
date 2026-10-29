@@ -1,0 +1,10 @@
+#!/bin/sh
+set -e
+
+files=$(git diff --cached --name-only --diff-filter=ACMR -- '*.ts')
+if [ -n "$files" ]; then
+  echo "$files" | xargs bunx prettier --write --log-level warn
+  echo "$files" | xargs git add
+fi
+
+bun run --filter harness test
