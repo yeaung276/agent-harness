@@ -105,7 +105,7 @@ export const workspaces: FastifyPluginAsyncTypebox = async app => {
       const { id } = request.params
       await app.services.workspaces.get(id)
       const offset = (request.query.page - 1) * PAGE_SIZE
-      const { items, total } = await app.services.activities.list(id, { limit: PAGE_SIZE, offset })
+      const { items, total } = await app.services.sandboxActivities.list(id, { limit: PAGE_SIZE, offset })
 
       return {
         items,

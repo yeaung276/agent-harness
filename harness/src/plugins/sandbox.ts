@@ -30,7 +30,7 @@ export const sandbox = fp(
 
     const manager = createSandboxManager({
       workspaces: app.services.workspaces,
-      activities: app.services.activities,
+      activities: app.services.sandboxActivities,
       placement: app.services.placement,
       mode: app.config.SANDBOX_MODE,
       memoryMaxMb: app.config.SANDBOX_MEMORY_MAX_MB,

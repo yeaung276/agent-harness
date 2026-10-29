@@ -15,7 +15,8 @@ export const chromium = fp(
     const manager = createChromiumManager({
       workspaces: app.services.workspaces,
       sandboxes: app.sandbox,
-      browserSessions: app.services.browserSessions,
+      browsers: app.services.browsers,
+      activities: app.services.browserActivities,
       placement: app.services.placement,
       mode: app.config.SANDBOX_MODE,
       portMin: app.config.SANDBOX_PORT_MIN,

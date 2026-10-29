@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, test } from 'bun:test'
 
 import { loadConfig } from '../../../src/config.ts'
-import { browserSessions, users, workspaces } from '../../../src/db/schema.ts'
+import { browserActivities, browsers, users, workspaces } from '../../../src/db/schema.ts'
 import { buildTestApp } from '../../test-app.ts'
 
 const app = await buildTestApp(loadConfig({ ...process.env, NODE_ENV: 'test', LOG_LEVEL: 'silent' }))
@@ -59,7 +59,7 @@ describe('browsers page', () => {
     const alice = await signIn()
     const bob = await signIn()
     const workspaceId = await createWorkspace(alice.id)
-    await app.db.insert(browserSessions).values({
+    await app.db.insert(browsers).values({
       userId: alice.id,
       workspaceId,
       record: true,
@@ -82,7 +82,7 @@ describe('browsers page', () => {
   test("a session's workspace links to the workspace page, and a session without one shows a dash", async () => {
     const { id, cookies } = await signIn()
     const workspaceId = await createWorkspace(id)
-    await app.db.insert(browserSessions).values([
+    await app.db.insert(browsers).values([
       { userId: id, workspaceId, url: 'http://with-workspace.test/' },
       { userId: id, workspaceId: null, url: 'http://without-workspace.test/' },
     ])
@@ -98,7 +98,7 @@ describe('browsers page', () => {
 
   test('sessions are sorted by last used, newest first, then by created', async () => {
     const { id, cookies } = await signIn()
-    await app.db.insert(browserSessions).values([
+    await app.db.insert(browsers).values([
       {
         userId: id,
         url: 'http://used-first.test/',
@@ -128,14 +128,14 @@ describe('browsers page', () => {
   test('sessions are 20 to a page, with previous and next links', async () => {
     const { id, cookies } = await signIn()
     // used after every other session in this file, so they sort to the top
-    await app.db.insert(browserSessions).values(
+    await app.db.insert(browsers).values(
       Array.from({ length: 25 }, (_, index) => ({
         userId: id,
         url: `http://page.test/${index + 1}/`,
         lastUsedAt: new Date(Date.UTC(2200, 0, 1, 0, 0, index)),
       }))
     )
-    const total = await app.db.$count(browserSessions)
+    const total = await app.db.$count(browsers)
 
     const first = await app.inject({ url: '/browsers', cookies })
     const second = await app.inject({ url: '/browsers?page=2', cookies })
@@ -154,7 +154,7 @@ describe('browsers page', () => {
 
   test('a page past the end says so, and page 0 is refused', async () => {
     const { cookies } = await signIn()
-    const total = await app.db.$count(browserSessions)
+    const total = await app.db.$count(browsers)
 
     const past = await app.inject({ url: '/browsers?page=1000', cookies })
     const zero = await app.inject({ url: '/browsers?page=0', cookies })
@@ -170,5 +170,33 @@ describe('browsers page', () => {
 
     expect(res.statusCode).toBe(302)
     expect(res.headers.location).toBe('/login')
+  })
+})
+
+describe('browser activity', () => {
+  test('lists calls newest first, 20 to a page, and refuses an unknown session', async () => {
+    const { id: userId, cookies } = await signIn()
+    const [browser] = await app.db.insert(browsers).values({ userId }).returning({ id: browsers.id })
+    const id = browser!.id
+    await app.db.insert(browserActivities).values(
+      Array.from({ length: 25 }, (_, index) => ({
+        browserId: id,
+        kind: 'click' as const,
+        command: `ref ${index + 1}`,
+        status: 'succeeded' as const,
+        output: `page ${index + 1}`,
+        createdAt: new Date(Date.UTC(2026, 0, 1, 0, 0, index)),
+      }))
+    )
+
+    const first = (await app.inject({ url: `/browsers/${id}/activities`, cookies })).json()
+    const second = (await app.inject({ url: `/browsers/${id}/activities?page=2`, cookies })).json()
+
+    expect(first.items).toHaveLength(20)
+    expect(first.items[0]).toMatchObject({ kind: 'click', command: 'ref 25', status: 'succeeded', output: 'page 25' })
+    expect(first.pagination).toEqual({ from: 1, to: 20, total: 25, prev: null, next: 2 })
+    expect(second.items).toHaveLength(5)
+    expect(second.pagination).toEqual({ from: 21, to: 25, total: 25, prev: 1, next: null })
+    expect((await app.inject({ url: `/browsers/${crypto.randomUUID()}/activities`, cookies })).statusCode).toBe(404)
   })
 })

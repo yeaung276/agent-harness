@@ -4,7 +4,8 @@ import { join } from 'node:path'
 import type { Browser } from 'playwright-core'
 
 import { logger } from '../../logger.ts'
-import type { createBrowserSessionService } from '../browser-sessions/index.ts'
+import type { createBrowserActivityService } from '../activities/index.ts'
+import type { createBrowserService } from '../browser/index.ts'
 import { HttpError } from '../http-error.ts'
 import type { createPlacementService } from '../placement/index.ts'
 import type { createSandboxManager } from '../sandbox/manager.ts'
@@ -19,12 +20,13 @@ const log = logger('chromium-manager')
 const CALL_TIMEOUT_MS = 60 * 1000
 const RESTART_DELAY_MS = 1000
 
-type BrowserSession = NonNullable<Awaited<ReturnType<ReturnType<typeof createBrowserSessionService>['get']>>>
+type BrowserSession = NonNullable<Awaited<ReturnType<ReturnType<typeof createBrowserService>['get']>>>
 
 export const createChromiumManager = ({
   workspaces,
   sandboxes,
-  browserSessions,
+  browsers,
+  activities,
   placement,
   mode,
   portMin,
@@ -33,7 +35,8 @@ export const createChromiumManager = ({
 }: {
   workspaces: ReturnType<typeof createWorkspaceService>
   sandboxes: ReturnType<typeof createSandboxManager>
-  browserSessions: ReturnType<typeof createBrowserSessionService>
+  browsers: ReturnType<typeof createBrowserService>
+  activities: ReturnType<typeof createBrowserActivityService>
   placement: ReturnType<typeof createPlacementService>
   mode: 'bwrap' | 'none'
   portMin: number
@@ -101,12 +104,12 @@ export const createChromiumManager = ({
     if (record) {
       await tab?.exportRecording(join(workspaces.getWorkspaceRoot(workspaceId!), 'browser', `${id}-${Date.now()}.webm`))
     }
-    await browserSessions.update(id, { ...state, status: 'closed' })
+    await browsers.update(id, { ...state, status: 'closed' })
   }
 
   const exec = (sessionId: string, code: string, timeoutMs: number) =>
     locked(sessionId, async () => {
-      const browserSession = await browserSessions.get(sessionId)
+      const browserSession = await browsers.get(sessionId)
       if (!browserSession) throw new HttpError(404, 'No session has this id')
 
       // a closed, idle or lost tab opens again where the row left off
@@ -114,7 +117,7 @@ export const createChromiumManager = ({
       if (!tab?.isOpen()) {
         if (tab) await closeTab(browserSession)
         tab = await openTab(browserSession)
-        await browserSessions.update(sessionId, { status: 'alive' })
+        await browsers.update(sessionId, { status: 'alive' })
         log.info({ sessionId }, 'browser session tab reopened where it left off')
       }
 
@@ -125,7 +128,7 @@ export const createChromiumManager = ({
           { sessionId, durationMs: ran.durationMs, timedOut: ran.timedOut, error: ran.error },
           'browser call finished'
         )
-        await browserSessions.update(sessionId, await tab.state())
+        await browsers.update(sessionId, await tab.state())
 
         return ran
       } finally {
@@ -155,7 +158,7 @@ export const createChromiumManager = ({
       if (workspaceId) await workspaces.get(workspaceId)
       if (!connection?.isConnected()) throw new HttpError(503, 'The browser is restarting. Try again shortly.')
 
-      const browserSession = await browserSessions.create(userId, { workspaceId, record })
+      const browserSession = await browsers.create(userId, { workspaceId, record })
       await openTab(browserSession)
       log.info({ sessionId: browserSession.id, workspaceId, record, userId }, 'browser session created')
 
@@ -163,13 +166,14 @@ export const createChromiumManager = ({
     },
 
     navigate: async (sessionId: string, url: string, until?: WaitFor) => {
-      const workspaceId = (await browserSessions.get(sessionId))?.workspaceId
+      const workspaceId = (await browsers.get(sessionId))?.workspaceId
       const workspaceAccessPort = workspaceId ? sandboxes.hostPort(workspaceId) : null
       const ran = await exec(
         sessionId,
         ops.navigate(url, workspaceAccessPort, until),
         CALL_TIMEOUT_MS + (until?.timeoutMs ?? 0)
       )
+      await activities.record(sessionId, 'navigate', url, ran)
 
       if (ran.timedOut) throw new HttpError(504, "The page didn't load in time")
       if (ran.error !== null) throw new HttpError(400, ran.error)
@@ -179,6 +183,7 @@ export const createChromiumManager = ({
 
     read: async (sessionId: string, maxChars?: number, waitFor?: WaitFor) => {
       const ran = await exec(sessionId, ops.read(maxChars, waitFor), CALL_TIMEOUT_MS + (waitFor?.timeoutMs ?? 0))
+      await activities.record(sessionId, 'read', '', ran)
 
       if (ran.timedOut) throw new HttpError(504, "The call didn't finish in time")
       if (ran.error === 'wait_for_timed_out') throw new HttpError(504, "What waitFor names didn't show up in time")
@@ -189,6 +194,7 @@ export const createChromiumManager = ({
 
     click: async (sessionId: string, ref: number, waitFor?: WaitFor) => {
       const ran = await exec(sessionId, ops.click(ref, waitFor), CALL_TIMEOUT_MS + (waitFor?.timeoutMs ?? 0))
+      await activities.record(sessionId, 'click', `ref ${ref}`, ran)
 
       if (ran.timedOut) throw new HttpError(504, "The call didn't finish in time")
       if (ran.error === 'wait_for_timed_out') throw new HttpError(504, "What waitFor names didn't show up in time")
@@ -204,6 +210,7 @@ export const createChromiumManager = ({
         ops.type(ref, text, submit, waitFor),
         CALL_TIMEOUT_MS + (waitFor?.timeoutMs ?? 0)
       )
+      await activities.record(sessionId, 'type', `ref ${ref}: ${text}`, ran)
 
       if (ran.timedOut) throw new HttpError(504, "The call didn't finish in time")
       if (ran.error === 'wait_for_timed_out') throw new HttpError(504, "What waitFor names didn't show up in time")
@@ -214,11 +221,12 @@ export const createChromiumManager = ({
     },
 
     screenshot: async (sessionId: string, fullPage: boolean, waitFor?: WaitFor) => {
-      const browserSession = await browserSessions.get(sessionId)
+      const browserSession = await browsers.get(sessionId)
       if (!browserSession) throw new HttpError(404, 'No session has this id')
       if (!browserSession.record) throw new HttpError(409, "The session wasn't created with record")
 
       const ran = await exec(sessionId, ops.screenshot(fullPage, waitFor), CALL_TIMEOUT_MS + (waitFor?.timeoutMs ?? 0))
+      await activities.record(sessionId, 'screenshot', fullPage ? 'full page' : 'viewport', ran)
 
       if (ran.timedOut) throw new HttpError(504, "The call didn't finish in time")
       if (ran.error === 'wait_for_timed_out') throw new HttpError(504, "What waitFor names didn't show up in time")
@@ -234,6 +242,7 @@ export const createChromiumManager = ({
 
     run: async (sessionId: string, code: string, timeoutMs: number) => {
       const { result, error, durationMs } = await exec(sessionId, ops.arbitrary(code), timeoutMs)
+      await activities.record(sessionId, 'run', code, { result, error })
 
       return { result, error, durationMs }
     },
@@ -243,7 +252,7 @@ export const createChromiumManager = ({
 
     close: (sessionId: string) =>
       locked(sessionId, async () => {
-        const browserSession = await browserSessions.get(sessionId)
+        const browserSession = await browsers.get(sessionId)
         if (browserSession?.status !== 'alive') {
           throw new HttpError(404, 'No session has this id, or it is already closed')
         }
@@ -260,7 +269,7 @@ export const createChromiumManager = ({
           .filter(([, tab]) => tab.isIdle(idleMs))
           .map(([sessionId]) =>
             locked(sessionId, async () => {
-              const browserSession = await browserSessions.get(sessionId)
+              const browserSession = await browsers.get(sessionId)
               if (browserSession) await closeTab(browserSession)
               log.info({ sessionId }, 'idle browser session tab closed')
             })
@@ -273,7 +282,7 @@ export const createChromiumManager = ({
       await Promise.all(
         [...tabs.keys()].map(sessionId =>
           locked(sessionId, async () => {
-            const browserSession = await browserSessions.get(sessionId)
+            const browserSession = await browsers.get(sessionId)
             if (browserSession) await closeTab(browserSession)
           })
         )

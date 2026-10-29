@@ -52,13 +52,10 @@ export const sandboxActivities = pgTable(
       .references(() => workspaces.id, { onDelete: 'cascade' }),
     kind: text('kind', { enum: ['launch', 'exec'] }).notNull(),
     command: text('command').notNull(),
-    status: text('status', { enum: ['running', 'succeeded', 'failed'] })
-      .notNull()
-      .default('running'),
+    status: text('status', { enum: ['succeeded', 'failed'] }).notNull(),
     exitCode: integer('exit_code'),
     output: text('output').notNull().default(''),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-    finishedAt: timestamp('finished_at', { withTimezone: true }),
   },
   table => [index('sandbox_activities_workspace_created_idx').on(table.workspaceId, table.createdAt)]
 )
@@ -69,7 +66,7 @@ export const workers = pgTable('workers', {
   registeredAt: timestamp('registered_at', { withTimezone: true }).notNull().defaultNow(),
 })
 
-export const browserSessions = pgTable('browser_sessions', {
+export const browsers = pgTable('browsers', {
   id: uuid('id').primaryKey().defaultRandom(),
   workspaceId: uuid('workspace_id').references(() => workspaces.id, { onDelete: 'cascade' }),
   record: boolean('record').notNull().default(false),
@@ -84,3 +81,19 @@ export const browserSessions = pgTable('browser_sessions', {
   lastUsedAt: timestamp('last_used_at', { withTimezone: true }).notNull().defaultNow(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 })
+
+export const browserActivities = pgTable(
+  'browser_activities',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    browserId: uuid('browser_id')
+      .notNull()
+      .references(() => browsers.id, { onDelete: 'cascade' }),
+    kind: text('kind', { enum: ['navigate', 'read', 'click', 'type', 'screenshot', 'run'] }).notNull(),
+    command: text('command').notNull(),
+    status: text('status', { enum: ['succeeded', 'failed'] }).notNull(),
+    output: text('output').notNull().default(''),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  table => [index('browser_activities_browser_created_idx').on(table.browserId, table.createdAt)]
+)

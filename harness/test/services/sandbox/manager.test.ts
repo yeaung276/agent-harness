@@ -168,7 +168,7 @@ type Activity = {
   workspaceId: string
   kind: 'launch' | 'exec'
   command: string
-  status: 'running' | 'succeeded' | 'failed'
+  status: 'succeeded' | 'failed'
   exitCode: number | null
   output: string
 }
@@ -178,14 +178,14 @@ const fakeActivities = () => {
 
   return {
     rows,
-    create: async (workspaceId: string, kind: 'launch' | 'exec', command: string) => {
+    record: async (
+      workspaceId: string,
+      kind: 'launch' | 'exec',
+      command: string,
+      fields: Pick<Activity, 'status' | 'exitCode' | 'output'>
+    ) => {
       await lag()
-      rows.push({ workspaceId, kind, command, status: 'running', exitCode: null, output: '' })
-      return String(rows.length - 1)
-    },
-    update: async (id: string, fields: Pick<Activity, 'status' | 'exitCode' | 'output'>) => {
-      await lag()
-      Object.assign(rows[Number(id)]!, fields)
+      rows.push({ workspaceId, kind, command, ...fields })
     },
   }
 }
@@ -1165,17 +1165,17 @@ describe('placement', () => {
 })
 
 describe('activity', () => {
-  test('records an exec as running, then succeeded with its exit code and output', async () => {
+  test('records an exec once it ends, as succeeded with its exit code and output', async () => {
     const { pending, child } = await startExec('ws-1', 'npm test')
-    expect(activities.rows).toEqual([
-      { workspaceId: 'ws-1', kind: 'exec', command: 'npm test', status: 'running', exitCode: null, output: '' },
-    ])
+    expect(activities.rows).toEqual([])
 
     child.lines.push('12 passed')
     child.finish(0)
     await pending
 
-    expect(activities.rows[0]).toMatchObject({ status: 'succeeded', exitCode: 0, output: '12 passed' })
+    expect(activities.rows).toEqual([
+      { workspaceId: 'ws-1', kind: 'exec', command: 'npm test', status: 'succeeded', exitCode: 0, output: '12 passed' },
+    ])
   })
 
   test('records a failing exec, and one that timed out, as failed', async () => {
@@ -1190,17 +1190,22 @@ describe('activity', () => {
     expect(activities.rows[1]).toMatchObject({ status: 'failed', exitCode: null })
   })
 
-  test('records a launch as running, then succeeded once it listens, with its output so far', async () => {
+  test('records a launch once it listens, as succeeded with its output so far', async () => {
     await manager.launch('ws-1', devServer)
-    expect(activities.rows).toEqual([
-      { workspaceId: 'ws-1', kind: 'launch', command: 'npm run dev', status: 'running', exitCode: null, output: '' },
-    ])
+    expect(activities.rows).toEqual([])
 
     latestLaunch('ws-1').lines.push('ready on 3000')
     latestLaunch('ws-1').listen()
 
-    await until(() => activities.rows[0]!.status === 'succeeded', 'succeeded')
-    expect(activities.rows[0]).toMatchObject({ exitCode: null, output: 'ready on 3000' })
+    await until(() => activities.rows.length === 1, 'recorded')
+    expect(activities.rows[0]).toEqual({
+      workspaceId: 'ws-1',
+      kind: 'launch',
+      command: 'npm run dev',
+      status: 'succeeded',
+      exitCode: null,
+      output: 'ready on 3000',
+    })
   })
 
   test('records a launch that ends before it listens as failed, with its exit code and last lines', async () => {
@@ -1208,8 +1213,12 @@ describe('activity', () => {
     latestLaunch('ws-1').lines.push('Error: Cannot find module express')
     latestLaunch('ws-1').crash()
 
-    await until(() => activities.rows[0]!.status === 'failed', 'failed')
-    expect(activities.rows[0]).toMatchObject({ exitCode: 1, output: 'Error: Cannot find module express' })
+    await until(() => activities.rows.length === 1, 'recorded')
+    expect(activities.rows[0]).toMatchObject({
+      status: 'failed',
+      exitCode: 1,
+      output: 'Error: Cannot find module express',
+    })
   })
 
   test('records a launch with no free pool port as failed, saying so', async () => {

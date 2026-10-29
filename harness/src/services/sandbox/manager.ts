@@ -1,5 +1,5 @@
 import { logger } from '../../logger.ts'
-import type { createActivityService } from '../activities/index.ts'
+import type { createSandboxActivityService } from '../activities/index.ts'
 import { HttpError } from '../http-error.ts'
 import type { createPlacementService } from '../placement/index.ts'
 import type { createWorkspaceService } from '../workspaces/index.ts'
@@ -30,7 +30,7 @@ export const createSandboxManager = ({
   depsRoot,
 }: {
   workspaces: ReturnType<typeof createWorkspaceService>
-  activities: ReturnType<typeof createActivityService>
+  activities: ReturnType<typeof createSandboxActivityService>
   placement: ReturnType<typeof createPlacementService>
   mode: 'bwrap' | 'none'
   memoryMaxMb: number
@@ -64,13 +64,15 @@ export const createSandboxManager = ({
   })
 
   const settle = async (
-    activityId: string,
+    workspaceId: string,
+    kind: 'launch' | 'exec',
+    command: string,
     sandbox: ReturnType<typeof createSandbox>,
     status: 'succeeded' | 'failed',
     exitCode: number | null
   ) => {
     const output = (await sandbox.logs(5000)).join('\n').slice(-16 * 1024)
-    await activities.update(activityId, { status, exitCode, output })
+    await activities.record(workspaceId, kind, command, { status, exitCode, output })
     return output
   }
 
@@ -79,13 +81,15 @@ export const createSandboxManager = ({
     const { mounts, env: depsEnv } = await deps.mounts(workspaceId, dir)
     await placement.claimWorkspace(workspaceId)
 
-    const activityId = await activities.create(workspaceId, 'launch', command)
-
     const hostPort = ports.take()
     if (hostPort === null) {
       log.warn({ workspaceId }, 'workspace app not launched: no free port on this worker')
       await placement.releaseWorkspace(workspaceId)
-      await activities.update(activityId, { status: 'failed', exitCode: null, output: 'No free port on this worker' })
+      await activities.record(workspaceId, 'launch', command, {
+        status: 'failed',
+        exitCode: null,
+        output: 'No free port on this worker',
+      })
       return null
     }
 
@@ -104,17 +108,17 @@ export const createSandboxManager = ({
     })
     void sandboxes.get(workspaceId)?.deleteLogs()
     sandboxes.set(workspaceId, launched)
-    log.info({ workspaceId, activityId, port: hostPort }, 'workspace app launching')
+    log.info({ workspaceId, port: hostPort }, 'workspace app launching')
 
     void launched.ready().then(
       async () => {
         log.info({ workspaceId, port: hostPort }, 'workspace app running')
         await workspaces.setStatus(workspaceId, 'running')
-        await settle(activityId, launched, 'succeeded', null)
+        await settle(workspaceId, 'launch', command, launched, 'succeeded', null)
       },
       async () => {
-        log.warn({ workspaceId, activityId }, 'workspace app failed to start')
-        await settle(activityId, launched, 'failed', await launched.exited())
+        log.warn({ workspaceId }, 'workspace app failed to start')
+        await settle(workspaceId, 'launch', command, launched, 'failed', await launched.exited())
       }
     )
     // every way a sandbox ends, stop, sweep, shutdown or on its own, comes through here
@@ -153,7 +157,6 @@ export const createSandboxManager = ({
       const dir = workspaces.getWorkspaceRoot(workspaceId)
       const { mounts, env: depsEnv } = await deps.mounts(workspaceId, dir)
       const childEnv = { ...depsEnv, ...(await getDefaultEnv(workspaceId, server?.port ?? null)), ...env }
-      const activityId = await activities.create(workspaceId, 'exec', command)
 
       const child = createSandbox(workspaceId, {
         dir,
@@ -178,8 +181,15 @@ export const createSandboxManager = ({
         const exited = await child.exited()
         clearTimeout(timer)
         const exitCode = timedOut ? null : exited
-        const output = await settle(activityId, child, exitCode === 0 ? 'succeeded' : 'failed', exitCode)
-        log.info({ workspaceId, activityId, exitCode, timedOut }, 'workspace command finished')
+        const output = await settle(
+          workspaceId,
+          'exec',
+          command,
+          child,
+          exitCode === 0 ? 'succeeded' : 'failed',
+          exitCode
+        )
+        log.info({ workspaceId, exitCode, timedOut }, 'workspace command finished')
 
         return { exitCode, output, timedOut }
       } finally {

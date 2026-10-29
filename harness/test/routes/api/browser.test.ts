@@ -23,7 +23,7 @@ const answers: Record<string, (call: Sent) => Response | Promise<Response>> = {
   // the worker inserts the row, as the chromium manager does
   '/internal/chromium/session': async ({ body }) =>
     Response.json(
-      await app.services.browserSessions.create(String(body.userId), {
+      await app.services.browsers.create(String(body.userId), {
         workspaceId: (body.workspaceId as string | undefined) ?? null,
         record: Boolean(body.record),
       }),

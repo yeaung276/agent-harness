@@ -45,7 +45,7 @@ export const browser: FastifyPluginAsyncTypebox = async app => {
 
   // the worker holding the session's tab, or the one its tab reopens on
   const workerOf = async (sessionId: string) => {
-    const session = await app.services.browserSessions.get(sessionId)
+    const session = await app.services.browsers.get(sessionId)
     if (!session) throw new HttpError(404, 'No session has this id')
 
     return app.services.placement.session(sessionId, session.workspaceId)

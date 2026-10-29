@@ -87,14 +87,14 @@ mock.module('../../../src/services/chromium/session.ts', () => ({
 const { createChromiumManager } = await import('../../../src/services/chromium/manager.ts')
 
 type Deps = Parameters<typeof createChromiumManager>[0]
-type BrowserSession = Awaited<ReturnType<Deps['browserSessions']['create']>>
+type BrowserSession = Awaited<ReturnType<Deps['browsers']['create']>>
 
 const root = await mkdtemp(join(tmpdir(), 'chromium-manager-'))
 afterAll(() => rm(root, { recursive: true, force: true }))
 
 const workspaceRoot = (id: string) => join(root, id)
 
-const fakeBrowserSessions = () => {
+const fakeBrowsers = () => {
   const rows = new Map<string, BrowserSession>()
 
   return {
@@ -128,6 +128,22 @@ const fakeBrowserSessions = () => {
   }
 }
 
+const fakeActivities = () => {
+  const rows: { browserId: string; kind: string; command: string; result: unknown; error: string | null }[] = []
+
+  return {
+    rows,
+    record: async (
+      browserId: string,
+      kind: string,
+      command: string,
+      { result, error }: { result: unknown; error: string | null }
+    ) => {
+      rows.push({ browserId, kind, command, result, error })
+    },
+  }
+}
+
 const fakePlacement = () => {
   const told: string[] = []
 
@@ -143,7 +159,8 @@ const fakePlacement = () => {
 }
 
 const hostPorts = new Map<string, number>()
-let browserSessions: ReturnType<typeof fakeBrowserSessions>
+let browsers: ReturnType<typeof fakeBrowsers>
+let activities: ReturnType<typeof fakeActivities>
 let placement: ReturnType<typeof fakePlacement>
 let manager: ReturnType<typeof createChromiumManager>
 
@@ -157,7 +174,8 @@ beforeEach(async () => {
   next = []
   tabs = []
   hostPorts.clear()
-  browserSessions = fakeBrowserSessions()
+  browsers = fakeBrowsers()
+  activities = fakeActivities()
   placement = fakePlacement()
 
   manager = createChromiumManager({
@@ -168,7 +186,8 @@ beforeEach(async () => {
       getWorkspaceRoot: workspaceRoot,
     } as unknown as Deps['workspaces'],
     sandboxes: { hostPort: (id: string) => hostPorts.get(id) ?? null } as unknown as Deps['sandboxes'],
-    browserSessions: browserSessions as unknown as Deps['browserSessions'],
+    browsers: browsers as unknown as Deps['browsers'],
+    activities: activities as unknown as Deps['activities'],
     placement: placement as unknown as Deps['placement'],
     mode: 'none',
     portMin: 4100,
@@ -185,7 +204,7 @@ describe('create', () => {
     const created = await manager.create('user-1', { workspaceId: 'ws-1', record: false })
 
     expect(created).toMatchObject({ workspaceId: 'ws-1', record: false, status: 'alive', userId: 'user-1' })
-    expect(browserSessions.rows.has(created.id)).toBe(true)
+    expect(browsers.rows.has(created.id)).toBe(true)
     expect(tabs).toHaveLength(1)
   })
 
@@ -200,7 +219,7 @@ describe('create', () => {
       status: 503,
     })
     expect(tabs).toHaveLength(0)
-    expect(browserSessions.rows.size).toBe(0)
+    expect(browsers.rows.size).toBe(0)
   })
 
   test("gives the tab its workspace's port as it is at each request, and none without a workspace", async () => {
@@ -221,7 +240,7 @@ describe('a call', () => {
     await manager.read(id)
 
     expect(runs[0]?.targetId).toBe(tabOf(0).targetId)
-    expect(browserSessions.rows.get(id)).toMatchObject({
+    expect(browsers.rows.get(id)).toMatchObject({
       url: 'http://127.0.0.1:4120/orders',
       storageState: { cookies: [], origins: [] },
     })
@@ -303,7 +322,38 @@ describe('a call', () => {
     expect(tabOf(0).exportedTo).toHaveLength(1)
     expect(tabOf(1).options).toMatchObject({ record: true, url: 'http://127.0.0.1:4120/orders' })
     expect(runs[1]?.targetId).toBe(tabOf(1).targetId)
-    expect(browserSessions.rows.get(id)?.status).toBe('alive')
+    expect(browsers.rows.get(id)?.status).toBe('alive')
+  })
+})
+
+describe('activity', () => {
+  test('records each call once it ends, with what it returned or its error', async () => {
+    const { id } = await manager.create('user-1', { workspaceId: null, record: false })
+    const page = { title: 'Orders', url: 'http://x/orders', text: '', refs: [] }
+
+    next.push(ok({ ...page, status: 200, error: null }))
+    await manager.navigate(id, 'http://x/orders')
+    next.push(failed('ref_not_found'))
+    await manager.click(id, 9).catch(() => {})
+    next.push(ok(42))
+    await manager.run(id, 'return 42', 1000)
+
+    expect(activities.rows).toEqual([
+      {
+        browserId: id,
+        kind: 'navigate',
+        command: 'http://x/orders',
+        result: { ...page, status: 200, error: null },
+        error: null,
+      },
+      { browserId: id, kind: 'click', command: 'ref 9', result: null, error: 'ref_not_found' },
+      { browserId: id, kind: 'run', command: 'return 42', result: 42, error: null },
+    ])
+  })
+
+  test('records nothing for a session that does not exist', async () => {
+    await expect(manager.read(crypto.randomUUID())).rejects.toMatchObject({ status: 404 })
+    expect(activities.rows).toEqual([])
   })
 })
 
@@ -333,7 +383,7 @@ describe('closing', () => {
     await manager.close(id)
 
     expect(tabOf(0).closes).toBe(1)
-    expect(browserSessions.rows.get(id)).toMatchObject({ status: 'closed', url: 'http://127.0.0.1:4120/orders' })
+    expect(browsers.rows.get(id)).toMatchObject({ status: 'closed', url: 'http://127.0.0.1:4120/orders' })
     await expect(manager.close(id)).rejects.toMatchObject({ status: 404 })
   })
 
@@ -345,7 +395,7 @@ describe('closing', () => {
 
     expect(tabOf(1).options.url).toBe('http://127.0.0.1:4120/orders')
     expect(runs[0]?.targetId).toBe(tabOf(1).targetId)
-    expect(browserSessions.rows.get(id)?.status).toBe('alive')
+    expect(browsers.rows.get(id)?.status).toBe('alive')
   })
 
   test("saves a recorded session's video into its workspace", async () => {
@@ -364,9 +414,9 @@ describe('closing', () => {
 
     await manager.stopIdle()
 
-    expect(browserSessions.rows.get(idle.id)?.status).toBe('closed')
+    expect(browsers.rows.get(idle.id)?.status).toBe('closed')
     expect(tabOf(0).exportedTo).toHaveLength(1)
-    expect(browserSessions.rows.get(busy.id)?.status).toBe('alive')
+    expect(browsers.rows.get(busy.id)?.status).toBe('alive')
     expect(tabOf(1).closes).toBe(0)
   })
 
@@ -375,7 +425,7 @@ describe('closing', () => {
 
     await manager.stopAll()
 
-    expect(browserSessions.rows.get(id)?.status).toBe('closed')
+    expect(browsers.rows.get(id)?.status).toBe('closed')
     expect(tabOf(0).exportedTo).toHaveLength(1)
     expect(connected).toBe(false)
   })
@@ -469,6 +519,6 @@ describe('Chromium exiting', () => {
 
     await manager.read(id)
     expect(runs[0]?.targetId).toBe(tabOf(1).targetId)
-    expect(browserSessions.rows.get(id)?.status).toBe('alive')
+    expect(browsers.rows.get(id)?.status).toBe('alive')
   })
 })

@@ -202,7 +202,6 @@
   const statusColors = {
     succeeded: 'bg-green-50 text-green-700',
     failed: 'bg-red-50 text-red-700',
-    running: 'bg-gray-100 text-gray-600',
   }
 
   const showActivities = async page => {

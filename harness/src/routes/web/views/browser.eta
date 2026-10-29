@@ -46,7 +46,6 @@
   const statusColors = {
     succeeded: 'bg-green-50 text-green-700',
     failed: 'bg-red-50 text-red-700',
-    running: 'bg-gray-100 text-gray-600',
   }
 
   const showActivities = async page => {
@@ -60,7 +59,7 @@
         row.querySelector('[data-kind]').textContent = item.kind
         row.querySelector('[data-command]').textContent = item.command
         const status = row.querySelector('[data-status]')
-        status.textContent = item.exitCode === null ? item.status : `${item.status} · exit ${item.exitCode}`
+        status.textContent = item.status
         status.classList.add(...statusColors[item.status].split(' '))
         row.querySelector('[data-time]').textContent = new Date(item.createdAt).toLocaleString()
         row.querySelector('[data-output]').textContent = item.output || 'No output'

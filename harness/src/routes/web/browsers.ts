@@ -11,7 +11,7 @@ export const browsers: FastifyPluginAsyncTypebox = async app => {
   app.get('/browsers', { schema: { querystring: BrowsersQuery } }, async (request, reply) => {
     const { page } = request.query
     const offset = (page - 1) * PAGE_SIZE
-    const { items, total } = await app.services.browserSessions.list({ limit: PAGE_SIZE, offset })
+    const { items, total } = await app.services.browsers.list({ limit: PAGE_SIZE, offset })
 
     return reply.viewAsync('browsers', {
       title: 'Browsers',
@@ -37,7 +37,7 @@ export const browsers: FastifyPluginAsyncTypebox = async app => {
   })
 
   app.get('/browsers/:id', { schema: { params: BrowserParams } }, async (request, reply) => {
-    const session = await app.services.browserSessions.get(request.params.id)
+    const session = await app.services.browsers.get(request.params.id)
     if (!session) throw new HttpError(404, 'No session has this id')
 
     return reply.viewAsync('browser', { title: session.url ?? 'Browser', active: 'browsers', session })
@@ -47,13 +47,21 @@ export const browsers: FastifyPluginAsyncTypebox = async app => {
     '/browsers/:id/activities',
     { schema: { params: BrowserParams, querystring: ActivitiesQuery } },
     async request => {
-      const session = await app.services.browserSessions.get(request.params.id)
+      const { id } = request.params
+      const session = await app.services.browsers.get(id)
       if (!session) throw new HttpError(404, 'No session has this id')
+      const offset = (request.query.page - 1) * PAGE_SIZE
+      const { items, total } = await app.services.browserActivities.list(id, { limit: PAGE_SIZE, offset })
 
-      // nothing records browser activity yet
       return {
-        items: [],
-        pagination: { from: 1, to: 0, total: 0, prev: null, next: null },
+        items,
+        pagination: {
+          from: offset + 1,
+          to: offset + items.length,
+          total,
+          prev: request.query.page > 1 ? request.query.page - 1 : null,
+          next: offset + items.length < total ? request.query.page + 1 : null,
+        },
       }
     }
   )
