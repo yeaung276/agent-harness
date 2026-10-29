@@ -20,7 +20,7 @@
 
           <figure>
             <div class="diagram">
-              <svg class="c4" viewBox="0 0 1120 870" role="img" aria-label="preview-runner as one server pod and many worker pods. 1: appx starts a preview, creates a browser session or makes a browser call on the server pod. In the server pod, a stateless Deployment, the preview and browser API reads the rows in Postgres, which the worker pods write with host set to their name, and maps a sessionId to its row and appId. Beside it, the preview proxy, a reverse proxy for requests carrying the signed preview cookie, serves the app preview to the user's browser over HTTP and WebSocket. Both use the placement controller, a shared module below them, not an API, to find the worker pod of an appId. 2: the controller reads the workspace's or session's placement key in Redis; if it names a worker pod that is still live, that pod is used. 3: if there is none or the pod is gone, it reads every pods:name stats entry and picks the live worker pod with the most free sandbox slots; the worker pod writes the placement key when it starts the sandbox or opens the tab, so a workspace's preview and sessions stay on one worker pod. 4: the API forwards the call to the internal API of the assigned worker pod, at the address in its pods entry. The worker pods are a StatefulSet, so each keeps its name, worker-0, worker-1 and so on, across restarts. On that worker pod, the internal API drives the sandbox, which runs the app's preview dev server on localhost:port, and Chromium, which holds one page per session. 5: because both run on the same pod, Chromium reaches the app's preview on localhost. 6: every worker pod's stats reporter writes pods:name with cpu, memory, previews, sessions and its address every 10 seconds, expiring after 30 seconds. The preview proxy sends preview traffic to the assigned worker's port forwarder on port 4002, which hands it to the sandbox on localhost:port, so sandbox ports never leave the pod. worker-1, worker-2 and more have the same parts as worker-0.">
+              <svg class="c4" viewBox="0 0 1120 870" role="img" aria-label="preview-runner as one server pod and many worker pods. 1: appx starts a preview, creates a browser session or makes a browser call on the server pod. In the server pod, a stateless Deployment, the preview and browser API reads the rows in Postgres, which the worker pods write with host set to their name, and maps a sessionId to its row and appId. Beside it, the proxy, a reverse proxy for requests carrying the signed preview cookie, serves the app preview to the user's browser over HTTP and WebSocket. Both use the placement controller, a shared module below them, not an API, to find the worker pod of an appId. 2: the controller reads the workspace's or session's placement key in Redis; if it names a worker pod that is still live, that pod is used. 3: if there is none or the pod is gone, it reads every pods:name stats entry and picks the live worker pod with the most free sandbox slots; the worker pod writes the placement key when it starts the sandbox or opens the tab, so a workspace's preview and sessions stay on one worker pod. 4: the API forwards the call to the internal API of the assigned worker pod, at the address in its pods entry. The worker pods are a StatefulSet, so each keeps its name, worker-0, worker-1 and so on, across restarts. On that worker pod, the internal API drives the sandbox, which runs the app's preview dev server on localhost:port, and Chromium, which holds one page per session. 5: because both run on the same pod, Chromium reaches the app's preview on localhost. 6: every worker pod's stats reporter writes pods:name with cpu, memory, previews, sessions and its address every 10 seconds, expiring after 30 seconds. The proxy sends preview traffic to the assigned worker's port forwarder on port 4002, which hands it to the sandbox on localhost:port, so sandbox ports never leave the pod. worker-1, worker-2 and more have the same parts as worker-0.">
                 <defs>
                   <marker id="rp-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
                     <path d="M0 0L10 5L0 10z" class="arrowhead"/>
@@ -40,7 +40,7 @@
                 <text class="label type" x="400" y="160" text-anchor="middle">[Deployment · stateless · preview-runner API]</text>
 
                 <rect class="component" x="40" y="180" width="220" height="140" rx="8"/>
-                <text class="on-light name" x="150" y="204" text-anchor="middle">Preview proxy</text>
+                <text class="on-light name" x="150" y="204" text-anchor="middle">Proxy</text>
                 <text class="on-light type" x="150" y="221" text-anchor="middle">[reverse proxy · signed preview cookie]</text>
                 <text class="on-light type" x="150" y="246" text-anchor="middle">appId → that app's worker pod</text>
                 <text class="on-light type" x="150" y="263" text-anchor="middle">→ its port forwarder</text>
@@ -158,7 +158,7 @@
               <tr><th>Component</th><th>Pod</th><th>What it does</th></tr>
             </thead>
             <tbody>
-              <tr><td>Preview proxy</td><td>Server</td><td>Takes every request that carries the signed preview cookie, HTTP and WebSocket, and sends it to the cookie's app on its worker pod. <code>/__preview/view</code> sets the cookie in exchange for a view token another service mints; the proxy verifies the cookie and reads the appId. The app is served at the root of the preview host, so its absolute links such as <code>/css/…</code> keep working.</td></tr>
+              <tr><td>Proxy</td><td>Server</td><td>On <code>PROXY_PORT</code>. Takes every request for <code>PREVIEW_DOMAIN</code>, HTTP and WebSocket, and sends it to its workspace's port forwarder. The workspace comes from the subdomain or from a signed cookie, by <code>PREVIEW_MODE</code>. See <a href="#proxy">Proxy</a>.</td></tr>
               <tr><td>preview + browser API</td><td>Server</td><td>The endpoints appx calls. Finds the app's worker, for a session through its row's appId, and forwards each call to that worker's internal API. The worker writes the rows.</td></tr>
               <tr><td>Placement controller</td><td>Server</td><td>A module both of the above use: appId → worker pod, through Redis.</td></tr>
               <tr><td>Internal API</td><td>Worker</td><td><code>/internal/sandbox/*</code> and <code>/internal/chromium/*</code>. Drives this pod's sandbox and Chromium.</td></tr>
@@ -169,940 +169,56 @@
             </tbody>
           </table>
 
-          <h3>Redis keys</h3>
+          <h3>Ports</h3>
+          <p>External ports are reachable from outside the pod; internal ones bind to 127.0.0.1 and never leave it.</p>
           <table>
             <thead>
-              <tr><th>Key</th><th>Value</th><th>Written by</th><th>Lifetime</th></tr>
+              <tr><th>Pod</th><th>Port</th><th>Reach</th><th>Bound to</th><th>What for</th></tr>
             </thead>
             <tbody>
-              <tr><td><code>pods:&lt;name&gt;</code></td><td>cpu, memory, previews, sessions, address</td><td>The server at registration (hostname, address); the worker's stats reporter (the rest)</td><td>Expires 30 s after its last write.</td></tr>
-              <tr><td><code>placement:workspace:&lt;workspaceId&gt;</code></td><td><code>&lt;name&gt;:&lt;bootId&gt;</code> of the worker pod running its sandbox</td><td>The worker's sandbox manager, <code>SET NX</code></td><td><code>SANDBOX_IDLE_MS</code> from the claim or the server's last lookup. Deleted when the sandbox stops.</td></tr>
-              <tr><td><code>placement:session:&lt;sessionId&gt;</code></td><td><code>&lt;name&gt;:&lt;bootId&gt;</code> of the worker pod holding its tab</td><td>The worker's chromium manager</td><td><code>BROWSER_IDLE_MS</code> from the claim or the server's last lookup. Deleted when the tab closes.</td></tr>
-              <tr><td><code>logs:&lt;name&gt;</code></td><td>Stream of the worker's log lines</td><td>A worker's logger</td><td>Capped at <code>LOG_MAX_LINES</code>; expires 24 h after its last write. See <a href="#logging">Logging</a>.</td></tr>
+              <tr><td>Server</td><td><code>PORT</code>, 3000</td><td>External</td><td><code>HOST</code>, every interface in the image</td><td>HTTP. The API at <code>/api/v1</code>, MCP at <code>/mcp</code>, the web pages, <code>/healthz</code>, and <code>POST /workers/register</code> for workers.</td></tr>
+              <tr><td>Server</td><td><code>PROXY_PORT</code>, 3001</td><td>External</td><td><code>HOST</code>, every interface in the image</td><td>HTTP and WebSocket for <code>PREVIEW_DOMAIN</code>: the proxy. See <a href="#proxy">Proxy</a>.</td></tr>
+              <tr><td>Worker</td><td><code>PORT</code>, 3000</td><td>External</td><td>The pod's IPv4 address, registered in <code>pods:&lt;name&gt;</code></td><td>HTTPS with mTLS, for the server only. The internal API, <code>/internal/sandbox/*</code> and <code>/internal/chromium/*</code>; a request with the <code>x-workspace-app</code> header is app traffic for the port forwarder instead. See <a href="#authentication">Authentication</a>.</td></tr>
+              <tr><td>Worker</td><td><code>SANDBOX_PORT_MIN</code>–<code>MAX</code>, 4100–4149</td><td>Internal</td><td>127.0.0.1</td><td>One per running sandbox: its launch's port, mapped from inside the sandbox. Reached only by the port forwarder and by Chromium tabs of the same workspace.</td></tr>
+              <tr><td>Worker</td><td>9222</td><td>Internal</td><td>127.0.0.1</td><td>Chromium's CDP, for the chromium manager and the runner of each browser call.</td></tr>
+              <tr><td>Worker</td><td>3128</td><td>Internal</td><td>127.0.0.1 inside each sandbox's and Chromium's network namespace</td><td>The network controller's proxy, their only way to the internet; it listens on a random 127.0.0.1 port on the pod.</td></tr>
+            </tbody>
+          </table>
+        </section>
+
+        <section class="doc-section" id="proxy">
+          <h2>Proxy</h2>
+          <p>The proxy runs on the server pod, on its own port, <code>PROXY_PORT</code>: a plain HTTP server, apart from the API's Fastify, with none of its hooks. The Ingress sends <code>PREVIEW_DOMAIN</code> and its subdomains to <code>PROXY_PORT</code>, and the API's domain to <code>PORT</code>. For each request, HTTP or WebSocket, the proxy finds its workspace, asks the placement controller for the workspace's worker with <code>any</code>, and sends the request to that worker's port forwarder over mTLS, presenting <code>server.crt</code>, with <code>x-workspace-app</code> set to the workspaceId. The proxy always sets that header itself, so a browser can't name a workspace. The app is served at the root of its host, so its absolute links such as <code>/css/…</code> keep working.</p>
+
+          <h3>Modes</h3>
+          <p><code>PREVIEW_MODE</code> sets how a request names its workspace, and so the URL a launch answers.</p>
+          <table>
+            <thead>
+              <tr><th>Mode</th><th>Launch answers</th><th>The workspace comes from</th><th>Needs</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>subdomain</code></td><td><code>https://&lt;workspaceId&gt;.&lt;PREVIEW_DOMAIN&gt;</code></td><td>The first label of the host.</td><td>A wildcard DNS record and certificate for <code>*.&lt;PREVIEW_DOMAIN&gt;</code>.</td></tr>
+              <tr><td><code>cookie</code></td><td>A link to <code>https://&lt;PREVIEW_DOMAIN&gt;/__view</code> carrying a short-lived signed token for the workspace.</td><td>The signed preview cookie. <code>/__view</code> checks the token, sets the cookie holding the workspaceId and redirects to <code>/</code>.</td><td>One host for every workspace, so a browser previews one workspace at a time.</td></tr>
             </tbody>
           </table>
 
-          <h3>Scaling and failure</h3>
+          <h3>Routing</h3>
           <table>
             <thead>
-              <tr><th>When</th><th>What happens</th></tr>
+              <tr><th>Case</th><th>Goes to</th><th>Answer</th></tr>
             </thead>
             <tbody>
-              <tr><td>A worker pod is added</td><td>It starts reporting and takes workspaces with nothing running when it has the most free sandbox slots. Workspaces already running stay where they are.</td></tr>
-              <tr><td>A worker pod dies</td><td>Its <code>pods</code> key expires within 30 s, and its placement keys stop counting. The next call for each of its workspaces goes to another worker; app traffic restarts the preview there. Each of its browser sessions reopens its tab where its row left off on the worker its next call goes to.</td></tr>
-              <tr><td>A worker pod restarts under the same name</td><td>It reports a new <code>bootId</code>, so the keys it held before stop counting at once, as when it dies.</td></tr>
-              <tr><td>The server pod restarts</td><td>Rows are in Postgres and placements in Redis, so nothing is lost. Previews and pages on the workers keep running.</td></tr>
-              <tr><td>Two workers start one workspace at once</td><td>The claim's <code>SET NX</code> lets one win; the other answers <code>409</code> before taking a port.</td></tr>
-              <tr><td>Network</td><td>A NetworkPolicy lets only the server pod reach the workers' port 4002. Sandbox ports bind to 127.0.0.1 and never leave the pod.</td></tr>
+              <tr><td>Placement key names a live worker</td><td>That worker; the lookup renews the key's TTL</td><td>The app's response</td></tr>
+              <tr><td>WebSocket stays open</td><td>Its worker, until either side closes</td><td>The proxy renews the placement key every minute while the socket is open</td></tr>
+              <tr><td>No live key, has <code>launch_options</code>: swept, worker died or shut down</td><td>The most free live worker</td><td>The port forwarder wakes the workspace and holds the request up to 90 s; still starting → 503 <code>workspace is starting</code>, <code>Retry-After: 5</code></td></tr>
+              <tr><td>No live key, no <code>launch_options</code>: never launched, or stopped</td><td>The most free live worker</td><td>503 <code>workspace is stopped</code>, <code>Retry-After: 5</code></td></tr>
+              <tr><td>Sandbox failed to start</td><td>Its worker</td><td>502 <code>workspace failed</code></td></tr>
+              <tr><td>Unknown workspace</td><td>No worker</td><td>404</td></tr>
+              <tr><td>Cookie mode: cookie missing, invalid or expired</td><td>No worker</td><td>403</td></tr>
+              <tr><td>No worker is live</td><td>No worker</td><td>503</td></tr>
+              <tr><td>Worker can't be reached</td><td>Its worker</td><td>503</td></tr>
             </tbody>
           </table>
-
-          <h3>API</h3>
-          <p>What appx and users&#x27; browsers call on the server pod. <code>/__preview/view</code> is checked first, with or without a cookie. Then a request that carries the signed preview cookie is app traffic, whatever its path, so an app&#x27;s own <code>/v1/…</code> routes reach the app. Any other request is an API call: it finds the app&#x27;s worker through the placement controller, a session through its row&#x27;s appId, and forwards to the worker&#x27;s <code>/internal</code> route. <code>503</code> means no worker has room or the app&#x27;s worker can&#x27;t be reached.</p>
-          <p>A request without the cookie reaches the API, so the API&#x27;s mTLS check must be on before the preview host is public. <code>/__preview/view</code> is the one public route; its token is its authentication.</p>
-<div class="routes">
-<details class="route">
-  <summary><span class="method get">GET</span><code class="route-path">/__preview/view</code><span class="route-summary">Exchange a view token for the preview cookie, then open the app at /</span></summary>
-  <div class="route-body">
-<h4>Query</h4>
-<pre class="schema"><code>{
-  &quot;type&quot;: &quot;object&quot;,
-  &quot;required&quot;: [
-    &quot;appId&quot;,
-    &quot;token&quot;
-  ],
-  &quot;properties&quot;: {
-    &quot;appId&quot;: {
-      &quot;minLength&quot;: 1,
-      &quot;maxLength&quot;: 64,
-      &quot;type&quot;: &quot;string&quot;
-    },
-    &quot;token&quot;: {
-      &quot;minLength&quot;: 1,
-      &quot;type&quot;: &quot;string&quot;
-    }
-  }
-}</code></pre>
-<p>The token is an HS256 JWT <code>{ appId, exp }</code> another service mints with <code>PREVIEW_TOKEN_SECRET</code>. It must verify, be unexpired and name the same appId.</p>
-<h4>Response 302</h4>
-<p><code>Location: /</code> and <code>Set-Cookie: promptx_preview=&lt;JWT { appId, exp }&gt;; HttpOnly; Secure; SameSite=None; Partitioned; Path=/</code>. The cookie is signed with the same secret and lasts 12 h.</p>
-<h4>Errors · 400, 403</h4>
-<pre class="schema"><code>{&quot;type&quot;:&quot;object&quot;,&quot;required&quot;:[&quot;error&quot;],&quot;properties&quot;:{&quot;error&quot;:{&quot;type&quot;:&quot;string&quot;}}}</code></pre>
-  </div>
-</details>
-<details class="route">
-  <summary><span class="method get">ANY</span><code class="route-path">/*</code><span class="route-summary">With the preview cookie: the cookie&#x27;s app from its worker, HTTP and WebSocket; places the app if needed</span></summary>
-  <div class="route-body">
-<h4>Request</h4>
-<p>Any method and path, or a WebSocket upgrade, carrying the signed preview cookie.</p>
-<h4>Response</h4>
-<p>The app&#x27;s own response, through its worker&#x27;s port forwarder.</p>
-<h4>Errors · 403, 503</h4>
-<p><code>403</code> when the cookie does not verify or has expired; the request does not fall through to the API.</p>
-<pre class="schema"><code>{&quot;type&quot;:&quot;object&quot;,&quot;required&quot;:[&quot;error&quot;],&quot;properties&quot;:{&quot;error&quot;:{&quot;type&quot;:&quot;string&quot;}}}</code></pre>
-  </div>
-</details>
-<details class="route">
-  <summary><span class="method post">POST</span><code class="route-path">/v1/previews/start</code><span class="route-summary">Place the app and start its sandbox on that worker; returns at once</span></summary>
-  <div class="route-body">
-<h4>Request body</h4>
-<pre class="schema"><code>{
-  &quot;type&quot;: &quot;object&quot;,
-  &quot;required&quot;: [
-    &quot;appId&quot;
-  ],
-  &quot;properties&quot;: {
-    &quot;appId&quot;: {
-      &quot;minLength&quot;: 1,
-      &quot;maxLength&quot;: 64,
-      &quot;type&quot;: &quot;string&quot;
-    }
-  }
-}</code></pre>
-<h4>Response 200</h4>
-<pre class="schema"><code>{
-  &quot;type&quot;: &quot;object&quot;,
-  &quot;required&quot;: [
-    &quot;appId&quot;,
-    &quot;status&quot;,
-    &quot;port&quot;,
-    &quot;error&quot;
-  ],
-  &quot;properties&quot;: {
-    &quot;appId&quot;: {
-      &quot;type&quot;: &quot;string&quot;
-    },
-    &quot;status&quot;: {
-      &quot;type&quot;: &quot;string&quot;,
-      &quot;enum&quot;: [
-        &quot;stopped&quot;,
-        &quot;installing&quot;,
-        &quot;starting&quot;,
-        &quot;running&quot;,
-        &quot;failed&quot;
-      ]
-    },
-    &quot;port&quot;: {
-      &quot;anyOf&quot;: [
-        {
-          &quot;type&quot;: &quot;integer&quot;
-        },
-        {
-          &quot;type&quot;: &quot;null&quot;
-        }
-      ]
-    },
-    &quot;error&quot;: {
-      &quot;anyOf&quot;: [
-        {
-          &quot;type&quot;: &quot;string&quot;
-        },
-        {
-          &quot;type&quot;: &quot;null&quot;
-        }
-      ]
-    }
-  }
-}</code></pre>
-<h4>Errors · 400, 404, 503</h4>
-<pre class="schema"><code>{&quot;type&quot;:&quot;object&quot;,&quot;required&quot;:[&quot;error&quot;],&quot;properties&quot;:{&quot;error&quot;:{&quot;type&quot;:&quot;string&quot;}}}</code></pre>
-  </div>
-</details>
-<details class="route">
-  <summary><span class="method post">POST</span><code class="route-path">/v1/previews/status</code><span class="route-summary">Get the preview&#x27;s status; an app on no worker is stopped</span></summary>
-  <div class="route-body">
-<h4>Request body</h4>
-<pre class="schema"><code>{
-  &quot;type&quot;: &quot;object&quot;,
-  &quot;required&quot;: [
-    &quot;appId&quot;
-  ],
-  &quot;properties&quot;: {
-    &quot;appId&quot;: {
-      &quot;minLength&quot;: 1,
-      &quot;maxLength&quot;: 64,
-      &quot;type&quot;: &quot;string&quot;
-    }
-  }
-}</code></pre>
-<h4>Response 200</h4>
-<pre class="schema"><code>{
-  &quot;type&quot;: &quot;object&quot;,
-  &quot;required&quot;: [
-    &quot;appId&quot;,
-    &quot;status&quot;,
-    &quot;port&quot;,
-    &quot;error&quot;
-  ],
-  &quot;properties&quot;: {
-    &quot;appId&quot;: {
-      &quot;type&quot;: &quot;string&quot;
-    },
-    &quot;status&quot;: {
-      &quot;type&quot;: &quot;string&quot;,
-      &quot;enum&quot;: [
-        &quot;stopped&quot;,
-        &quot;installing&quot;,
-        &quot;starting&quot;,
-        &quot;running&quot;,
-        &quot;failed&quot;
-      ]
-    },
-    &quot;port&quot;: {
-      &quot;anyOf&quot;: [
-        {
-          &quot;type&quot;: &quot;integer&quot;
-        },
-        {
-          &quot;type&quot;: &quot;null&quot;
-        }
-      ]
-    },
-    &quot;error&quot;: {
-      &quot;anyOf&quot;: [
-        {
-          &quot;type&quot;: &quot;string&quot;
-        },
-        {
-          &quot;type&quot;: &quot;null&quot;
-        }
-      ]
-    }
-  }
-}</code></pre>
-<h4>Errors · 400, 503</h4>
-<pre class="schema"><code>{&quot;type&quot;:&quot;object&quot;,&quot;required&quot;:[&quot;error&quot;],&quot;properties&quot;:{&quot;error&quot;:{&quot;type&quot;:&quot;string&quot;}}}</code></pre>
-  </div>
-</details>
-<details class="route">
-  <summary><span class="method post">POST</span><code class="route-path">/v1/previews/stop</code><span class="route-summary">Stop the app&#x27;s sandbox on its worker; an app on no worker is already stopped</span></summary>
-  <div class="route-body">
-<h4>Request body</h4>
-<pre class="schema"><code>{
-  &quot;type&quot;: &quot;object&quot;,
-  &quot;required&quot;: [
-    &quot;appId&quot;
-  ],
-  &quot;properties&quot;: {
-    &quot;appId&quot;: {
-      &quot;minLength&quot;: 1,
-      &quot;maxLength&quot;: 64,
-      &quot;type&quot;: &quot;string&quot;
-    }
-  }
-}</code></pre>
-<h4>Response 200</h4>
-<pre class="schema"><code>{
-  &quot;type&quot;: &quot;object&quot;,
-  &quot;required&quot;: [
-    &quot;appId&quot;,
-    &quot;status&quot;,
-    &quot;port&quot;,
-    &quot;error&quot;
-  ],
-  &quot;properties&quot;: {
-    &quot;appId&quot;: {
-      &quot;type&quot;: &quot;string&quot;
-    },
-    &quot;status&quot;: {
-      &quot;type&quot;: &quot;string&quot;,
-      &quot;enum&quot;: [
-        &quot;stopped&quot;,
-        &quot;installing&quot;,
-        &quot;starting&quot;,
-        &quot;running&quot;,
-        &quot;failed&quot;
-      ]
-    },
-    &quot;port&quot;: {
-      &quot;anyOf&quot;: [
-        {
-          &quot;type&quot;: &quot;integer&quot;
-        },
-        {
-          &quot;type&quot;: &quot;null&quot;
-        }
-      ]
-    },
-    &quot;error&quot;: {
-      &quot;anyOf&quot;: [
-        {
-          &quot;type&quot;: &quot;string&quot;
-        },
-        {
-          &quot;type&quot;: &quot;null&quot;
-        }
-      ]
-    }
-  }
-}</code></pre>
-<h4>Errors · 400, 503</h4>
-<pre class="schema"><code>{&quot;type&quot;:&quot;object&quot;,&quot;required&quot;:[&quot;error&quot;],&quot;properties&quot;:{&quot;error&quot;:{&quot;type&quot;:&quot;string&quot;}}}</code></pre>
-  </div>
-</details>
-<details class="route">
-  <summary><span class="method post">POST</span><code class="route-path">/v1/previews/restart</code><span class="route-summary">Stop, then start the sandbox; places the app if needed</span></summary>
-  <div class="route-body">
-<h4>Request body</h4>
-<pre class="schema"><code>{
-  &quot;type&quot;: &quot;object&quot;,
-  &quot;required&quot;: [
-    &quot;appId&quot;
-  ],
-  &quot;properties&quot;: {
-    &quot;appId&quot;: {
-      &quot;minLength&quot;: 1,
-      &quot;maxLength&quot;: 64,
-      &quot;type&quot;: &quot;string&quot;
-    }
-  }
-}</code></pre>
-<h4>Response 200</h4>
-<pre class="schema"><code>{
-  &quot;type&quot;: &quot;object&quot;,
-  &quot;required&quot;: [
-    &quot;appId&quot;,
-    &quot;status&quot;,
-    &quot;port&quot;,
-    &quot;error&quot;
-  ],
-  &quot;properties&quot;: {
-    &quot;appId&quot;: {
-      &quot;type&quot;: &quot;string&quot;
-    },
-    &quot;status&quot;: {
-      &quot;type&quot;: &quot;string&quot;,
-      &quot;enum&quot;: [
-        &quot;stopped&quot;,
-        &quot;installing&quot;,
-        &quot;starting&quot;,
-        &quot;running&quot;,
-        &quot;failed&quot;
-      ]
-    },
-    &quot;port&quot;: {
-      &quot;anyOf&quot;: [
-        {
-          &quot;type&quot;: &quot;integer&quot;
-        },
-        {
-          &quot;type&quot;: &quot;null&quot;
-        }
-      ]
-    },
-    &quot;error&quot;: {
-      &quot;anyOf&quot;: [
-        {
-          &quot;type&quot;: &quot;string&quot;
-        },
-        {
-          &quot;type&quot;: &quot;null&quot;
-        }
-      ]
-    }
-  }
-}</code></pre>
-<h4>Errors · 400, 404, 503</h4>
-<pre class="schema"><code>{&quot;type&quot;:&quot;object&quot;,&quot;required&quot;:[&quot;error&quot;],&quot;properties&quot;:{&quot;error&quot;:{&quot;type&quot;:&quot;string&quot;}}}</code></pre>
-  </div>
-</details>
-<details class="route">
-  <summary><span class="method post">POST</span><code class="route-path">/v1/previews/exec</code><span class="route-summary">Run a shell command in the app&#x27;s sandbox; places the app if needed</span></summary>
-  <div class="route-body">
-<h4>Request body</h4>
-<pre class="schema"><code>{
-  &quot;type&quot;: &quot;object&quot;,
-  &quot;required&quot;: [
-    &quot;appId&quot;,
-    &quot;command&quot;
-  ],
-  &quot;properties&quot;: {
-    &quot;appId&quot;: {
-      &quot;minLength&quot;: 1,
-      &quot;maxLength&quot;: 64,
-      &quot;type&quot;: &quot;string&quot;
-    },
-    &quot;command&quot;: {
-      &quot;minLength&quot;: 1,
-      &quot;maxLength&quot;: 4000,
-      &quot;type&quot;: &quot;string&quot;
-    },
-    &quot;timeoutMs&quot;: {
-      &quot;minimum&quot;: 1000,
-      &quot;maximum&quot;: 240000,
-      &quot;default&quot;: 120000,
-      &quot;type&quot;: &quot;integer&quot;
-    }
-  }
-}</code></pre>
-<h4>Response 200</h4>
-<pre class="schema"><code>{
-  &quot;type&quot;: &quot;object&quot;,
-  &quot;required&quot;: [
-    &quot;appId&quot;,
-    &quot;command&quot;,
-    &quot;exitCode&quot;,
-    &quot;durationMs&quot;,
-    &quot;output&quot;
-  ],
-  &quot;properties&quot;: {
-    &quot;appId&quot;: {
-      &quot;type&quot;: &quot;string&quot;
-    },
-    &quot;command&quot;: {
-      &quot;type&quot;: &quot;string&quot;
-    },
-    &quot;exitCode&quot;: {
-      &quot;anyOf&quot;: [
-        {
-          &quot;type&quot;: &quot;integer&quot;
-        },
-        {
-          &quot;type&quot;: &quot;null&quot;
-        }
-      ]
-    },
-    &quot;durationMs&quot;: {
-      &quot;type&quot;: &quot;integer&quot;
-    },
-    &quot;output&quot;: {
-      &quot;maxLength&quot;: 16384,
-      &quot;type&quot;: &quot;string&quot;
-    }
-  }
-}</code></pre>
-<h4>Errors · 400, 404, 503</h4>
-<pre class="schema"><code>{&quot;type&quot;:&quot;object&quot;,&quot;required&quot;:[&quot;error&quot;],&quot;properties&quot;:{&quot;error&quot;:{&quot;type&quot;:&quot;string&quot;}}}</code></pre>
-  </div>
-</details>
-<details class="route">
-  <summary><span class="method post">POST</span><code class="route-path">/v1/browser/session</code><span class="route-summary">Place the app and open a session on its worker</span></summary>
-  <div class="route-body">
-<h4>Request body</h4>
-<pre class="schema"><code>{
-  &quot;type&quot;: &quot;object&quot;,
-  &quot;required&quot;: [
-    &quot;appId&quot;
-  ],
-  &quot;properties&quot;: {
-    &quot;appId&quot;: {
-      &quot;minLength&quot;: 1,
-      &quot;maxLength&quot;: 64,
-      &quot;type&quot;: &quot;string&quot;
-    }
-  }
-}</code></pre>
-<h4>Response 200</h4>
-<pre class="schema"><code>{
-  &quot;type&quot;: &quot;object&quot;,
-  &quot;required&quot;: [
-    &quot;sessionId&quot;,
-    &quot;appId&quot;,
-    &quot;previewUrl&quot;
-  ],
-  &quot;properties&quot;: {
-    &quot;sessionId&quot;: {
-      &quot;type&quot;: &quot;string&quot;
-    },
-    &quot;appId&quot;: {
-      &quot;type&quot;: &quot;string&quot;
-    },
-    &quot;previewUrl&quot;: {
-      &quot;anyOf&quot;: [
-        {
-          &quot;type&quot;: &quot;string&quot;
-        },
-        {
-          &quot;type&quot;: &quot;null&quot;
-        }
-      ]
-    }
-  }
-}</code></pre>
-<h4>Errors · 400, 429, 503</h4>
-<pre class="schema"><code>{&quot;type&quot;:&quot;object&quot;,&quot;required&quot;:[&quot;error&quot;],&quot;properties&quot;:{&quot;error&quot;:{&quot;type&quot;:&quot;string&quot;}}}</code></pre>
-  </div>
-</details>
-<details class="route">
-  <summary><span class="method post">POST</span><code class="route-path">/v1/browser/session/:id/navigate</code><span class="route-summary">Go to a URL; a path such as /orders opens the app&#x27;s preview</span></summary>
-  <div class="route-body">
-<h4>Request body</h4>
-<pre class="schema"><code>{
-  &quot;type&quot;: &quot;object&quot;,
-  &quot;required&quot;: [
-    &quot;url&quot;
-  ],
-  &quot;properties&quot;: {
-    &quot;url&quot;: {
-      &quot;minLength&quot;: 1,
-      &quot;maxLength&quot;: 4000,
-      &quot;type&quot;: &quot;string&quot;
-    }
-  }
-}</code></pre>
-<h4>Response 200</h4>
-<pre class="schema"><code>{
-  &quot;type&quot;: &quot;object&quot;,
-  &quot;required&quot;: [
-    &quot;title&quot;,
-    &quot;url&quot;,
-    &quot;text&quot;,
-    &quot;refs&quot;,
-    &quot;status&quot;,
-    &quot;error&quot;
-  ],
-  &quot;properties&quot;: {
-    &quot;title&quot;: {
-      &quot;type&quot;: &quot;string&quot;
-    },
-    &quot;url&quot;: {
-      &quot;type&quot;: &quot;string&quot;
-    },
-    &quot;text&quot;: {
-      &quot;type&quot;: &quot;string&quot;
-    },
-    &quot;refs&quot;: {
-      &quot;type&quot;: &quot;array&quot;,
-      &quot;items&quot;: {
-        &quot;type&quot;: &quot;object&quot;,
-        &quot;required&quot;: [
-          &quot;ref&quot;,
-          &quot;tag&quot;,
-          &quot;role&quot;,
-          &quot;name&quot;,
-          &quot;value&quot;,
-          &quot;placeholder&quot;,
-          &quot;href&quot;
-        ],
-        &quot;properties&quot;: {
-          &quot;ref&quot;: {
-            &quot;type&quot;: &quot;integer&quot;
-          },
-          &quot;tag&quot;: {
-            &quot;type&quot;: &quot;string&quot;
-          },
-          &quot;role&quot;: {
-            &quot;anyOf&quot;: [
-              {
-                &quot;type&quot;: &quot;string&quot;
-              },
-              {
-                &quot;type&quot;: &quot;null&quot;
-              }
-            ]
-          },
-          &quot;name&quot;: {
-            &quot;type&quot;: &quot;string&quot;
-          },
-          &quot;value&quot;: {
-            &quot;type&quot;: &quot;string&quot;
-          },
-          &quot;placeholder&quot;: {
-            &quot;type&quot;: &quot;string&quot;
-          },
-          &quot;href&quot;: {
-            &quot;type&quot;: &quot;string&quot;
-          }
-        }
-      }
-    },
-    &quot;status&quot;: {
-      &quot;anyOf&quot;: [
-        {
-          &quot;type&quot;: &quot;integer&quot;
-        },
-        {
-          &quot;type&quot;: &quot;null&quot;
-        }
-      ]
-    },
-    &quot;error&quot;: {
-      &quot;anyOf&quot;: [
-        {
-          &quot;type&quot;: &quot;string&quot;
-        },
-        {
-          &quot;type&quot;: &quot;null&quot;
-        }
-      ]
-    }
-  }
-}</code></pre>
-<h4>Errors · 400, 404, 504</h4>
-<pre class="schema"><code>{&quot;type&quot;:&quot;object&quot;,&quot;required&quot;:[&quot;error&quot;],&quot;properties&quot;:{&quot;error&quot;:{&quot;type&quot;:&quot;string&quot;}}}</code></pre>
-  </div>
-</details>
-<details class="route">
-  <summary><span class="method post">POST</span><code class="route-path">/v1/browser/session/:id/read</code><span class="route-summary">Read the page&#x27;s text and the refs it can act on</span></summary>
-  <div class="route-body">
-<h4>Request body</h4>
-<pre class="schema"><code>{
-  &quot;type&quot;: &quot;object&quot;,
-  &quot;properties&quot;: {
-    &quot;maxChars&quot;: {
-      &quot;minimum&quot;: 1,
-      &quot;maximum&quot;: 100000,
-      &quot;type&quot;: &quot;integer&quot;
-    }
-  }
-}</code></pre>
-<h4>Response 200</h4>
-<pre class="schema"><code>{
-  &quot;type&quot;: &quot;object&quot;,
-  &quot;required&quot;: [
-    &quot;title&quot;,
-    &quot;url&quot;,
-    &quot;text&quot;,
-    &quot;refs&quot;
-  ],
-  &quot;properties&quot;: {
-    &quot;title&quot;: {
-      &quot;type&quot;: &quot;string&quot;
-    },
-    &quot;url&quot;: {
-      &quot;type&quot;: &quot;string&quot;
-    },
-    &quot;text&quot;: {
-      &quot;type&quot;: &quot;string&quot;
-    },
-    &quot;refs&quot;: {
-      &quot;type&quot;: &quot;array&quot;,
-      &quot;items&quot;: {
-        &quot;type&quot;: &quot;object&quot;,
-        &quot;required&quot;: [
-          &quot;ref&quot;,
-          &quot;tag&quot;,
-          &quot;role&quot;,
-          &quot;name&quot;,
-          &quot;value&quot;,
-          &quot;placeholder&quot;,
-          &quot;href&quot;
-        ],
-        &quot;properties&quot;: {
-          &quot;ref&quot;: {
-            &quot;type&quot;: &quot;integer&quot;
-          },
-          &quot;tag&quot;: {
-            &quot;type&quot;: &quot;string&quot;
-          },
-          &quot;role&quot;: {
-            &quot;anyOf&quot;: [
-              {
-                &quot;type&quot;: &quot;string&quot;
-              },
-              {
-                &quot;type&quot;: &quot;null&quot;
-              }
-            ]
-          },
-          &quot;name&quot;: {
-            &quot;type&quot;: &quot;string&quot;
-          },
-          &quot;value&quot;: {
-            &quot;type&quot;: &quot;string&quot;
-          },
-          &quot;placeholder&quot;: {
-            &quot;type&quot;: &quot;string&quot;
-          },
-          &quot;href&quot;: {
-            &quot;type&quot;: &quot;string&quot;
-          }
-        }
-      }
-    }
-  }
-}</code></pre>
-<h4>Errors · 400, 404, 504</h4>
-<pre class="schema"><code>{&quot;type&quot;:&quot;object&quot;,&quot;required&quot;:[&quot;error&quot;],&quot;properties&quot;:{&quot;error&quot;:{&quot;type&quot;:&quot;string&quot;}}}</code></pre>
-  </div>
-</details>
-<details class="route">
-  <summary><span class="method post">POST</span><code class="route-path">/v1/browser/session/:id/click</code><span class="route-summary">Click the element with a ref</span></summary>
-  <div class="route-body">
-<h4>Request body</h4>
-<pre class="schema"><code>{
-  &quot;type&quot;: &quot;object&quot;,
-  &quot;required&quot;: [
-    &quot;ref&quot;
-  ],
-  &quot;properties&quot;: {
-    &quot;ref&quot;: {
-      &quot;minimum&quot;: 1,
-      &quot;type&quot;: &quot;integer&quot;
-    }
-  }
-}</code></pre>
-<h4>Response 200</h4>
-<pre class="schema"><code>{
-  &quot;type&quot;: &quot;object&quot;,
-  &quot;required&quot;: [
-    &quot;title&quot;,
-    &quot;url&quot;,
-    &quot;text&quot;,
-    &quot;refs&quot;
-  ],
-  &quot;properties&quot;: {
-    &quot;title&quot;: {
-      &quot;type&quot;: &quot;string&quot;
-    },
-    &quot;url&quot;: {
-      &quot;type&quot;: &quot;string&quot;
-    },
-    &quot;text&quot;: {
-      &quot;type&quot;: &quot;string&quot;
-    },
-    &quot;refs&quot;: {
-      &quot;type&quot;: &quot;array&quot;,
-      &quot;items&quot;: {
-        &quot;type&quot;: &quot;object&quot;,
-        &quot;required&quot;: [
-          &quot;ref&quot;,
-          &quot;tag&quot;,
-          &quot;role&quot;,
-          &quot;name&quot;,
-          &quot;value&quot;,
-          &quot;placeholder&quot;,
-          &quot;href&quot;
-        ],
-        &quot;properties&quot;: {
-          &quot;ref&quot;: {
-            &quot;type&quot;: &quot;integer&quot;
-          },
-          &quot;tag&quot;: {
-            &quot;type&quot;: &quot;string&quot;
-          },
-          &quot;role&quot;: {
-            &quot;anyOf&quot;: [
-              {
-                &quot;type&quot;: &quot;string&quot;
-              },
-              {
-                &quot;type&quot;: &quot;null&quot;
-              }
-            ]
-          },
-          &quot;name&quot;: {
-            &quot;type&quot;: &quot;string&quot;
-          },
-          &quot;value&quot;: {
-            &quot;type&quot;: &quot;string&quot;
-          },
-          &quot;placeholder&quot;: {
-            &quot;type&quot;: &quot;string&quot;
-          },
-          &quot;href&quot;: {
-            &quot;type&quot;: &quot;string&quot;
-          }
-        }
-      }
-    }
-  }
-}</code></pre>
-<h4>Errors · 400, 404, 504</h4>
-<pre class="schema"><code>{&quot;type&quot;:&quot;object&quot;,&quot;required&quot;:[&quot;error&quot;],&quot;properties&quot;:{&quot;error&quot;:{&quot;type&quot;:&quot;string&quot;}}}</code></pre>
-  </div>
-</details>
-<details class="route">
-  <summary><span class="method post">POST</span><code class="route-path">/v1/browser/session/:id/type</code><span class="route-summary">Type into the element with a ref, then submit if asked</span></summary>
-  <div class="route-body">
-<h4>Request body</h4>
-<pre class="schema"><code>{
-  &quot;type&quot;: &quot;object&quot;,
-  &quot;required&quot;: [
-    &quot;ref&quot;,
-    &quot;text&quot;
-  ],
-  &quot;properties&quot;: {
-    &quot;ref&quot;: {
-      &quot;minimum&quot;: 1,
-      &quot;type&quot;: &quot;integer&quot;
-    },
-    &quot;text&quot;: {
-      &quot;maxLength&quot;: 10000,
-      &quot;type&quot;: &quot;string&quot;
-    },
-    &quot;submit&quot;: {
-      &quot;default&quot;: false,
-      &quot;type&quot;: &quot;boolean&quot;
-    }
-  }
-}</code></pre>
-<h4>Response 200</h4>
-<pre class="schema"><code>{
-  &quot;type&quot;: &quot;object&quot;,
-  &quot;required&quot;: [
-    &quot;title&quot;,
-    &quot;url&quot;,
-    &quot;text&quot;,
-    &quot;refs&quot;
-  ],
-  &quot;properties&quot;: {
-    &quot;title&quot;: {
-      &quot;type&quot;: &quot;string&quot;
-    },
-    &quot;url&quot;: {
-      &quot;type&quot;: &quot;string&quot;
-    },
-    &quot;text&quot;: {
-      &quot;type&quot;: &quot;string&quot;
-    },
-    &quot;refs&quot;: {
-      &quot;type&quot;: &quot;array&quot;,
-      &quot;items&quot;: {
-        &quot;type&quot;: &quot;object&quot;,
-        &quot;required&quot;: [
-          &quot;ref&quot;,
-          &quot;tag&quot;,
-          &quot;role&quot;,
-          &quot;name&quot;,
-          &quot;value&quot;,
-          &quot;placeholder&quot;,
-          &quot;href&quot;
-        ],
-        &quot;properties&quot;: {
-          &quot;ref&quot;: {
-            &quot;type&quot;: &quot;integer&quot;
-          },
-          &quot;tag&quot;: {
-            &quot;type&quot;: &quot;string&quot;
-          },
-          &quot;role&quot;: {
-            &quot;anyOf&quot;: [
-              {
-                &quot;type&quot;: &quot;string&quot;
-              },
-              {
-                &quot;type&quot;: &quot;null&quot;
-              }
-            ]
-          },
-          &quot;name&quot;: {
-            &quot;type&quot;: &quot;string&quot;
-          },
-          &quot;value&quot;: {
-            &quot;type&quot;: &quot;string&quot;
-          },
-          &quot;placeholder&quot;: {
-            &quot;type&quot;: &quot;string&quot;
-          },
-          &quot;href&quot;: {
-            &quot;type&quot;: &quot;string&quot;
-          }
-        }
-      }
-    }
-  }
-}</code></pre>
-<h4>Errors · 400, 404, 504</h4>
-<pre class="schema"><code>{&quot;type&quot;:&quot;object&quot;,&quot;required&quot;:[&quot;error&quot;],&quot;properties&quot;:{&quot;error&quot;:{&quot;type&quot;:&quot;string&quot;}}}</code></pre>
-  </div>
-</details>
-<details class="route">
-  <summary><span class="method post">POST</span><code class="route-path">/v1/browser/session/:id/screenshot</code><span class="route-summary">Screenshot the page as a PNG</span></summary>
-  <div class="route-body">
-<h4>Request body</h4>
-<pre class="schema"><code>{
-  &quot;type&quot;: &quot;object&quot;,
-  &quot;properties&quot;: {
-    &quot;fullPage&quot;: {
-      &quot;default&quot;: false,
-      &quot;type&quot;: &quot;boolean&quot;
-    }
-  }
-}</code></pre>
-<h4>Response 200</h4>
-<pre class="schema"><code>{
-  &quot;type&quot;: &quot;object&quot;,
-  &quot;required&quot;: [
-    &quot;png&quot;
-  ],
-  &quot;properties&quot;: {
-    &quot;png&quot;: {
-      &quot;contentEncoding&quot;: &quot;base64&quot;,
-      &quot;type&quot;: &quot;string&quot;
-    }
-  }
-}</code></pre>
-<h4>Errors · 400, 404, 504</h4>
-<pre class="schema"><code>{&quot;type&quot;:&quot;object&quot;,&quot;required&quot;:[&quot;error&quot;],&quot;properties&quot;:{&quot;error&quot;:{&quot;type&quot;:&quot;string&quot;}}}</code></pre>
-  </div>
-</details>
-<details class="route">
-  <summary><span class="method post">POST</span><code class="route-path">/v1/browser/session/:id/run</code><span class="route-summary">Run Playwright code in the runner: the body of async (page) =&gt; …</span></summary>
-  <div class="route-body">
-<h4>Request body</h4>
-<pre class="schema"><code>{
-  &quot;type&quot;: &quot;object&quot;,
-  &quot;required&quot;: [
-    &quot;code&quot;
-  ],
-  &quot;properties&quot;: {
-    &quot;code&quot;: {
-      &quot;minLength&quot;: 1,
-      &quot;maxLength&quot;: 100000,
-      &quot;type&quot;: &quot;string&quot;
-    },
-    &quot;timeoutMs&quot;: {
-      &quot;minimum&quot;: 1000,
-      &quot;maximum&quot;: 120000,
-      &quot;default&quot;: 60000,
-      &quot;type&quot;: &quot;integer&quot;
-    }
-  }
-}</code></pre>
-<h4>Response 200</h4>
-<pre class="schema"><code>{
-  &quot;type&quot;: &quot;object&quot;,
-  &quot;required&quot;: [
-    &quot;result&quot;,
-    &quot;error&quot;,
-    &quot;durationMs&quot;
-  ],
-  &quot;properties&quot;: {
-    &quot;result&quot;: {},
-    &quot;error&quot;: {
-      &quot;anyOf&quot;: [
-        {
-          &quot;type&quot;: &quot;string&quot;
-        },
-        {
-          &quot;type&quot;: &quot;null&quot;
-        }
-      ]
-    },
-    &quot;durationMs&quot;: {
-      &quot;type&quot;: &quot;integer&quot;
-    }
-  }
-}</code></pre>
-<h4>Errors · 400, 404, 503</h4>
-<pre class="schema"><code>{&quot;type&quot;:&quot;object&quot;,&quot;required&quot;:[&quot;error&quot;],&quot;properties&quot;:{&quot;error&quot;:{&quot;type&quot;:&quot;string&quot;}}}</code></pre>
-  </div>
-</details>
-<details class="route">
-  <summary><span class="method post">POST</span><code class="route-path">/v1/browser/session/:id/close</code><span class="route-summary">Close the session on its worker and set its status to closed</span></summary>
-  <div class="route-body">
-<h4>Response 200</h4>
-<pre class="schema"><code>{
-  &quot;type&quot;: &quot;object&quot;,
-  &quot;required&quot;: [
-    &quot;sessionId&quot;,
-    &quot;closed&quot;
-  ],
-  &quot;properties&quot;: {
-    &quot;sessionId&quot;: {
-      &quot;type&quot;: &quot;string&quot;
-    },
-    &quot;closed&quot;: {
-      &quot;type&quot;: &quot;boolean&quot;
-    }
-  }
-}</code></pre>
-<h4>Errors · 400, 404, 503</h4>
-<pre class="schema"><code>{&quot;type&quot;:&quot;object&quot;,&quot;required&quot;:[&quot;error&quot;],&quot;properties&quot;:{&quot;error&quot;:{&quot;type&quot;:&quot;string&quot;}}}</code></pre>
-  </div>
-</details>
-</div>
         </section>
 
         <section class="doc-section" id="workers">
@@ -1121,7 +237,7 @@
           </table>
 
           <h3 id="authentication">Authentication</h3>
-          <p>A worker registers with the server on every boot. The request and the reply are sealed with a key derived from <code>WORKER_JOIN_SECRET</code>, which the server and every worker read from one Kubernetes Secret; the secret itself is never sent. At registration the server signs the worker's certificate with <code>WORKER_CA_KEY</code>, and on its own boot it signs its client certificate, <code>server.crt</code>, with the same key. Calls from the server to a worker's internal API are mTLS: each side presents its certificate and checks the other's against <code>WORKER_CA_CERT</code>. Preview traffic from the preview proxy to the port forwarder is not covered.</p>
+          <p>A worker registers with the server on every boot. The request and the reply are sealed with a key derived from <code>WORKER_JOIN_SECRET</code>, which the server and every worker read from one Kubernetes Secret; the secret itself is never sent. At registration the server signs the worker's certificate with <code>WORKER_CA_KEY</code>, and on its own boot it signs its client certificate, <code>server.crt</code>, with the same key. Calls from the server to a worker's internal API, and preview traffic from the proxy to its port forwarder, are mTLS: each side presents its certificate and checks the other's against <code>WORKER_CA_CERT</code>.</p>
           <p>A worker makes a new key and gets a new certificate on every boot, and registers again before the certificate expires. The server calls a worker only while its <code>pods:&lt;hostname&gt;</code> key holds stats, so a stopped worker drops out within 30 s. The Postgres row records the worker for the machines page; routing never reads it.</p>
           <figure>
             <div class="diagram">
@@ -1254,7 +370,7 @@
           <p>A module both pods run, <code>services/placement</code>. A worker writes a key to Redis for each sandbox and browser session it holds, and the server reads those keys to pick the worker for each call. A workspace's sandbox, execs, app traffic and browser sessions stay on one worker, so they share its localhost.</p>
           <figure>
             <div class="diagram">
-              <svg class="c4" viewBox="0 0 1120 780" role="img" aria-label="Placement across the server pod, Redis and a worker pod. On the server pod, the workspace API, for launch, exec, logs and stop, the preview proxy, for app traffic, and the browser API, for create, calls and close, each ask the placement controller, server side, for a worker. 1: they call workspace with the workspaceId and what the call needs, new, running or any, or session with the sessionId and workspaceId. 2: the controller reads the placement key with GETEX, which renews its TTL, and the named worker's pods key; a key whose worker is not live is deleted, and with no live key it picks the most free live worker from pods keys. 3: the API or the proxy calls the internal API of the worker it returns, over mTLS, or sends app traffic to its port 4002. On the worker pod, the internal API drives the sandbox manager and the chromium manager. 4: the sandbox manager claims the workspace's key when it starts a sandbox and releases it on stop or when the sandbox exits. 5: the chromium manager claims the session's key when it opens a tab and releases it when the tab closes. 6: the placement controller, worker side, claims with SET NX and the idle TTL, the value being the worker's name and bootId, and releases by deleting the key if it holds that value. 7: the stats reporter writes pods name with its bootId and stats every 10 seconds. In Redis, placement:workspace:workspaceId and placement:session:sessionId hold name:bootId with the idle TTL, and pods:name holds bootId, reportedAt, address, sandboxes, sandboxSlots and sessions.">
+              <svg class="c4" viewBox="0 0 1120 780" role="img" aria-label="Placement across the server pod, Redis and a worker pod. On the server pod, the workspace API, for launch, exec, logs and stop, the proxy, for app traffic, and the browser API, for create, calls and close, each ask the placement controller, server side, for a worker. 1: they call workspace with the workspaceId and what the call needs, new, running or any, or session with the sessionId and workspaceId. 2: the controller reads the placement key with GETEX, which renews its TTL, and the named worker's pods key; a key whose worker is not live is deleted, and with no live key it picks the most free live worker from pods keys. 3: the API or the proxy calls the internal API of the worker it returns, over mTLS, or sends app traffic to its port 4002. On the worker pod, the internal API drives the sandbox manager and the chromium manager. 4: the sandbox manager claims the workspace's key when it starts a sandbox and releases it on stop or when the sandbox exits. 5: the chromium manager claims the session's key when it opens a tab and releases it when the tab closes. 6: the placement controller, worker side, claims with SET NX and the idle TTL, the value being the worker's name and bootId, and releases by deleting the key if it holds that value. 7: the stats reporter writes pods name with its bootId and stats every 10 seconds. In Redis, placement:workspace:workspaceId and placement:session:sessionId hold name:bootId with the idle TTL, and pods:name holds bootId, reportedAt, address, sandboxes, sandboxSlots and sessions.">
                 <defs>
                   <marker id="pl-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
                     <path d="M0 0L10 5L0 10z" class="arrowhead"/>
@@ -1271,7 +387,7 @@
                 <text class="on-light type" x="150" y="150" text-anchor="middle">logs · stop: running</text>
 
                 <rect class="component" x="280" y="70" width="220" height="90" rx="8"/>
-                <text class="on-light name" x="390" y="94" text-anchor="middle">Preview proxy</text>
+                <text class="on-light name" x="390" y="94" text-anchor="middle">Proxy</text>
                 <text class="on-light type" x="390" y="111" text-anchor="middle">[app traffic · HTTP + WS]</text>
                 <text class="on-light type" x="390" y="134" text-anchor="middle">any: wakes the workspace</text>
 
@@ -1360,7 +476,7 @@
               <tr><th>Key</th><th>Value</th><th>Lifetime</th></tr>
             </thead>
             <tbody>
-              <tr><td><code>placement:workspace:&lt;workspaceId&gt;</code></td><td><code>&lt;name&gt;:&lt;bootId&gt;</code> of the worker running its sandbox</td><td><code>SANDBOX_IDLE_MS</code>, 15 min, from the claim or the last lookup</td></tr>
+              <tr><td><code>placement:workspace:&lt;workspaceId&gt;</code></td><td><code>&lt;name&gt;:&lt;bootId&gt;</code> of the worker running its sandbox</td><td><code>SANDBOX_IDLE_MS</code>, 15 min, from the claim or the last lookup; the proxy looks it up every minute while a WebSocket to the workspace is open</td></tr>
               <tr><td><code>placement:session:&lt;sessionId&gt;</code></td><td><code>&lt;name&gt;:&lt;bootId&gt;</code> of the worker holding its tab</td><td><code>BROWSER_IDLE_MS</code>, 5 min, from the claim or the last lookup</td></tr>
             </tbody>
           </table>
@@ -1385,7 +501,7 @@
             <tbody>
               <tr><td><code>new</code></td><td><code>launch</code></td><td><code>409</code>, one launch per workspace</td><td>The most free worker</td></tr>
               <tr><td><code>running</code></td><td><code>logs</code>, <code>stop</code></td><td>That worker</td><td><code>409</code>, nothing is running</td></tr>
-              <tr><td><code>any</code></td><td><code>exec</code>, app traffic from the preview proxy, a new browser session with a <code>workspaceId</code></td><td>That worker</td><td>The most free worker; app traffic wakes the workspace there</td></tr>
+              <tr><td><code>any</code></td><td><code>exec</code>, app traffic from the proxy, a new browser session with a <code>workspaceId</code></td><td>That worker</td><td>The most free worker; app traffic wakes the workspace there</td></tr>
               <tr><td>session</td><td>Any call on a browser session</td><td>That worker</td><td>As <code>any</code> for the session's <code>workspaceId</code>; the most free worker for a session without one. The tab reopens there from its row.</td></tr>
             </tbody>
           </table>
@@ -1509,7 +625,7 @@
 
           <figure>
             <div class="diagram">
-              <svg class="c4" viewBox="0 0 1000 720" role="img" aria-label="A sandbox on a worker pod. Calls come from the server pod's sandbox API to the worker's internal API: launch, exec, stop or logs with a workspaceId. App traffic comes from the preview proxy to the worker's port forwarder on port 4002, the same port as the internal API: a request with the x-workspace-app header is taken over before routing and forwarded, and any other request is an internal API call. The internal API, at /internal/sandbox from services/sandbox/routes, drives the sandbox plugin in plugins/sandbox.ts, app.sandbox. Its sandbox manager maps a workspaceId to its sandbox in memory, runs one launch at a time per workspace, and writes status and the saved launch to the workspace's row in Postgres. It takes a port from the pod's pool, 4100 to 4149, and spawns the sandbox under bubblewrap. The sweeper stops sandboxes idle for 15 minutes. The port forwarder sends a workspace's traffic to 127.0.0.1 on its port, and when the workspace has no running sandbox it wakes it through the manager. Each sandbox has its own network namespace and holds the workspace's launch server, for example npm run dev, with PORT 3000 inside mapped to 127.0.0.1 on the pool port; and exec, sh -c with a 2 minute default and 4 minute maximum, returning the exit code and the last 16 KB of output. A sandbox mounts the workspace's folder from the shared workspace volume at /workspace, and its deps folders, such as node_modules, vendor or .venv, from the deps cache at SANDBOX_DEPS_ROOT. Its only egress is the internet, including the npm registry, through the network controller, which applies each command's allow and deny lists. Other workspaces get one sandbox each on the same pod.">
+              <svg class="c4" viewBox="0 0 1000 720" role="img" aria-label="A sandbox on a worker pod. Calls come from the server pod's sandbox API to the worker's internal API: launch, exec, stop or logs with a workspaceId. App traffic comes from the proxy to the worker's port forwarder on port 4002, the same port as the internal API: a request with the x-workspace-app header is taken over before routing and forwarded, and any other request is an internal API call. The internal API, at /internal/sandbox from services/sandbox/routes, drives the sandbox plugin in plugins/sandbox.ts, app.sandbox. Its sandbox manager maps a workspaceId to its sandbox in memory, runs one launch at a time per workspace, and writes status and the saved launch to the workspace's row in Postgres. It takes a port from the pod's pool, 4100 to 4149, and spawns the sandbox under bubblewrap. The sweeper stops sandboxes idle for 15 minutes. The port forwarder sends a workspace's traffic to 127.0.0.1 on its port, and when the workspace has no running sandbox it wakes it through the manager. Each sandbox has its own network namespace and holds the workspace's launch server, for example npm run dev, with PORT 3000 inside mapped to 127.0.0.1 on the pool port; and exec, sh -c with a 2 minute default and 4 minute maximum, returning the exit code and the last 16 KB of output. A sandbox mounts the workspace's folder from the shared workspace volume at /workspace, and its deps folders, such as node_modules, vendor or .venv, from the deps cache at SANDBOX_DEPS_ROOT. Its only egress is the internet, including the npm registry, through the network controller, which applies each command's allow and deny lists. Other workspaces get one sandbox each on the same pod.">
                 <defs>
                   <marker id="sb-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
                     <path d="M0 0L10 5L0 10z" class="arrowhead"/>
@@ -1593,7 +709,7 @@
 
                 <polyline class="edge" points="184,41 58,41 58,118" marker-end="url(#sb-arrow)"/>
                 <text class="edge-label" x="66" y="70">app traffic, HTTP + WS</text>
-                <text class="note" x="66" y="84">from the preview proxy, taken before routing</text>
+                <text class="note" x="66" y="84">from the proxy, taken before routing</text>
                 <text class="note" x="66" y="98">header x-workspace-app: &lt;workspaceId&gt;</text>
 
                 <polyline class="edge" points="264,41 390,41 390,118" marker-end="url(#sb-arrow)"/>
@@ -2720,6 +1836,7 @@
             </tbody>
           </table>
         </section>
+
       </div>
     </main>
   </div>

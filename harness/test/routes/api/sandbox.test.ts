@@ -5,6 +5,7 @@ import { join } from 'node:path'
 
 import { loadConfig } from '../../../src/config.ts'
 import { users } from '../../../src/db/schema.ts'
+import { proxy } from '../../../src/plugins/proxy.ts'
 import { createPlacementService } from '../../../src/services/placement/index.ts'
 import { buildTestApp } from '../../test-app.ts'
 
@@ -39,6 +40,7 @@ app.decorate('workers', {
     return answer ? answer(call) : answers[path]!()
   },
 } as never)
+await app.register(proxy)
 
 const [user] = await app.db
   .insert(users)
@@ -96,7 +98,7 @@ describe('launch', () => {
     const res = await post(`/api/v1/workspaces/${id}/sandbox/launch`, { command: 'npm run dev', port: 3000 })
 
     expect(res.statusCode).toBe(201)
-    expect(res.json()).toEqual({ url: `https://${id}.preview.invalid` })
+    expect(res.json()).toEqual({ url: `http://${id}.localhost:3001/` })
     expect(sent).toEqual([
       {
         worker: 'worker-1',

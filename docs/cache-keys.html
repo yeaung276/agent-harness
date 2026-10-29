@@ -48,7 +48,7 @@
               <tr><th>Key</th><th>Value</th><th>Written by</th><th>Lifetime</th></tr>
             </thead>
             <tbody>
-              <tr><td><code>placement:workspace:&lt;workspaceId&gt;</code></td><td><code>&lt;hostname&gt;:&lt;bootId&gt;</code> of the worker running the workspace's sandbox</td><td>The worker's sandbox manager when it starts the sandbox, <code>SET NX</code>; another worker's value fails the start with <code>409</code></td><td><code>SANDBOX_IDLE_MS</code> (15 min) from the claim or the server's last lookup. Deleted by the worker on stop or when the sandbox exits.</td></tr>
+              <tr><td><code>placement:workspace:&lt;workspaceId&gt;</code></td><td><code>&lt;hostname&gt;:&lt;bootId&gt;</code> of the worker running the workspace's sandbox</td><td>The worker's sandbox manager when it starts the sandbox, <code>SET NX</code>; another worker's value fails the start with <code>409</code></td><td><code>SANDBOX_IDLE_MS</code> (15 min) from the claim or the server's last lookup; the proxy looks it up every minute while a WebSocket to the workspace is open. Deleted by the worker on stop or when the sandbox exits.</td></tr>
               <tr><td><code>placement:session:&lt;sessionId&gt;</code></td><td><code>&lt;hostname&gt;:&lt;bootId&gt;</code> of the worker holding the session's tab</td><td>The worker's chromium manager when it opens the tab</td><td><code>BROWSER_IDLE_MS</code> (5 min) from the claim or the server's last lookup. Deleted by the worker when the tab closes.</td></tr>
             </tbody>
           </table>

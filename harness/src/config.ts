@@ -22,6 +22,13 @@ export const ConfigSchema = Type.Object({
   APP_MODE: Type.Union([Type.Literal('server'), Type.Literal('worker')], { default: 'server' }),
   HOST: Type.String({ default: '127.0.0.1' }),
   PORT: Type.Integer({ minimum: 0, maximum: 65535, default: 3000 }),
+
+  // the server only: the proxy's own port, the URL apps are served under, and how a request names its workspace
+  PROXY_PORT: Type.Integer({ minimum: 0, maximum: 65535, default: 3001 }),
+  PROXY_URL: Type.String({ minLength: 1, default: 'http://localhost:3001' }),
+  PROXY_MODE: Type.Union([Type.Literal('subdomain'), Type.Literal('cookie')], { default: 'subdomain' }),
+  PROXY_TOKEN_SECRET: Type.Optional(Type.String({ minLength: 32 })),
+
   DATABASE_URL: Type.String({ minLength: 1 }),
   REDIS_URL: Type.String({ minLength: 1 }),
   WORKSPACES_DIR: Type.String({ minLength: 1, default: '/workspaces' }),

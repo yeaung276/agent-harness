@@ -7,6 +7,7 @@ import { chromium } from './plugins/chromium.ts'
 import { db } from './plugins/db.ts'
 import { logStream } from './plugins/log-stream.ts'
 import { multipart } from './plugins/multipart.ts'
+import { proxy } from './plugins/proxy.ts'
 import { redis } from './plugins/redis.ts'
 import { sandbox } from './plugins/sandbox.ts'
 import { services } from './plugins/services.ts'
@@ -57,6 +58,7 @@ export const buildApp = async (config: Config) => {
   }
 
   await app.register(workers)
+  await app.register(proxy)
   await app.register(multipart)
 
   await app.register(api, { prefix: '/api/v1' })

@@ -1,4 +1,4 @@
-import { checkServerIdentity } from 'node:tls'
+import { type PeerCertificate, checkServerIdentity } from 'node:tls'
 
 import * as x509 from '@peculiar/x509'
 import { eq } from 'drizzle-orm'
@@ -103,12 +103,24 @@ export const createWorkerService = async ({
     return { key: await exportKey(keys.privateKey), cert }
   }
 
-  const sessionOf = (name: string) => {
+  const getConnectionInfo = async (name: string) => {
+    const address = await redis.hget(`pods:${name}`, 'address')
+    if (!address) throw new HttpError(503, `worker ${name} is not available`)
+
+    return {
+      address,
+      tls: {
+        ...serverCert,
+        ca: caCert,
+        checkServerIdentity: (_host: string, cert: PeerCertificate) => checkServerIdentity(name, cert),
+      },
+    }
+  }
+
+  const sessionOf = (name: string, tls: Awaited<ReturnType<typeof getConnectionInfo>>['tls']) => {
     let session = sessions.get(name)
     if (!session) {
-      session = new Bun.FetchSession({
-        tls: { ...serverCert, ca: caCert, checkServerIdentity: (_host, cert) => checkServerIdentity(name, cert) },
-      })
+      session = new Bun.FetchSession({ tls })
       sessions.set(name, session)
     }
     return session
@@ -118,6 +130,7 @@ export const createWorkerService = async ({
 
   return {
     serverCert,
+    getConnectionInfo,
 
     register: async ({ hostname, address, csr }: { hostname: string; address: string; csr: string }) => {
       const cert = await signWorkerCsr(csr, hostname)
@@ -172,10 +185,8 @@ export const createWorkerService = async ({
     },
 
     call: async (name: string, path: string, init?: RequestInit) => {
-      const address = await redis.hget(`pods:${name}`, 'address')
-      if (!address) throw new HttpError(503, `worker ${name} is not available`)
-
-      return sessionOf(name).fetch(`https://${address}${path}`, init)
+      const { address, tls } = await getConnectionInfo(name)
+      return sessionOf(name, tls).fetch(`https://${address}${path}`, init)
     },
   }
 }

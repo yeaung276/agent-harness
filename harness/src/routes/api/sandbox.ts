@@ -42,9 +42,7 @@ export const sandbox: FastifyPluginAsyncTypebox = async app => {
       const { id } = request.params
       await forward(await workerOf(id, 'new'), 'launch', { ...request.body, workspaceId: id })
 
-      // a stand-in until the preview proxy is written: in subdomain mode the URL will be <workspaceId>.<proxy domain>,
-      // in cookie mode a link that sets the preview cookie and redirects to the proxy's domain
-      return reply.status(201).send({ url: `https://${id}.preview.invalid` })
+      return reply.status(201).send({ url: app.proxy.urlOf(id) })
     }
   )
 

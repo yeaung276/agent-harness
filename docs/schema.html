@@ -121,6 +121,23 @@
           </table>
           <p>The worker running the browser writes each row. Rows are never deleted; closing sets <code>status</code>. Like <code>status</code> on <code>workspaces</code>, <code>status</code> is limited only by the app.</p>
         </section>
+
+        <section class="doc-section" id="workers">
+          <h2>Workers</h2>
+
+          <h3>workers</h3>
+          <table>
+            <thead>
+              <tr><th>Column</th><th>Type</th><th>Notes</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>hostname</code></td><td><code>text</code></td><td>Primary key. The worker's <code>WORKER_NAME</code>, the pod name.</td></tr>
+              <tr><td><code>address</code></td><td><code>text</code></td><td><code>ip:port</code> the worker serves its internal API on: its own IPv4 address and <code>PORT</code>.</td></tr>
+              <tr><td><code>registered_at</code></td><td><code>timestamptz</code></td><td><code>now()</code>. Set again each time the worker registers.</td></tr>
+            </tbody>
+          </table>
+          <p><code>POST /workers/register</code> upserts the row by hostname on every worker boot. Rows are never deleted. The machines page lists every row; whether a worker is live comes from its <code>pods:&lt;hostname&gt;</code> key in Redis, not from this table, and routing never reads it.</p>
+        </section>
       </div>
     </main>
   </div>
