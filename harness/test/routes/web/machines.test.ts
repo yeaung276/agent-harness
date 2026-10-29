@@ -90,7 +90,7 @@ describe('machine detail page', () => {
     expect(page.body).toContain('512 MB')
     expect(page.body).toContain('of 2048 MB')
     expect(page.body).toContain('5 / 50')
-    expect(page.body).toContain('width: 10%')
+    expect(page.body).toContain('stroke-dasharray="10 100"')
   })
 
   test('answers 404 for an unknown worker', async () => {

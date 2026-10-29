@@ -48,11 +48,8 @@ export const machines: FastifyPluginAsyncTypebox = async app => {
           used: worker.memoryBytes === null ? null : mb(worker.memoryBytes),
           limit: worker.memoryLimitBytes === null ? null : mb(worker.memoryLimitBytes),
         },
-        sandboxes: {
-          percent: percent(worker.sandboxes, worker.sandboxSlots),
-          used: worker.sandboxes,
-          total: worker.sandboxSlots,
-        },
+        sandboxes: worker.sandboxes,
+        sandboxSlots: worker.sandboxSlots,
         sessions: worker.sessions,
       },
     })

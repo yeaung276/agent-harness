@@ -9,6 +9,7 @@ import { strToU8, zipSync } from 'fflate'
 
 import { loadConfig } from '../../../src/config.ts'
 import { sandboxActivities, users, workspaces } from '../../../src/db/schema.ts'
+import { createPlacementService } from '../../../src/services/placement/index.ts'
 import { decrypt } from '../../../src/services/workspaces/crypto.ts'
 import { buildTestApp } from '../../test-app.ts'
 
@@ -23,6 +24,16 @@ const app = await buildTestApp(
     SANDBOX_DEPS_ROOT: depsDir,
   })
 )
+
+const sent: { worker: string; path: string; body: Record<string, unknown> }[] = []
+
+// the worker's internal API, as the server reaches it over mTLS
+app.decorate('workers', {
+  call: async (worker: string, path: string, init: RequestInit) => {
+    sent.push({ worker, path, body: JSON.parse(String(init.body)) })
+    return Response.json({ lines: ['listening on 3000'] })
+  },
+} as never)
 
 afterAll(async () => {
   await app.close()
@@ -317,7 +328,7 @@ describe('workspace page', () => {
     expect((await app.inject({ url: `/workspaces/${id}/activities`, cookies })).statusCode).toBe(404)
   })
 
-  test('logs are empty for now, and an unknown workspace or a bad tail is refused', async () => {
+  test('logs are empty with nothing running, and an unknown workspace or a bad tail is refused', async () => {
     const { cookies } = await signIn()
     const { id } = await workspaceWithFiles(cookies, {})
 
@@ -326,7 +337,35 @@ describe('workspace page', () => {
     const badTail = await app.inject({ url: `/workspaces/${id}/logs?tail=0`, cookies })
 
     expect(logs.json()).toEqual({ lines: [] })
+    expect(sent).toEqual([])
     expect(unknown.statusCode).toBe(404)
     expect(badTail.statusCode).toBe(400)
+  })
+
+  test('logs of a running workspace come from its worker, with the tail asked for', async () => {
+    const { cookies } = await signIn()
+    const { id } = await workspaceWithFiles(cookies, {})
+    // worker-0's stats reporter writes pods:worker-0, and its sandbox manager claims the workspace
+    const placement = createPlacementService({
+      redis: app.redis,
+      workerName: 'worker-0',
+      sandboxIdleMs: 15 * 60 * 1000,
+      browserIdleMs: 5 * 60 * 1000,
+    })
+    await app.redis.hset('pods:worker-0', {
+      hostname: 'worker-0',
+      address: '10.0.0.1:3000',
+      bootId: placement.bootId,
+      reportedAt: Date.now(),
+      sandboxes: 1,
+      sandboxSlots: 50,
+      sessions: 0,
+    })
+    await placement.claimWorkspace(id)
+
+    const logs = await app.inject({ url: `/workspaces/${id}/logs?tail=50`, cookies })
+
+    expect(logs.json()).toEqual({ lines: ['listening on 3000'] })
+    expect(sent).toEqual([{ worker: 'worker-0', path: '/internal/sandbox/logs', body: { workspaceId: id, tail: 50 } }])
   })
 })

@@ -1,6 +1,7 @@
 import type { FastifyPluginAsyncTypebox } from '@fastify/type-provider-typebox'
 
-import { BrowsersQuery } from './schemas/browsers.ts'
+import { HttpError } from '../../services/http-error.ts'
+import { ActivitiesQuery, BrowserParams, BrowsersQuery } from './schemas/browsers.ts'
 
 const PAGE_SIZE = 20
 
@@ -34,4 +35,26 @@ export const browsers: FastifyPluginAsyncTypebox = async app => {
       },
     })
   })
+
+  app.get('/browsers/:id', { schema: { params: BrowserParams } }, async (request, reply) => {
+    const session = await app.services.browserSessions.get(request.params.id)
+    if (!session) throw new HttpError(404, 'No session has this id')
+
+    return reply.viewAsync('browser', { title: session.url ?? 'Browser', active: 'browsers', session })
+  })
+
+  app.get(
+    '/browsers/:id/activities',
+    { schema: { params: BrowserParams, querystring: ActivitiesQuery } },
+    async request => {
+      const session = await app.services.browserSessions.get(request.params.id)
+      if (!session) throw new HttpError(404, 'No session has this id')
+
+      // nothing records browser activity yet
+      return {
+        items: [],
+        pagination: { from: 1, to: 0, total: 0, prev: null, next: null },
+      }
+    }
+  )
 }

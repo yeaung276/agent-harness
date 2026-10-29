@@ -8,7 +8,7 @@ RUN apt-get update \
 WORKDIR /usr/src/app
 COPY package.json bun.lock ./
 COPY harness/package.json harness/bunfig.toml harness/
-RUN bun install --frozen-lockfile && chown -R bun:bun /usr/src/app
+RUN bun install --frozen-lockfile --ignore-scripts && chown -R bun:bun /usr/src/app
 
 WORKDIR /usr/src/app/harness
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
