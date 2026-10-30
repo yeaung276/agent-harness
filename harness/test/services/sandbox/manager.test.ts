@@ -719,6 +719,15 @@ describe('stop', () => {
     expect(launchesOf('ws-1')).toHaveLength(1)
   })
 
+  test('drops the launch from the count', async () => {
+    await bringUp('ws-1')
+    await bringUp('ws-2')
+
+    await manager.stop('ws-1')
+
+    expect(manager.count()).toBe(1)
+  })
+
   test('records stopped and clears the saved launch when nothing runs', async () => {
     await manager.stop('ws-1')
 
@@ -930,6 +939,43 @@ describe('stopIdle', () => {
     expect(workspaces.statuses.get('ws-2')).toBe('running')
   })
 
+  test('drops swept launches from the count', async () => {
+    const idle = await bringUp('ws-1')
+    await bringUp('ws-2')
+    idle.idle = true
+
+    await manager.stopIdle()
+
+    expect(manager.count()).toBe(1)
+  })
+
+  test('drops a failed launch idle for the idle time without killing it, so the next wake starts it again', async () => {
+    const failed = await bringUp('ws-1')
+    failed.crash()
+    await until(() => workspaces.statuses.get('ws-1') === 'stopped', 'stopped')
+    failed.idle = true
+
+    await manager.stopIdle()
+
+    expect(failed.kills).toBe(0)
+    expect(manager.count()).toBe(0)
+    const woken = manager.wake('ws-1')
+    await until(() => launchesOf('ws-1').length === 2, 'relaunch')
+    latestLaunch('ws-1').listen()
+    expect(await woken).toBe(latestLaunch('ws-1'))
+  })
+
+  test('keeps a failed launch that is not idle yet', async () => {
+    const failed = await bringUp('ws-1')
+    failed.crash()
+    await until(() => workspaces.statuses.get('ws-1') === 'stopped', 'stopped')
+
+    await manager.stopIdle()
+
+    expect(await manager.wake('ws-1')).toBe(failed)
+    expect(launchesOf('ws-1')).toHaveLength(1)
+  })
+
   test('asks each running launch whether it has been idle for idleMs', async () => {
     const launched = await bringUp('ws-1')
 
@@ -997,6 +1043,7 @@ describe('stopAll', () => {
     expect(workspaces.statuses.get('ws-2')).toBe('stopped')
     expect(workspaces.saved.get('ws-1')).toMatchObject({ command: 'npm run dev' })
     expect(workspaces.saved.get('ws-2')).toMatchObject({ command: 'npm run dev' })
+    expect(manager.count()).toBe(0)
   })
 
   test('leaves launches that already ended alone', async () => {

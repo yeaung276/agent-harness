@@ -133,7 +133,7 @@ export const createSandboxManager = ({
     void launched.exited().then(async exitCode => {
       ports.release(hostPort)
       await launched.deleteLogs()
-      if (sandboxes.get(workspaceId) !== launched) return
+      if (sandboxes.has(workspaceId) && sandboxes.get(workspaceId) !== launched) return
 
       await placement.releaseWorkspace(workspaceId)
       if (launched.status() === 'failed') {
@@ -213,6 +213,7 @@ export const createSandboxManager = ({
       locked(workspaceId, async () => {
         await workspaces.setLaunchOptions(workspaceId, null)
         await sandboxes.get(workspaceId)?.kill()
+        sandboxes.delete(workspaceId)
         await workspaces.setStatus(workspaceId, 'stopped')
         log.info({ workspaceId }, 'workspace app stopped')
       }),
@@ -240,12 +241,19 @@ export const createSandboxManager = ({
     stopIdle: async () => {
       await Promise.all(
         [...sandboxes]
-          .filter(([, launched]) => launched.status() === 'running' && launched.isIdle(idleMs))
+          .filter(
+            ([, launched]) =>
+              (launched.status() === 'running' || launched.status() === 'failed') && launched.isIdle(idleMs)
+          )
           .map(async ([workspaceId, launched]) => {
-            log.info({ workspaceId }, 'stopping idle workspace app')
-            await launched.kill()
-            await launched.deleteLogs()
-            if (sandboxes.get(workspaceId) === launched) await workspaces.setStatus(workspaceId, 'stopped')
+            if (launched.status() === 'running') {
+              log.info({ workspaceId }, 'stopping idle workspace app')
+              await launched.kill()
+              await launched.deleteLogs()
+            }
+            if (sandboxes.get(workspaceId) !== launched) return
+            sandboxes.delete(workspaceId)
+            await workspaces.setStatus(workspaceId, 'stopped')
           })
       )
     },
@@ -257,7 +265,9 @@ export const createSandboxManager = ({
           .map(async ([workspaceId, launched]) => {
             await launched.kill()
             await launched.deleteLogs()
-            if (sandboxes.get(workspaceId) === launched) await workspaces.setStatus(workspaceId, 'stopped')
+            if (sandboxes.get(workspaceId) !== launched) return
+            sandboxes.delete(workspaceId)
+            await workspaces.setStatus(workspaceId, 'stopped')
           })
       )
     },

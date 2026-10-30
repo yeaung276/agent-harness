@@ -56,6 +56,8 @@ export const createChromium = ({
         '--use-mock-keychain',
         '--password-store=basic',
         '--no-sandbox',
+        '--disable-extensions',
+        '--disable-component-extensions-with-background-pages',
         ...(mode === 'bwrap' ? [`--proxy-server=http://127.0.0.1:${PROXY_PORT}`] : []),
         'about:blank',
       ]
