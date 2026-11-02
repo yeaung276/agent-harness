@@ -3,6 +3,7 @@ import { Type } from 'typebox'
 
 import { readForm } from '../../plugins/multipart.ts'
 import { HttpError } from '../../services/http-error.ts'
+import { forward } from './forward.ts'
 import {
   CreateWorkspaceBody,
   UpdateWorkspaceBody,
@@ -39,7 +40,15 @@ export const workspaces: FastifyPluginAsyncTypebox = async app => {
     '/workspaces/:id',
     { schema: { params: WorkspaceParams, response: { 204: Type.Null() } } },
     async (request, reply) => {
-      await app.services.workspaces.delete(request.params.id)
+      const { id } = request.params
+      await app.services.workspaces.get(id)
+      const worker = await app.services.placement.workspace(id, 'running').catch(err => {
+        if (err instanceof HttpError && err.status === 409) return null
+        throw err
+      })
+
+      if (worker) await forward(app, worker, '/internal/sandbox/stop', { workspaceId: id })
+      await app.services.workspaces.delete(id)
 
       return reply.status(204).send(null)
     }

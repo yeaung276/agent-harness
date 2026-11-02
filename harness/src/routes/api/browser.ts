@@ -2,6 +2,7 @@ import type { FastifyPluginAsyncTypebox } from '@fastify/type-provider-typebox'
 import { type Static, Type } from 'typebox'
 
 import { HttpError } from '../../services/http-error.ts'
+import { forward } from './forward.ts'
 import {
   BrowserSession,
   ClickBody,
@@ -21,27 +22,6 @@ import {
 const MAX_WORKSPACE_SESSIONS = 5
 
 export const browser: FastifyPluginAsyncTypebox = async app => {
-  // calls the worker's internal chromium API; a worker's error answers with its own status
-  const forward = async (worker: string, path: string, body: unknown): Promise<unknown> => {
-    const res = await app.workers
-      .call(worker, `/internal/chromium/${path}`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(body),
-      })
-      .catch(err => {
-        if (err instanceof HttpError) throw err
-        app.log.warn({ worker, path, err }, 'worker unreachable')
-        throw new HttpError(503, `worker ${worker} can't be reached`)
-      })
-    if (!res.ok) {
-      const { message } = (await res.json().catch(() => ({}))) as { message?: string }
-      throw new HttpError(res.status, message ?? `worker ${worker} answered ${res.status}`)
-    }
-
-    return res.status === 204 ? null : res.json()
-  }
-
   // the worker holding the session's tab, or the one its tab reopens on
   const workerOf = async (sessionId: string) => {
     const session = await app.services.browsers.get(sessionId)
@@ -61,7 +41,10 @@ export const browser: FastifyPluginAsyncTypebox = async app => {
       throw new HttpError(429, 'Too many sessions are open for this workspace')
 
     const worker = await app.services.placement.session(null, workspaceId ?? null)
-    const session = await forward(worker, 'session', { ...request.body, userId: request.userId })
+    const session = await forward(app, worker, '/internal/chromium/session', {
+      ...request.body,
+      userId: request.userId,
+    })
 
     return reply.status(201).send(session as Static<typeof BrowserSession>)
   })
@@ -72,9 +55,10 @@ export const browser: FastifyPluginAsyncTypebox = async app => {
     async request => {
       const { id } = request.params
 
-      return (await forward(await workerOf(id), 'navigate', { ...request.body, sessionId: id })) as Static<
-        typeof NavigatedContent
-      >
+      return (await forward(app, await workerOf(id), '/internal/chromium/navigate', {
+        ...request.body,
+        sessionId: id,
+      })) as Static<typeof NavigatedContent>
     }
   )
 
@@ -84,9 +68,10 @@ export const browser: FastifyPluginAsyncTypebox = async app => {
     async request => {
       const { id } = request.params
 
-      return (await forward(await workerOf(id), 'read', { ...request.body, sessionId: id })) as Static<
-        typeof PageContent
-      >
+      return (await forward(app, await workerOf(id), '/internal/chromium/read', {
+        ...request.body,
+        sessionId: id,
+      })) as Static<typeof PageContent>
     }
   )
 
@@ -96,9 +81,10 @@ export const browser: FastifyPluginAsyncTypebox = async app => {
     async request => {
       const { id } = request.params
 
-      return (await forward(await workerOf(id), 'click', { ...request.body, sessionId: id })) as Static<
-        typeof PageContent
-      >
+      return (await forward(app, await workerOf(id), '/internal/chromium/click', {
+        ...request.body,
+        sessionId: id,
+      })) as Static<typeof PageContent>
     }
   )
 
@@ -108,9 +94,10 @@ export const browser: FastifyPluginAsyncTypebox = async app => {
     async request => {
       const { id } = request.params
 
-      return (await forward(await workerOf(id), 'type', { ...request.body, sessionId: id })) as Static<
-        typeof PageContent
-      >
+      return (await forward(app, await workerOf(id), '/internal/chromium/type', {
+        ...request.body,
+        sessionId: id,
+      })) as Static<typeof PageContent>
     }
   )
 
@@ -119,7 +106,10 @@ export const browser: FastifyPluginAsyncTypebox = async app => {
     { schema: { params: SessionParams, body: ScreenshotBody, response: { 201: Screenshot } } },
     async (request, reply) => {
       const { id } = request.params
-      const shot = await forward(await workerOf(id), 'screenshot', { ...request.body, sessionId: id })
+      const shot = await forward(app, await workerOf(id), '/internal/chromium/screenshot', {
+        ...request.body,
+        sessionId: id,
+      })
 
       return reply.status(201).send(shot as Static<typeof Screenshot>)
     }
@@ -131,7 +121,10 @@ export const browser: FastifyPluginAsyncTypebox = async app => {
     async request => {
       const { id } = request.params
 
-      return (await forward(await workerOf(id), 'run', { ...request.body, sessionId: id })) as Static<typeof RunResult>
+      return (await forward(app, await workerOf(id), '/internal/chromium/run', {
+        ...request.body,
+        sessionId: id,
+      })) as Static<typeof RunResult>
     }
   )
 
@@ -140,7 +133,7 @@ export const browser: FastifyPluginAsyncTypebox = async app => {
     { schema: { params: SessionParams, response: { 204: Type.Null() } } },
     async (request, reply) => {
       const { id } = request.params
-      await forward(await workerOf(id), 'close', { sessionId: id })
+      await forward(app, await workerOf(id), '/internal/chromium/close', { sessionId: id })
 
       return reply.status(204).send(null)
     }

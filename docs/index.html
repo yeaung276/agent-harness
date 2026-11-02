@@ -487,9 +487,9 @@
             </thead>
             <tbody>
               <tr><td>Claim a workspace</td><td>The sandbox manager starts a sandbox, on launch or on a wake</td><td><code>SET NX</code> with the TTL. A key holding this worker's <code>&lt;name&gt;:&lt;bootId&gt;</code> counts as claimed; one holding another's fails the request with <code>409</code> before a port is taken.</td></tr>
-              <tr><td>Release a workspace</td><td><code>stop</code>, or the sandbox exits: the idle sweep, shutdown, or exiting on its own</td><td>Deletes the key if it holds this worker's value. An exit releases only if its sandbox is still the workspace's current one, checked under the workspace's lock, the one a launch or wake starts under, so a start can't claim the key between the check and the delete.</td></tr>
+              <tr><td>Release a workspace</td><td><code>stop</code>, a delete of the workspace, which stops it first, or the sandbox exits: the idle sweep, shutdown, or exiting on its own</td><td>Deletes the key if it holds this worker's value. An exit releases only if its sandbox is still the workspace's current one, checked under the workspace's lock, the one a launch or wake starts under, so a start can't claim the key between the check and the delete.</td></tr>
               <tr><td>Claim a session</td><td>The chromium manager opens the session's tab, on create or on a reopen</td><td><code>SET</code> with the TTL.</td></tr>
-              <tr><td>Release a session</td><td>The tab closes: <code>close</code>, the idle sweep or shutdown</td><td>Deletes the key if it holds this worker's value.</td></tr>
+              <tr><td>Release a session</td><td>The tab closes: <code>close</code>, the idle sweep or shutdown. The idle sweep closes a tab whose row went with its workspace too.</td><td>Deletes the key if it holds this worker's value.</td></tr>
             </tbody>
           </table>
 

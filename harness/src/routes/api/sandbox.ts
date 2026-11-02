@@ -5,31 +5,11 @@ import { HttpError } from '../../services/http-error.ts'
 import type { Need } from '../../services/placement/index.ts'
 import { readRedisLog } from '../../services/sandbox/log.ts'
 import { launchLogKey } from '../../services/sandbox/manager.ts'
+import { forward } from './forward.ts'
 import { ExecBody, ExecResult, LaunchBody, Launched, Logs, LogsQuery } from './schemas/sandbox.ts'
 import { WorkspaceParams } from './schemas/workspaces.ts'
 
 export const sandbox: FastifyPluginAsyncTypebox = async app => {
-  // calls the worker's internal sandbox API; a worker's error answers with its own status
-  const forward = async (worker: string, path: string, body: unknown): Promise<unknown> => {
-    const res = await app.workers
-      .call(worker, `/internal/sandbox/${path}`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(body),
-      })
-      .catch(err => {
-        if (err instanceof HttpError) throw err
-        app.log.warn({ worker, path, err }, 'worker unreachable')
-        throw new HttpError(503, `worker ${worker} can't be reached`)
-      })
-    if (!res.ok) {
-      const { message } = (await res.json().catch(() => ({}))) as { message?: string }
-      throw new HttpError(res.status, message ?? `worker ${worker} answered ${res.status}`)
-    }
-
-    return res.status === 204 ? null : res.json()
-  }
-
   // the worker running the workspace, or the one to run it on, as the call needs
   const workerOf = async (workspaceId: string, need: Need) => {
     await app.services.workspaces.get(workspaceId)
@@ -42,7 +22,7 @@ export const sandbox: FastifyPluginAsyncTypebox = async app => {
     { schema: { params: WorkspaceParams, body: LaunchBody, response: { 201: Launched } } },
     async (request, reply) => {
       const { id } = request.params
-      await forward(await workerOf(id, 'new'), 'launch', { ...request.body, workspaceId: id })
+      await forward(app, await workerOf(id, 'new'), '/internal/sandbox/launch', { ...request.body, workspaceId: id })
 
       return reply.status(201).send({ url: app.proxy.urlOf(id) })
     }
@@ -54,9 +34,10 @@ export const sandbox: FastifyPluginAsyncTypebox = async app => {
     async request => {
       const { id } = request.params
 
-      return (await forward(await workerOf(id, 'any'), 'exec', { ...request.body, workspaceId: id })) as Static<
-        typeof ExecResult
-      >
+      return (await forward(app, await workerOf(id, 'any'), '/internal/sandbox/exec', {
+        ...request.body,
+        workspaceId: id,
+      })) as Static<typeof ExecResult>
     }
   )
 
@@ -70,7 +51,7 @@ export const sandbox: FastifyPluginAsyncTypebox = async app => {
         throw err
       })
 
-      if (worker) await forward(worker, 'stop', { workspaceId: id })
+      if (worker) await forward(app, worker, '/internal/sandbox/stop', { workspaceId: id })
       else await app.services.workspaces.setStatus(id, 'stopped')
 
       return reply.status(204).send(null)

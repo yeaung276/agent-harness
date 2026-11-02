@@ -242,9 +242,11 @@
   }
 }</code></pre>
 <h4>Response 204</h4>
-<p>No body. The workspace and its directory are gone at once; the files in it are removed afterwards, so the call doesn't wait on them. If the directory can't be moved aside, nothing is deleted.</p>
+<p>No body. A running app is stopped first. The workspace, its directory and its browser sessions are gone at once; the files in it are removed afterwards, so the call doesn't wait on them. A session's tab closes with the browser's idle sweep, and a call on the session is a 404. If the directory can't be moved aside, nothing is deleted.</p>
 <h4>Errors · 404</h4>
 <p>No workspace has this id.</p>
+<h4>Errors · 503</h4>
+<p>The app is running and its worker can't be reached; nothing is deleted.</p>
   </div>
 </details>
 <details class="route">

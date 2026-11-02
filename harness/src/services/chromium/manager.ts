@@ -94,7 +94,7 @@ export const createChromiumManager = ({
     return tab
   }
 
-  const closeTab = async ({ id, workspaceId, record }: BrowserSession) => {
+  const closeTab = async ({ id, workspaceId, record }: Pick<BrowserSession, 'id' | 'workspaceId' | 'record'>) => {
     const tab = tabs.get(id)
     tabs.delete(id)
     await placement.releaseSession(id)
@@ -279,7 +279,8 @@ export const createChromiumManager = ({
           .map(([sessionId]) =>
             locked(sessionId, async () => {
               const browserSession = await browsers.get(sessionId)
-              if (browserSession) await closeTab(browserSession)
+              // close with sessionId in case browserSession is deleted with workspace delete action.
+              await closeTab(browserSession ?? { id: sessionId, workspaceId: null, record: false })
               log.info({ sessionId }, 'idle browser session tab closed')
             })
           )

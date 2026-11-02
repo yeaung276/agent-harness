@@ -451,6 +451,18 @@ describe('closing', () => {
     expect(tabOf(1).closes).toBe(0)
   })
 
+  test("stopIdle closes an idle tab whose row went with its workspace, and records nothing", async () => {
+    const { id } = await manager.create('user-1', { workspaceId: 'ws-1', record: true })
+    browsers.rows.delete(id)
+    tabOf(0).idle = true
+
+    await manager.stopIdle()
+
+    expect(tabOf(0).closes).toBe(1)
+    expect(tabOf(0).exportedTo).toHaveLength(0)
+    expect(manager.count()).toBe(0)
+  })
+
   test('stopAll closes every tab the same way and stops Chromium', async () => {
     const { id } = await manager.create('user-1', { workspaceId: 'ws-1', record: true })
 

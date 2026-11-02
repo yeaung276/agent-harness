@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, test } from 'bun:test'
+import { afterAll, beforeEach, describe, expect, test } from 'bun:test'
 import { existsSync } from 'node:fs'
 import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -9,6 +9,7 @@ import { strToU8, zipSync } from 'fflate'
 
 import { loadConfig } from '../../../src/config.ts'
 import { users, workspaces } from '../../../src/db/schema.ts'
+import { createPlacementService } from '../../../src/services/placement/index.ts'
 import { decrypt } from '../../../src/services/workspaces/crypto.ts'
 import { buildTestApp } from '../../test-app.ts'
 
@@ -24,6 +25,40 @@ const app = await buildTestApp(
   })
 )
 const email = `${crypto.randomUUID()}@example.com`
+
+type Sent = { worker: string; path: string; body: Record<string, unknown> }
+let sent: Sent[] = []
+let answer: (() => Response) | null = null
+
+// the worker's internal API, as the server reaches it over mTLS
+app.decorate('workers', {
+  call: async (worker: string, path: string, init: RequestInit) => {
+    sent.push({ worker, path, body: JSON.parse(String(init.body)) })
+    return answer ? answer() : new Response(null, { status: 204 })
+  },
+} as never)
+
+// worker-0 is live, and claims workspaces through its own placement
+const placement = createPlacementService({
+  redis: app.redis,
+  workerName: 'worker-0',
+  sandboxIdleMs: 15 * 60 * 1000,
+  browserIdleMs: 5 * 60 * 1000,
+})
+
+beforeEach(async () => {
+  sent = []
+  answer = null
+  await app.redis.hset('pods:worker-0', {
+    hostname: 'worker-0',
+    address: '10.0.0.1:3000',
+    bootId: placement.bootId,
+    reportedAt: Date.now(),
+    sandboxes: 0,
+    sandboxSlots: 50,
+    sessions: 0,
+  })
+})
 
 const [user] = await app.db
   .insert(users)
@@ -119,6 +154,36 @@ describe('workspaces on the API', () => {
     expect(existsSync(join(dir, id))).toBe(false)
     for (let i = 0; i < 100 && existsSync(join(depsDir, id)); i++) await Bun.sleep(10)
     expect(existsSync(join(depsDir, id))).toBe(false)
+  })
+
+  test('deleting a running workspace stops its app on its worker first', async () => {
+    const { id } = (await createWorkspace(uniqueName())).json()
+    await placement.claimWorkspace(id)
+
+    const res = await deleteWorkspace(id)
+
+    expect(res.statusCode).toBe(204)
+    expect(sent).toEqual([{ worker: 'worker-0', path: '/internal/sandbox/stop', body: { workspaceId: id } }])
+    expect((await getWorkspace(id)).statusCode).toBe(404)
+  })
+
+  test('deleting a running workspace whose worker answers an error keeps it', async () => {
+    const { id } = (await createWorkspace(uniqueName())).json()
+    await placement.claimWorkspace(id)
+    answer =() => Response.json({ message: 'boom' }, { status: 500 })
+
+    const res = await deleteWorkspace(id)
+
+    expect(res.statusCode).toBe(500)
+    expect((await getWorkspace(id)).statusCode).toBe(200)
+  })
+
+  test('deleting a workspace with nothing running calls no worker', async () => {
+    const { id } = (await createWorkspace(uniqueName())).json()
+
+    await deleteWorkspace(id)
+
+    expect(sent).toEqual([])
   })
 
   test('deleting an unknown workspace is not found', async () => {
