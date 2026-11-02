@@ -5,3 +5,5 @@ node_modules
 harness/src/routes/web/public/app.css
 harness/dist
 /workspaces
+deploy/k8s/example/secret.env
+deploy/k8s/example/ca.*

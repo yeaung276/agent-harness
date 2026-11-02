@@ -1,0 +1,25 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - workspaces-pvc.yaml
+  - server/deployment.yaml
+  - server/service.yaml
+  - workers/default-statefulset.yaml
+
+configMapGenerator:
+  - name: harness
+    envs:
+      - config.env
+
+# the overlay makes the secrets:
+#   harness         DATABASE_URL, REDIS_URL, DATA_ENCRYPTION_KEY, WORKER_JOIN_SECRET
+#   harness-server  WORKER_CA_KEY, WORKER_CA_CERT
+
+images:
+  - name: harness-server
+    newName: ghcr.io/yeaung276/agent-harness-server
+    newTag: latest
+  - name: default-harness-worker
+    newName: ghcr.io/yeaung276/agent-harness-default-worker
+    newTag: latest

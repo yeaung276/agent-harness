@@ -1,0 +1,24 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: agent-harness
+
+# from outside this repo: github.com/yeaung276/agent-harness//deploy/k8s/base?ref=v0.1.0
+resources:
+  - ../base
+
+images:
+  - name: ghcr.io/yeaung276/agent-harness-server
+    newTag: v0.1.0
+  - name: ghcr.io/yeaung276/agent-harness-default-worker
+    newTag: v0.1.0
+
+secretGenerator:
+  - name: harness
+    envs:
+      - secret.env
+  # openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -keyout ca.key -out ca.crt -subj /CN=worker-ca -days 3650
+  - name: harness-server
+    files:
+      - WORKER_CA_KEY=ca.key
+      - WORKER_CA_CERT=ca.crt

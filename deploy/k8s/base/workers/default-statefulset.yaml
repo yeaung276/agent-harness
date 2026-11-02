@@ -1,0 +1,56 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: default-worker
+spec:
+  # no Service: workers register their pod IP with the server
+  serviceName: ""
+  replicas: 2
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels:
+      app: worker
+      type: default
+  template:
+    metadata:
+      labels:
+        app: worker
+        type: default
+    spec:
+      containers:
+        - name: worker
+          image: default-harness-worker
+          envFrom:
+            - configMapRef:
+                name: harness
+            - secretRef:
+                name: harness
+          env:
+            # default-worker-0, default-worker-1, …: deps and placement keys stay with the name
+            - name: WORKER_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: SERVER_URL
+              value: http://server:3000
+          # bwrap, pasta, nft and the sandbox cgroups
+          securityContext:
+            privileged: true
+          ports:
+            - name: internal
+              containerPort: 3000
+          readinessProbe:
+            tcpSocket:
+              port: internal
+            periodSeconds: 10
+          volumeMounts:
+            - name: workspaces
+              mountPath: /workspaces
+            - name: deps
+              mountPath: /tmp/workspace-deps
+      volumes:
+        - name: workspaces
+          persistentVolumeClaim:
+            claimName: workspaces
+        - name: deps
+          emptyDir: {}

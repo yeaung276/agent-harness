@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: workspaces
+spec:
+  # the server and every worker mount it
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 50Gi

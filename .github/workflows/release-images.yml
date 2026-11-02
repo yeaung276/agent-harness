@@ -28,7 +28,7 @@ jobs:
     strategy:
       matrix:
         include:
-          - name: worker
+          - name: default-worker
             dockerfile: harness/build/default.worker.Dockerfile
           - name: server
             dockerfile: harness/build/server.Dockerfile
