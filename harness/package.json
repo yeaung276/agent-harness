@@ -15,7 +15,7 @@
     "db:migrate": "bun scripts/migrate.ts",
     "typecheck": "tsc",
     "test": "bun test --isolate",
-    "test:container": "docker build -q -f test/container/Dockerfile -t container-test .. && docker run --rm --privileged --cgroupns=private -v \"$PWD/src:/usr/src/app/harness/src:ro\" -v \"$PWD/test:/usr/src/app/harness/test:ro\" -v \"$PWD/drizzle:/usr/src/app/harness/drizzle:ro\" container-test"
+    "test:container": "docker build -f test/container/Dockerfile -t container-test .. && docker run --rm --privileged --cgroupns=private -v \"$PWD/src:/usr/src/app/harness/src:ro\" -v \"$PWD/test:/usr/src/app/harness/test:ro\" -v \"$PWD/drizzle:/usr/src/app/harness/drizzle:ro\" container-test"
   },
   "dependencies": {
     "@fastify/cookie": "^11.1.3",
