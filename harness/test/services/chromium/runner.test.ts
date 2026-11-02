@@ -63,7 +63,7 @@ afterEach(async () => {
 afterAll(async () => {
   await chromium?.stop()
   for (const server of servers) server.stop(true)
-})
+}, 15_000)
 
 describe.if(linux)('runner', () => {
   test("runs the code on the session's page and returns its result, and the page's owner sees what it did", async () => {

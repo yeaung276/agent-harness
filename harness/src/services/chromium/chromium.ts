@@ -108,7 +108,7 @@ export const createChromium = ({
       const launched = sandbox
       sandbox = undefined
 
-      await launched?.kill()
+      await launched?.kill('SIGKILL')
       await cleanup
     },
 

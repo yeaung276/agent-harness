@@ -90,7 +90,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await chromium?.stop()
   for (const server of servers) server.stop(true)
-})
+}, 15_000)
 
 describe.if(linux)('a session', () => {
   test('opens on a blank page, with nothing to save yet', async () => {

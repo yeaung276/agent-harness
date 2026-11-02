@@ -196,10 +196,10 @@ export const createSandbox = (
   child.on('error', error => log?.write(`${error.message}\n`))
   if (log) child.stdout.setEncoding('utf8').on('data', log.write)
 
-  const killTree = async () => {
+  const killTree = async (signal: 'SIGTERM' | 'SIGKILL' = 'SIGTERM') => {
     if (child.pid === undefined) return
 
-    // bwrap ignores SIGTERM and pasta's SIGKILL to it can be refused by AppArmor, so every process under the sandbox gets SIGTERM itself
+    // bwrap ignores SIGTERM and pasta's SIGKILL to it can be refused by AppArmor, so every process under the sandbox gets the signal itself
     const descendants = (pid: number): number[] => {
       try {
         const children = readFileSync(`/proc/${pid}/task/${pid}/children`, 'utf8').split(' ').filter(Boolean).map(Number)
@@ -212,7 +212,7 @@ export const createSandbox = (
     const group = -child.pid
     for (const pid of [group, ...descendants(child.pid)]) {
       try {
-        process.kill(pid, 'SIGTERM')
+        process.kill(pid, signal)
       } catch {}
     }
     const timer = setTimeout(() => {
@@ -303,10 +303,10 @@ export const createSandbox = (
       await log?.remove()
     },
 
-    kill: async () => {
+    kill: async (signal: 'SIGTERM' | 'SIGKILL' = 'SIGTERM') => {
       if (status === 'failed' || status === 'stopped') return
       status = 'stopped'
-      await killTree()
+      await killTree(signal)
     },
 
     use: () => {

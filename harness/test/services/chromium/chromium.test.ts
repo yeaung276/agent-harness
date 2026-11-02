@@ -64,7 +64,7 @@ beforeAll(async () => {
 afterEach(async () => {
   await browser?.stop()
   browser = undefined
-})
+}, 15_000)
 
 afterAll(() => {
   for (const server of servers) server.stop(true)
