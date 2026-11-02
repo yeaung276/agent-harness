@@ -58,7 +58,7 @@ services:
   worker:
     build:
       context: .
-      dockerfile: harness/build/worker.Dockerfile
+      dockerfile: harness/build/default.worker.Dockerfile
     env_file: harness/.env
     environment:
       NODE_ENV: production
@@ -81,7 +81,7 @@ services:
   worker-1:
     build:
       context: .
-      dockerfile: harness/build/worker.Dockerfile
+      dockerfile: harness/build/default.worker.Dockerfile
     env_file: harness/.env
     environment:
       NODE_ENV: production
