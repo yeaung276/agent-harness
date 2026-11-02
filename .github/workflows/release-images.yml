@@ -1,11 +1,11 @@
 name: release images
 
 on:
-  release:
-    types: [published]
+  push:
+    tags: ['v*']
 
 permissions:
-  contents: read
+  contents: write
   packages: write
 
 jobs:
@@ -49,7 +49,15 @@ jobs:
           file: ${{ matrix.dockerfile }}
           push: true
           tags: |
-            ghcr.io/${{ github.repository_owner }}/agent-harness-${{ matrix.name }}:${{ github.event.release.tag_name }}
+            ghcr.io/${{ github.repository_owner }}/agent-harness-${{ matrix.name }}:${{ github.ref_name }}
             ghcr.io/${{ github.repository_owner }}/agent-harness-${{ matrix.name }}:latest
           cache-from: type=gha,scope=${{ matrix.name }}
           cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+
+  release:
+    needs: images
+    runs-on: ubuntu-latest
+    steps:
+      - run: gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
