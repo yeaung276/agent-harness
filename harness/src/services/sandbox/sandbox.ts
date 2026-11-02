@@ -199,10 +199,22 @@ export const createSandbox = (
   const killTree = async () => {
     if (child.pid === undefined) return
 
+    // bwrap ignores SIGTERM and pasta's SIGKILL to it can be refused by AppArmor, so every process under the sandbox gets SIGTERM itself
+    const descendants = (pid: number): number[] => {
+      try {
+        const children = readFileSync(`/proc/${pid}/task/${pid}/children`, 'utf8').split(' ').filter(Boolean).map(Number)
+        return children.flatMap(next => [next, ...descendants(next)])
+      } catch {
+        return []
+      }
+    }
+
     const group = -child.pid
-    try {
-      process.kill(group, 'SIGTERM')
-    } catch {}
+    for (const pid of [group, ...descendants(child.pid)]) {
+      try {
+        process.kill(pid, 'SIGTERM')
+      } catch {}
+    }
     const timer = setTimeout(() => {
       try {
         process.kill(group, 'SIGKILL')
