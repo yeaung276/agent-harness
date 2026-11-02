@@ -4,13 +4,13 @@ import type { Duplex } from 'node:stream'
 
 import { logger } from '../../logger.ts'
 import type { createSandboxManager } from './manager.ts'
-import type { createSandbox } from './sandbox.ts'
+import type { Sandbox } from './sandbox.ts'
 
 const log = logger('port-forwarder')
 
 export const WORKSPACE_APP_HEADER = 'x-workspace-app'
 
-type Target = { launched: ReturnType<typeof createSandbox>; port: number } | { statusCode: number; message: string }
+type Target = { launched: Sandbox; port: number } | { statusCode: number; message: string }
 
 export const portForwarder = (manager: ReturnType<typeof createSandboxManager>) => {
   const target = async (workspaceId: string): Promise<Target> => {

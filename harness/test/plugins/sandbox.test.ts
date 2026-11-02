@@ -46,13 +46,16 @@ const startWorker = async () => {
       body: JSON.stringify(body),
     })
 
+  const workspace = async () =>
+    (await app.services.workspaces.create(user!.id, `ws-${crypto.randomUUID().slice(0, 8)}`)).id
+
   const launched = async (command = SERVER) => {
-    const { id } = await app.services.workspaces.create(user!.id, `ws-${crypto.randomUUID().slice(0, 8)}`)
+    const id = await workspace()
     expect((await post('/launch', { workspaceId: id, command, port: 3000 })).status).toBe(204)
     return id
   }
 
-  return { app, base, post, launched }
+  return { app, base, post, workspace, launched }
 }
 
 afterAll(() => rm(root, { recursive: true, force: true }))
@@ -93,19 +96,29 @@ describe('a worker', () => {
     expect(row!.status).toBe('stopped')
   })
 
-  test("puts a launch's log in Redis under launch-logs:<workspaceId>, ending with how it ended", async () => {
-    const { app, launched } = worker
-    const id = await launched('echo "Error: Cannot find module express"; exit 1')
-
-    const deadline = Date.now() + 10_000
-    while ((await readRedisLog(app.redis, `launch-logs:${id}`, 10)).at(-1) !== 'exited with code 1') {
-      if (Date.now() > deadline) throw new Error('timed out waiting for the launch log')
-      await Bun.sleep(100)
-    }
-    expect(await readRedisLog(app.redis, `launch-logs:${id}`, 10)).toEqual([
+  test('answers 502 with the log of a launch that exits before it listens, and keeps that log in Redis under launch-log:<workspaceId>', async () => {
+    const { app, post, workspace } = worker
+    const id = await workspace()
+    const lines = [
       'Error: Cannot find module express',
       'exited with code 1',
-    ])
+      'If deps are missing, put the install step in the launch command, e.g. "npm ci && npm start".',
+    ]
+
+    const res = await post('/launch', {
+      workspaceId: id,
+      command: 'echo "Error: Cannot find module express"; exit 1',
+      port: 3000,
+    })
+
+    expect(res.status).toBe(502)
+    expect(((await res.json()) as { message: string }).message).toBe(`The app didn't start:\n${lines.join('\n')}`)
+    expect(await readRedisLog(app.redis, `launch-log:${id}`, 10)).toEqual(lines)
+    const [row] = await app.db
+      .select({ launchOptions: workspaces.launchOptions })
+      .from(workspaces)
+      .where(eq(workspaces.id, id))
+    expect(row!.launchOptions).toBeNull()
   })
 
   test('refuses an internal call with a bad body', async () => {

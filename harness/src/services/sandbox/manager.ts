@@ -9,13 +9,16 @@ import { depsCache } from './deps-cache.ts'
 import { createRedisLog } from './log.ts'
 import { type NetworkRules, PROXY_PORT } from './network-controller.ts'
 import { portPool } from './port-pool.ts'
-import { createSandbox } from './sandbox.ts'
+import { type Sandbox, createSandbox } from './sandbox.ts'
 
 const log = logger('sandbox-manager')
 
 const READY_TIMEOUT_MS = 90 * 1000
+const MISSING_DEPS_HINT = 'If deps are missing, put the install step in the launch command, e.g. "npm ci && npm start".'
 
-export const launchLogKey = (workspaceId: string) => `launch-logs:${workspaceId}`
+const isLive = (sandbox: Sandbox | undefined) => sandbox?.status() === 'starting' || sandbox?.status() === 'running'
+
+export const launchLogKey = (workspaceId: string) => `launch-log:${workspaceId}`
 
 export type LaunchOptions = { command: string; port: number; env: Record<string, string>; network: NetworkRules }
 
@@ -48,7 +51,7 @@ export const createSandboxManager = ({
   idleMs: number
   depsRoot: string
 }) => {
-  const sandboxes = new Map<string, ReturnType<typeof createSandbox>>()
+  const sandboxes = new Map<string, Sandbox>()
   const ports = portPool(portMin, portMax)
   const deps = depsCache(depsRoot)
   const locks = new Map<string, Promise<unknown>>()
@@ -74,7 +77,7 @@ export const createSandboxManager = ({
     workspaceId: string,
     kind: 'launch' | 'exec',
     command: string,
-    sandbox: ReturnType<typeof createSandbox>,
+    sandbox: Sandbox,
     status: 'succeeded' | 'failed',
     exitCode: number | null
   ) => {
@@ -100,7 +103,7 @@ export const createSandboxManager = ({
       return null
     }
 
-    await sandboxes.get(workspaceId)?.deleteLogs()
+    const launchLog = createRedisLog(redis, launchLogKey(workspaceId))
     const launched = createSandbox(workspaceId, {
       dir,
       mounts,
@@ -113,9 +116,10 @@ export const createSandboxManager = ({
       network,
       ports: { inside: port, host: hostPort },
       readyTimeoutMs: READY_TIMEOUT_MS,
-      log: createRedisLog(redis, launchLogKey(workspaceId)),
+      log: launchLog,
     })
     sandboxes.set(workspaceId, launched)
+    await workspaces.setStatus(workspaceId, 'starting')
     log.info({ workspaceId, port: hostPort }, 'workspace app launching')
 
     void launched.ready().then(
@@ -129,45 +133,53 @@ export const createSandboxManager = ({
         await settle(workspaceId, 'launch', command, launched, 'failed', await launched.exited())
       }
     )
-    // every way a sandbox ends, stop, sweep, shutdown or on its own, comes through here
     void launched.exited().then(async exitCode => {
-      ports.release(hostPort)
-      await launched.deleteLogs()
-      if (sandboxes.has(workspaceId) && sandboxes.get(workspaceId) !== launched) return
-
-      await placement.releaseWorkspace(workspaceId)
-      if (launched.status() === 'failed') {
-        log.warn({ workspaceId, exitCode }, 'workspace app exited on its own')
-        await workspaces.setStatus(workspaceId, 'stopped')
-      }
+      if (launched.status() === 'failed') launchLog.write(`${MISSING_DEPS_HINT}\n`)
+      // for now every way a sandbox ends, stop, sweep, shutdown or a crash, is dropped here, as a crash has no caller to do it
+      await locked(workspaceId, () => drop(workspaceId, launched, exitCode))
     })
 
     return launched
   }
 
+  const drop = async (workspaceId: string, launched: Sandbox, exitCode: number | null) => {
+    ports.release(launched.hostPort!)
+    await launched.deleteLogs()
+    if (sandboxes.has(workspaceId) && sandboxes.get(workspaceId) !== launched) return
+
+    await placement.releaseWorkspace(workspaceId)
+    if (launched.status() === 'failed') {
+      log.warn({ workspaceId, exitCode }, 'workspace app exited on its own')
+      await workspaces.setStatus(workspaceId, 'stopped')
+    }
+  }
+
   return {
-    launch: (workspaceId: string, { command, port, env, network }: LaunchOptions) =>
-      locked(workspaceId, async () => {
-        if (port === PROXY_PORT) throw new HttpError(400, `Port ${PROXY_PORT} is held by the sandbox's proxy`)
+    launch: async (workspaceId: string, { command, port, env, network }: LaunchOptions) => {
+      if (port === PROXY_PORT) throw new HttpError(400, `Port ${PROXY_PORT} is held by the sandbox's proxy`)
 
-        const options = { command, port, network, env: { ...(await getDefaultEnv(workspaceId, port)), ...env } }
+      const options = { command, port, network, env: { ...(await getDefaultEnv(workspaceId, port)), ...env } }
 
-        const status = sandboxes.get(workspaceId)?.status()
-        if (status === 'starting' || status === 'running')
-          throw new HttpError(409, 'A background process is already running')
-        if (!(await start(workspaceId, options))) throw new HttpError(503, 'No free port on this worker')
+      const launched = await locked(workspaceId, async () => {
+        if (isLive(sandboxes.get(workspaceId))) throw new HttpError(409, 'A background process is already running')
 
-        await workspaces.setLaunchOptions(workspaceId, options)
-      }),
+        return start(workspaceId, options)
+      })
+      if (!launched) throw new HttpError(503, 'No free port on this worker')
+
+      await launched.ready().catch(() => {})
+      if (launched.status() !== 'running')
+        throw new HttpError(502, `The app didn't start:\n${(await launched.logs(20, true)).join('\n')}`)
+
+      await workspaces.setLaunchOptions(workspaceId, options)
+    },
 
     exec: async (workspaceId: string, { command, timeoutMs, env }: ExecOptions) => {
       const launched = sandboxes.get(workspaceId)
-      const status = launched?.status()
-      const server = status === 'starting' || status === 'running' ? launched : undefined
+      const server = isLive(launched) ? launched : undefined
 
       const dir = workspaces.getWorkspaceRoot(workspaceId)
       const { mounts, env: depsEnv } = await deps.mounts(workspaceId, dir)
-      const childEnv = { ...depsEnv, ...(await getDefaultEnv(workspaceId, server?.port ?? null)), ...env }
 
       const child = createSandbox(workspaceId, {
         dir,
@@ -177,7 +189,7 @@ export const createSandboxManager = ({
         cpuMax,
         pidsMax,
         command,
-        env: childEnv,
+        env: { ...depsEnv, ...(await getDefaultEnv(workspaceId, server?.port ?? null)), ...env },
         joinPid: server?.pid,
       })
 
@@ -211,7 +223,6 @@ export const createSandboxManager = ({
 
     stop: (workspaceId: string) =>
       locked(workspaceId, async () => {
-        await workspaces.setLaunchOptions(workspaceId, null)
         await sandboxes.get(workspaceId)?.kill()
         sandboxes.delete(workspaceId)
         await workspaces.setStatus(workspaceId, 'stopped')
@@ -220,8 +231,10 @@ export const createSandboxManager = ({
 
     count: () => sandboxes.size,
 
-    hostPort: (workspaceId: string) =>
-      sandboxes.get(workspaceId)?.status() === 'running' ? sandboxes.get(workspaceId)!.hostPort : null,
+    hostPort: (workspaceId: string) => {
+      const launched = sandboxes.get(workspaceId)
+      return launched?.status() === 'running' ? launched.hostPort : null
+    },
 
     wake: async (workspaceId: string) => {
       const launched = await locked(workspaceId, async () => {
@@ -231,10 +244,8 @@ export const createSandboxManager = ({
         const options = await workspaces.getLaunchOptions(workspaceId)
         return options ? start(workspaceId, options) : null
       })
-      if (!launched) return null
 
-      if (launched.status() === 'starting') await launched.ready().catch(() => {})
-
+      await launched?.ready().catch(() => {})
       return launched
     },
 
@@ -246,11 +257,8 @@ export const createSandboxManager = ({
               (launched.status() === 'running' || launched.status() === 'failed') && launched.isIdle(idleMs)
           )
           .map(async ([workspaceId, launched]) => {
-            if (launched.status() === 'running') {
-              log.info({ workspaceId }, 'stopping idle workspace app')
-              await launched.kill()
-              await launched.deleteLogs()
-            }
+            if (launched.status() === 'running') log.info({ workspaceId }, 'stopping idle workspace app')
+            await launched.kill()
             if (sandboxes.get(workspaceId) !== launched) return
             sandboxes.delete(workspaceId)
             await workspaces.setStatus(workspaceId, 'stopped')
@@ -261,10 +269,9 @@ export const createSandboxManager = ({
     stopAll: async () => {
       await Promise.all(
         [...sandboxes]
-          .filter(([, launched]) => launched.status() === 'starting' || launched.status() === 'running')
+          .filter(([, launched]) => isLive(launched))
           .map(async ([workspaceId, launched]) => {
             await launched.kill()
-            await launched.deleteLogs()
             if (sandboxes.get(workspaceId) !== launched) return
             sandboxes.delete(workspaceId)
             await workspaces.setStatus(workspaceId, 'stopped')

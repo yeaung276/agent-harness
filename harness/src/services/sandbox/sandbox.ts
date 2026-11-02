@@ -6,7 +6,7 @@ import { join } from 'node:path'
 
 import type { Config } from '../../config.ts'
 import type { Mount } from './deps-cache.ts'
-import { createLog } from './log.ts'
+import { type Log, createLog } from './log.ts'
 import { createNetworkController, type NetworkRules, PROXY_ENV, PROXY_PORT } from './network-controller.ts'
 
 const CGROUP_ROOT = '/sys/fs/cgroup'
@@ -26,12 +26,14 @@ export type SandboxOptions = {
   outboundPorts?: string
   readyTimeoutMs?: number
   joinPid?: number
-  // 'log' (default) writes stdout and stderr to a log file read by logs(); 'pipe' hands stdout back as the sandbox's stdout stream and drops stderr: nothing is written to a log file, and logs() returns nothing
+  // 'log' (default) writes stdout and stderr to the log read by logs(); 'pipe' hands stdout back as the sandbox's stdout stream and drops stderr: nothing is logged, and logs() returns nothing
   stdout?: 'log' | 'pipe'
-  log?: ReturnType<typeof createLog> | null
+  log?: Log | null
 }
 
 export type SandboxStatus = 'starting' | 'running' | 'failed' | 'stopped'
+
+export type Sandbox = ReturnType<typeof createSandbox>
 
 export const createSandbox = (
   workspaceId: string,
@@ -157,12 +159,15 @@ export const createSandbox = (
     command,
   ]
 
+  // a logged command writes stdout and stderr to one pipe, so the log keeps them in the order written
+  const merge = log ? 'exec 2>&1; ' : ''
   const args =
     mode === 'none'
-      ? ['-c', command]
+      ? ['-c', merge + command]
       : [
           '-c',
-          'set -e; cg=$1; mkdir -p "$cg"; echo "$2" > "$cg/memory.max"; echo "$3" > "$cg/cpu.max"; ' +
+          merge +
+            'set -e; cg=$1; mkdir -p "$cg"; echo "$2" > "$cg/memory.max"; echo "$3" > "$cg/cpu.max"; ' +
             'echo "$4" > "$cg/pids.max"; [ ! -f "$cg/memory.swap.max" ] || echo 0 > "$cg/memory.swap.max"; ' +
             'echo $$ > "$cg/cgroup.procs"; shift 4; exec "$@"',
           'sh',
@@ -186,9 +191,10 @@ export const createSandbox = (
       ...(mode === 'none' && ports ? { PORT: String(ports.host) } : {}),
     },
     detached: true,
-    stdio: log ? ['ignore', log.fd, log.fd] : ['ignore', 'pipe', 'ignore'],
+    stdio: ['ignore', 'pipe', 'ignore'],
   })
   child.on('error', error => log?.write(`${error.message}\n`))
+  if (log) child.stdout.setEncoding('utf8').on('data', log.write)
 
   const killTree = async () => {
     if (child.pid === undefined) return
@@ -277,7 +283,7 @@ export const createSandbox = (
 
     exited: () => finished,
 
-    stdout: child.stdout,
+    stdout: log ? null : child.stdout,
 
     logs: async (tail: number, clean?: boolean) => (await log?.tail(tail, clean)) ?? [],
 

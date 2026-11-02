@@ -190,7 +190,7 @@ describe('exec', () => {
 
 describe('logs', () => {
   test("are the last tail lines of the workspace's launch log in Redis, read without calling a worker", async () => {
-    await app.redis.set(`launch-logs:${id}`, 'listening on 3000\nGET / 200\nexited with code 1')
+    await app.redis.rpush(`launch-log:${id}`, 'listening on 3000', 'GET / 200', 'exited with code 1')
 
     const res = await app.inject({ url: `/api/v1/workspaces/${id}/sandbox/logs?tail=2`, headers })
 
@@ -200,7 +200,7 @@ describe('logs', () => {
   })
 
   test('are there when no worker is left', async () => {
-    await app.redis.set(`launch-logs:${id}`, 'Error: Cannot find module express\nexited with code 1')
+    await app.redis.rpush(`launch-log:${id}`, 'Error: Cannot find module express', 'exited with code 1')
     await app.redis.del('pods:worker-0', 'pods:worker-1')
 
     const res = await app.inject({ url: `/api/v1/workspaces/${id}/sandbox/logs`, headers })
@@ -238,15 +238,16 @@ describe('stop', () => {
     expect(sent).toEqual([{ worker: 'worker-0', path: '/internal/sandbox/stop', body: { workspaceId: id } }])
   })
 
-  test('with nothing running clears the saved launch and records stopped itself, so a request cannot wake it', async () => {
-    await app.services.workspaces.setLaunchOptions(id, { command: 'npm run dev', port: 3000, env: {}, network: {} })
+  test('with nothing running records stopped itself and keeps the saved launch, so a request can wake it', async () => {
+    const options = { command: 'npm run dev', port: 3000, env: {}, network: {} }
+    await app.services.workspaces.setLaunchOptions(id, options)
     await app.services.workspaces.setStatus(id, 'running')
 
     const res = await post(`/api/v1/workspaces/${id}/sandbox/stop`)
 
     expect(res.statusCode).toBe(204)
     expect(sent).toEqual([])
-    expect(await app.services.workspaces.getLaunchOptions(id)).toBeNull()
+    expect(await app.services.workspaces.getLaunchOptions(id)).toEqual(options)
     expect((await app.services.workspaces.get(id)).status).toBe('stopped')
   })
 

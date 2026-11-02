@@ -111,12 +111,18 @@ mock.module('../../../src/services/sandbox/sandbox.ts', () => ({
 }))
 
 mock.module('../../../src/services/sandbox/log.ts', () => ({
-  createRedisLog: (_redis: unknown, key: string) => ({ key }),
+  createRedisLog: (_redis: unknown, key: string) => {
+    const written: string[] = []
+    return { key, written, write: (text: string) => void written.push(text) }
+  },
 }))
 
 const { createSandboxManager } = await import('../../../src/services/sandbox/manager.ts')
 
 type LaunchOptions = Parameters<ReturnType<typeof createSandboxManager>['launch']>[1]
+
+const MISSING_DEPS_HINT =
+  'If deps are missing, put the install step in the launch command, e.g. "npm ci && npm start".\n'
 
 const lag = () => Bun.sleep(Math.random() * 3)
 
@@ -137,7 +143,7 @@ const addFiles = async (id: string, files: Record<string, string>) => {
 const fakeWorkspaces = () => {
   const known = new Set(['ws-1', 'ws-2', 'ws-3'])
   const defaultEnvs = new Map<string, Record<string, string>>()
-  const statuses = new Map<string, 'running' | 'stopped'>()
+  const statuses = new Map<string, 'starting' | 'running' | 'stopped'>()
   const saved = new Map<string, LaunchOptions | null>()
 
   return {
@@ -150,7 +156,7 @@ const fakeWorkspaces = () => {
       if (!known.has(id)) throw new HttpError(404, 'Workspace not found')
       return { ...defaultEnvs.get(id) }
     },
-    setStatus: async (id: string, status: 'running' | 'stopped') => {
+    setStatus: async (id: string, status: 'starting' | 'running' | 'stopped') => {
       await lag()
       calls.push(`status ${id} ${status}`)
       statuses.set(id, status)
@@ -223,6 +229,8 @@ let manager: ReturnType<typeof createSandboxManager>
 const launchesOf = (id: string) => fakes.filter(fake => fake.workspaceId === id && fake.options.ports)
 const execsOf = (id: string) => fakes.filter(fake => fake.workspaceId === id && !fake.options.ports)
 const latestLaunch = (id: string) => launchesOf(id).at(-1)!
+const writtenTo = (launched: ReturnType<typeof fakeSandbox>) =>
+  (launched.options.log as unknown as { written: string[] }).written
 
 const until = async (check: () => boolean, what: string) => {
   const deadline = Date.now() + 2000
@@ -232,10 +240,18 @@ const until = async (check: () => boolean, what: string) => {
   }
 }
 
+const startLaunch = async (id: string, options = devServer) => {
+  const before = launchesOf(id).length
+  const pending = manager.launch(id, options)
+  pending.catch(() => {})
+  await until(() => launchesOf(id).length > before, `${id} launch`)
+  return { pending, launched: latestLaunch(id) }
+}
+
 const bringUp = async (id: string, options = devServer) => {
-  await manager.launch(id, options)
-  const launched = latestLaunch(id)
+  const { pending, launched } = await startLaunch(id, options)
   launched.listen()
+  await pending
   await until(() => workspaces.statuses.get(id) === 'running', `${id} running`)
   return launched
 }
@@ -270,39 +286,70 @@ beforeEach(() => {
 })
 
 describe('launch', () => {
-  test('starts the command in its workspace with its port mapped to a pool port, and answers before it listens', async () => {
-    await manager.launch('ws-1', devServer)
+  test('starts the command in its workspace with its port mapped to a pool port, records it starting, and answers once it listens', async () => {
+    const { pending, launched } = await startLaunch('ws-1')
+    let answered = false
+    void pending.finally(() => (answered = true))
 
     expect(launchesOf('ws-1')).toHaveLength(1)
-    expect(latestLaunch('ws-1').options).toMatchObject({
+    expect(launched.options).toMatchObject({
       dir: workspaceDir('ws-1'),
       command: 'npm run dev',
       ports: { inside: 3000, host: 4100 },
     })
-    expect(latestLaunch('ws-1').status()).toBe('starting')
-    expect(workspaces.statuses.get('ws-1')).toBeUndefined()
+    await until(() => workspaces.statuses.get('ws-1') === 'starting', 'starting')
+    await Bun.sleep(20)
+    expect(answered).toBe(false)
+
+    launched.listen()
+    await pending
   })
 
   test('gives the command 90 s to start listening', async () => {
-    await manager.launch('ws-1', devServer)
+    const { launched } = await startLaunch('ws-1')
 
-    expect(latestLaunch('ws-1').options.readyTimeoutMs).toBe(90_000)
+    expect(launched.options.readyTimeoutMs).toBe(90_000)
   })
 
   test('records the workspace running once the command listens', async () => {
-    await manager.launch('ws-1', devServer)
+    const { pending, launched } = await startLaunch('ws-1')
 
-    latestLaunch('ws-1').listen()
+    launched.listen()
+    await pending
 
     await until(() => workspaces.statuses.get('ws-1') === 'running', 'running')
+  })
+
+  test('is a 502 with its last log lines when it exits before it listens, and saves nothing', async () => {
+    const { pending, launched } = await startLaunch('ws-1')
+    launched.lines.push('Error: Cannot find module express')
+
+    launched.crash()
+
+    await expect(pending).rejects.toMatchObject({
+      status: 502,
+      message: "The app didn't start:\nError: Cannot find module express",
+    })
+    expect(workspaces.saved.has('ws-1')).toBe(false)
+  })
+
+  test('is a 502 when nothing listens in time, and saves nothing', async () => {
+    const { pending, launched } = await startLaunch('ws-1')
+    launched.lines.push('nothing answered on port 3000 within 90 s')
+
+    launched.timeOut()
+    launched.die()
+
+    await expect(pending).rejects.toMatchObject({ status: 502 })
+    expect(workspaces.saved.has('ws-1')).toBe(false)
   })
 
   test("confines it with the sandbox mode, limits and the launch's network rules", async () => {
     const network = { deny: ['*'], allow: ['registry.npmjs.org'] }
 
-    await manager.launch('ws-1', { ...devServer, network })
+    const { launched } = await startLaunch('ws-1', { ...devServer, network })
 
-    expect(latestLaunch('ws-1').options).toMatchObject({
+    expect(launched.options).toMatchObject({
       mode: 'none',
       memoryMaxMb: 512,
       cpuMax: 1,
@@ -314,9 +361,9 @@ describe('launch', () => {
   test("sets PORT to the port it listens on, with the workspace's env and then the launch's env on top", async () => {
     workspaces.defaultEnvs.set('ws-1', { NODE_ENV: 'production', API_URL: 'https://a.example' })
 
-    await manager.launch('ws-1', { ...devServer, env: { API_URL: 'https://b.example' } })
+    const { launched } = await startLaunch('ws-1', { ...devServer, env: { API_URL: 'https://b.example' } })
 
-    expect(latestLaunch('ws-1').options.env).toEqual({
+    expect(launched.options.env).toEqual({
       PORT: '3000',
       NODE_ENV: 'production',
       API_URL: 'https://b.example',
@@ -327,17 +374,24 @@ describe('launch', () => {
     workspaces.defaultEnvs.set('ws-1', { PORT: '8080' })
     workspaces.defaultEnvs.set('ws-2', { PORT: '8080' })
 
-    await manager.launch('ws-1', devServer)
-    await manager.launch('ws-2', { ...devServer, env: { PORT: '9090' } })
+    await startLaunch('ws-1')
+    await startLaunch('ws-2', { ...devServer, env: { PORT: '9090' } })
 
     expect(latestLaunch('ws-1').options.env.PORT).toBe('8080')
     expect(latestLaunch('ws-2').options.env.PORT).toBe('9090')
   })
 
-  test('saves the launch with its merged env, so the workspace can wake exactly as launched', async () => {
+  test('saves the launch with its merged env once it listens, so the workspace can wake exactly as launched', async () => {
     workspaces.defaultEnvs.set('ws-1', { NODE_ENV: 'production' })
 
-    await manager.launch('ws-1', { ...devServer, env: { DEBUG: '1' }, network: { deny: ['*'] } })
+    const { pending, launched } = await startLaunch('ws-1', {
+      ...devServer,
+      env: { DEBUG: '1' },
+      network: { deny: ['*'] },
+    })
+    expect(workspaces.saved.has('ws-1')).toBe(false)
+    launched.listen()
+    await pending
 
     expect(workspaces.saved.get('ws-1')).toEqual({
       command: 'npm run dev',
@@ -350,7 +404,7 @@ describe('launch', () => {
   test("mounts the workspace's deps from its cache and sets their env, without saving that env", async () => {
     await addFiles('ws-1', { 'package.json': '{}', 'api/Gemfile': '' })
 
-    await manager.launch('ws-1', devServer)
+    await bringUp('ws-1')
 
     expect(latestLaunch('ws-1').options.mounts).toEqual([
       { source: join(dirs, 'deps', 'ws-1', 'node_modules'), target: 'node_modules' },
@@ -365,25 +419,30 @@ describe('launch', () => {
     await addFiles('ws-2', { Gemfile: '' })
     workspaces.defaultEnvs.set('ws-1', { BUNDLE_PATH: '/gems' })
 
-    await manager.launch('ws-1', devServer)
-    await manager.launch('ws-2', { ...devServer, env: { BUNDLE_PATH: '/other' } })
+    await startLaunch('ws-1')
+    await startLaunch('ws-2', { ...devServer, env: { BUNDLE_PATH: '/other' } })
 
     expect(latestLaunch('ws-1').options.env.BUNDLE_PATH).toBe('/gems')
     expect(latestLaunch('ws-2').options.env.BUNDLE_PATH).toBe('/other')
   })
 
   test('is a 409 while the last launch is starting or running, and starts nothing more', async () => {
-    await manager.launch('ws-1', devServer)
+    const { pending, launched } = await startLaunch('ws-1')
     await expect(manager.launch('ws-1', devServer)).rejects.toMatchObject({ status: 409 })
 
-    latestLaunch('ws-1').listen()
+    launched.listen()
+    await pending
     await expect(manager.launch('ws-1', devServer)).rejects.toMatchObject({ status: 409 })
 
     expect(launchesOf('ws-1')).toHaveLength(1)
   })
 
   test('lets only one of two racing launches through', async () => {
-    const results = await Promise.allSettled([manager.launch('ws-1', devServer), manager.launch('ws-1', devServer)])
+    const racing = Promise.allSettled([manager.launch('ws-1', devServer), manager.launch('ws-1', devServer)])
+    await until(() => launchesOf('ws-1').length === 1, 'launch')
+    await Bun.sleep(20)
+    latestLaunch('ws-1').listen()
+    const results = await racing
 
     expect(results.filter(result => result.status === 'fulfilled')).toHaveLength(1)
     expect(results.find(result => result.status === 'rejected')).toMatchObject({ reason: { status: 409 } })
@@ -391,8 +450,8 @@ describe('launch', () => {
   })
 
   test('is a 503 once every pool port is taken, and saves nothing', async () => {
-    await manager.launch('ws-1', devServer)
-    await manager.launch('ws-2', devServer)
+    await startLaunch('ws-1')
+    await startLaunch('ws-2')
 
     await expect(manager.launch('ws-3', devServer)).rejects.toMatchObject({ status: 503 })
 
@@ -410,52 +469,39 @@ describe('launch', () => {
   test('is a 404 for an unknown workspace, before taking a port', async () => {
     await expect(manager.launch('missing', devServer)).rejects.toMatchObject({ status: 404 })
 
-    await manager.launch('ws-1', devServer)
+    const { launched } = await startLaunch('ws-1')
 
     expect(launchesOf('missing')).toHaveLength(0)
-    expect(latestLaunch('ws-1').hostPort).toBe(4100)
+    expect(launched.hostPort).toBe(4100)
   })
 
   test('launches again over a launch that failed', async () => {
     const first = await bringUp('ws-1')
     first.crash()
 
-    await manager.launch('ws-1', devServer)
+    const { launched } = await startLaunch('ws-1')
 
     expect(launchesOf('ws-1')).toHaveLength(2)
-    expect(latestLaunch('ws-1').status()).toBe('starting')
+    expect(launched.status()).toBe('starting')
   })
 
   test('launches again after a stop, on the port the stop freed', async () => {
     await bringUp('ws-1')
-    await manager.launch('ws-2', devServer)
+    await startLaunch('ws-2')
     await manager.stop('ws-1')
 
-    await manager.launch('ws-1', devServer)
+    const { launched } = await startLaunch('ws-1')
 
-    expect(latestLaunch('ws-1').hostPort).toBe(4100)
+    expect(launched.hostPort).toBe(4100)
   })
 
-  test('deletes the log of the launch it replaces, and no others', async () => {
-    const first = await bringUp('ws-1')
-    const other = await bringUp('ws-2')
-    first.crash()
-    await until(() => workspaces.statuses.get('ws-1') === 'stopped', 'stopped')
-
-    await manager.launch('ws-1', devServer)
-
-    expect(first.logsDeleted).toBe(true)
-    expect(latestLaunch('ws-1').logsDeleted).toBe(false)
-    expect(other.logsDeleted).toBe(false)
-  })
-
-  test('gives the launch a Redis log under launch-logs:<workspaceId>, and an exec none', async () => {
-    await manager.launch('ws-1', devServer)
+  test('gives the launch a Redis log under launch-log:<workspaceId>, and an exec none', async () => {
+    const { launched } = await startLaunch('ws-1')
     const { pending, child } = await startExec('ws-1')
     child.finish(0)
     await pending
 
-    expect(latestLaunch('ws-1').options.log).toEqual({ key: 'launch-logs:ws-1' } as never)
+    expect(launched.options.log).toMatchObject({ key: 'launch-log:ws-1' })
     expect(child.options.log).toBeUndefined()
   })
 })
@@ -463,19 +509,19 @@ describe('launch', () => {
 describe('a launch ending on its own', () => {
   test('records the workspace stopped and frees its port', async () => {
     const launched = await bringUp('ws-1')
-    await manager.launch('ws-2', devServer)
+    await startLaunch('ws-2')
 
     launched.crash()
     await until(() => workspaces.statuses.get('ws-1') === 'stopped', 'stopped')
 
-    await manager.launch('ws-3', devServer)
-    expect(latestLaunch('ws-3').hostPort).toBe(4100)
+    const { launched: next } = await startLaunch('ws-3')
+    expect(next.hostPort).toBe(4100)
   })
 
   test('never records running for a command that dies before it listens', async () => {
-    await manager.launch('ws-1', devServer)
+    const { launched } = await startLaunch('ws-1')
 
-    latestLaunch('ws-1').crash()
+    launched.crash()
     await until(() => workspaces.statuses.get('ws-1') === 'stopped', 'stopped')
 
     expect(calls).not.toContain('status ws-1 running')
@@ -491,9 +537,26 @@ describe('a launch ending on its own', () => {
     expect(launched.logsDeleted).toBe(true)
   })
 
+  test('writes the install-step advice to its log, before deleting it', async () => {
+    const { launched } = await startLaunch('ws-1')
+
+    launched.crash()
+    await until(() => launched.logsDeleted, 'log deleted')
+
+    expect(writtenTo(launched)).toEqual([MISSING_DEPS_HINT])
+  })
+
+  test("doesn't write the advice when it is stopped", async () => {
+    const launched = await bringUp('ws-1')
+
+    await manager.stop('ws-1')
+    await until(() => launched.logsDeleted, 'log deleted')
+
+    expect(writtenTo(launched)).toEqual([])
+  })
+
   test('leaves the status alone when it ends after a newer launch took its place', async () => {
-    await manager.launch('ws-1', devServer)
-    const timedOut = latestLaunch('ws-1')
+    const { launched: timedOut } = await startLaunch('ws-1')
     timedOut.timeOut()
     await bringUp('ws-1')
     const before = calls.length
@@ -526,13 +589,13 @@ describe('exec', () => {
 
   test('mounts the same deps as the launch, with their env', async () => {
     await addFiles('ws-1', { 'package.json': '{}', Gemfile: '' })
-    await manager.launch('ws-1', devServer)
+    const { launched } = await startLaunch('ws-1')
 
     const { pending, child } = await startExec('ws-1', 'npm install')
     child.finish(0)
     await pending
 
-    expect(child.options.mounts).toEqual(latestLaunch('ws-1').options.mounts)
+    expect(child.options.mounts).toEqual(launched.options.mounts)
     expect(child.options.env.BUNDLE_PATH).toBe('vendor/bundle')
   })
 
@@ -620,13 +683,13 @@ describe('exec', () => {
   })
 
   test('joins a launch that is still starting', async () => {
-    await manager.launch('ws-1', devServer)
+    const { launched } = await startLaunch('ws-1')
 
     const { pending, child } = await startExec('ws-1')
     child.finish(0)
     await pending
 
-    expect(child.options.joinPid).toBe(latestLaunch('ws-1').pid)
+    expect(child.options.joinPid).toBe(launched.pid)
   })
 
   test('gets its own network again once the launch has stopped or failed', async () => {
@@ -667,8 +730,8 @@ describe('exec', () => {
   test("isn't kept: it takes no pool port and doesn't block a launch", async () => {
     const { pending, child } = await startExec('ws-1', 'npm install')
 
-    await manager.launch('ws-1', devServer)
-    expect(latestLaunch('ws-1').hostPort).toBe(4100)
+    const { launched } = await startLaunch('ws-1')
+    expect(launched.hostPort).toBe(4100)
 
     child.finish(0)
     await pending
@@ -698,25 +761,28 @@ describe('exec', () => {
 describe('stop', () => {
   test('kills the launch, records stopped and frees its port', async () => {
     const launched = await bringUp('ws-1')
-    await manager.launch('ws-2', devServer)
+    await startLaunch('ws-2')
 
     await manager.stop('ws-1')
 
     expect(launched.kills).toBe(1)
     expect(workspaces.statuses.get('ws-1')).toBe('stopped')
-    await manager.launch('ws-3', devServer)
-    expect(latestLaunch('ws-3').hostPort).toBe(4100)
+    const { launched: next } = await startLaunch('ws-3')
+    expect(next.hostPort).toBe(4100)
   })
 
-  test("clears the saved launch before killing, so a request can't bring it back", async () => {
+  test('keeps the saved launch, so the next request wakes it again', async () => {
     await bringUp('ws-1')
     const before = calls.length
 
     await manager.stop('ws-1')
 
-    expect(calls.slice(before)).toEqual(['options ws-1 cleared', 'kill ws-1', 'status ws-1 stopped'])
-    expect(await manager.wake('ws-1')).toBeNull()
-    expect(launchesOf('ws-1')).toHaveLength(1)
+    expect(calls.slice(before)).toEqual(['kill ws-1', 'status ws-1 stopped'])
+    expect(workspaces.saved.get('ws-1')).toMatchObject({ command: 'npm run dev' })
+    const woken = manager.wake('ws-1')
+    await until(() => launchesOf('ws-1').length === 2, 'relaunch')
+    latestLaunch('ws-1').listen()
+    expect(await woken).toBe(latestLaunch('ws-1'))
   })
 
   test('drops the launch from the count', async () => {
@@ -728,20 +794,22 @@ describe('stop', () => {
     expect(manager.count()).toBe(1)
   })
 
-  test('records stopped and clears the saved launch when nothing runs', async () => {
+  test('records stopped when nothing runs, and leaves the saved launch', async () => {
+    workspaces.saved.set('ws-1', devServer)
+
     await manager.stop('ws-1')
 
     expect(workspaces.statuses.get('ws-1')).toBe('stopped')
-    expect(workspaces.saved.get('ws-1')).toBeNull()
+    expect(workspaces.saved.get('ws-1')).toEqual(devServer)
   })
 
-  test('stops a launch that is still starting, and it never records running', async () => {
-    await manager.launch('ws-1', devServer)
+  test('stops a launch that is still starting, which then answers 502, and it never records running', async () => {
+    const { pending, launched } = await startLaunch('ws-1')
 
     await manager.stop('ws-1')
-    await Bun.sleep(20)
 
-    expect(latestLaunch('ws-1').status()).toBe('stopped')
+    await expect(pending).rejects.toMatchObject({ status: 502 })
+    expect(launched.status()).toBe('stopped')
     expect(calls).not.toContain('status ws-1 running')
     expect(workspaces.statuses.get('ws-1')).toBe('stopped')
   })
@@ -765,21 +833,27 @@ describe('stop', () => {
     expect(launchesOf('ws-1')).toHaveLength(1)
 
     first.die()
-    await Promise.all([stopping, launching])
+    await stopping
+    await until(() => launchesOf('ws-1').length === 2, 'relaunch')
     latestLaunch('ws-1').listen()
+    await launching
 
     await until(() => workspaces.statuses.get('ws-1') === 'running', 'running')
     expect(workspaces.saved.get('ws-1')).toMatchObject({ command: 'npm run dev' })
   })
 
-  test('sent together with a launch, ends the way the later one asked', async () => {
+  test('sent while a launch is starting ends it; a launch sent after a stop runs', async () => {
     for (let round = 0; round < 10; round++) {
-      await Promise.all([manager.launch('ws-1', devServer), manager.stop('ws-1')])
+      const { pending } = await startLaunch('ws-1')
+      await manager.stop('ws-1')
+      await expect(pending).rejects.toMatchObject({ status: 502 })
       expect(latestLaunch('ws-1').status()).toBe('stopped')
-      expect(workspaces.saved.get('ws-1')).toBeNull()
 
-      await Promise.all([manager.stop('ws-1'), manager.launch('ws-1', devServer)])
-      expect(latestLaunch('ws-1').status()).toBe('starting')
+      const both = Promise.all([manager.stop('ws-1'), manager.launch('ws-1', devServer)])
+      await until(() => latestLaunch('ws-1').status() === 'starting', 'relaunch')
+      latestLaunch('ws-1').listen()
+      await both
+      expect(latestLaunch('ws-1').status()).toBe('running')
       expect(workspaces.saved.get('ws-1')).toMatchObject({ command: 'npm run dev' })
 
       await manager.stop('ws-1')
@@ -796,23 +870,24 @@ describe('wake', () => {
   })
 
   test('holds while the launch starts, until it listens', async () => {
-    await manager.launch('ws-1', devServer)
+    const { pending, launched } = await startLaunch('ws-1')
 
     let answered = false
     const woken = manager.wake('ws-1').finally(() => (answered = true))
     await Bun.sleep(20)
     expect(answered).toBe(false)
-    latestLaunch('ws-1').listen()
+    launched.listen()
 
-    expect(await woken).toBe(latestLaunch('ws-1'))
-    expect(latestLaunch('ws-1').status()).toBe('running')
+    expect(await woken).toBe(launched)
+    expect(launched.status()).toBe('running')
+    await pending
   })
 
   test('stops holding when the launch fails while starting', async () => {
-    await manager.launch('ws-1', devServer)
+    const { launched } = await startLaunch('ws-1')
 
     const woken = manager.wake('ws-1')
-    latestLaunch('ws-1').crash()
+    launched.crash()
 
     expect((await woken)?.status()).toBe('failed')
   })
@@ -891,34 +966,24 @@ describe('wake', () => {
     expect(launchesOf('ws-1')).toHaveLength(0)
   })
 
-  test('is null after a stop', async () => {
+  test('starts it again after a stop, from the saved launch', async () => {
     await bringUp('ws-1')
     await manager.stop('ws-1')
 
-    expect(await manager.wake('ws-1')).toBeNull()
-    expect(launchesOf('ws-1')).toHaveLength(1)
+    const woken = manager.wake('ws-1')
+    await until(() => launchesOf('ws-1').length === 2, 'relaunch')
+    latestLaunch('ws-1').listen()
+
+    expect(await woken).toBe(latestLaunch('ws-1'))
   })
 
   test('is null when no pool port is free', async () => {
     workspaces.saved.set('ws-1', devServer)
-    await manager.launch('ws-2', devServer)
-    await manager.launch('ws-3', devServer)
+    await startLaunch('ws-2')
+    await startLaunch('ws-3')
 
     expect(await manager.wake('ws-1')).toBeNull()
     expect(launchesOf('ws-1')).toHaveLength(0)
-  })
-
-  test('never brings back a workspace stopped at the same time', async () => {
-    for (let round = 0; round < 10; round++) {
-      const swept = await bringUp('ws-1')
-      swept.idle = true
-      await manager.stopIdle()
-
-      const [, woken] = await Promise.all([manager.stop('ws-1'), manager.wake('ws-1')])
-
-      expect(woken).toBeNull()
-      expect(latestLaunch('ws-1')).toBe(swept)
-    }
   })
 })
 
@@ -931,7 +996,7 @@ describe('stopIdle', () => {
     await manager.stopIdle()
 
     expect(idle.kills).toBe(1)
-    expect(idle.logsDeleted).toBe(true)
+    await until(() => idle.logsDeleted, 'log deleted')
     expect(workspaces.statuses.get('ws-1')).toBe('stopped')
     expect(workspaces.saved.get('ws-1')).toMatchObject({ command: 'npm run dev' })
     expect(busy.kills).toBe(0)
@@ -949,7 +1014,7 @@ describe('stopIdle', () => {
     expect(manager.count()).toBe(1)
   })
 
-  test('drops a failed launch idle for the idle time without killing it, so the next wake starts it again', async () => {
+  test('drops a failed launch idle for the idle time, so the next wake starts it again', async () => {
     const failed = await bringUp('ws-1')
     failed.crash()
     await until(() => workspaces.statuses.get('ws-1') === 'stopped', 'stopped')
@@ -957,7 +1022,8 @@ describe('stopIdle', () => {
 
     await manager.stopIdle()
 
-    expect(failed.kills).toBe(0)
+    expect(failed.kills).toBe(1)
+    expect(failed.status()).toBe('failed')
     expect(manager.count()).toBe(0)
     const woken = manager.wake('ws-1')
     await until(() => launchesOf('ws-1').length === 2, 'relaunch')
@@ -985,13 +1051,13 @@ describe('stopIdle', () => {
   })
 
   test('leaves starting launches alone', async () => {
-    await manager.launch('ws-1', devServer)
-    latestLaunch('ws-1').idle = true
+    const { launched } = await startLaunch('ws-1')
+    launched.idle = true
 
     await manager.stopIdle()
 
-    expect(latestLaunch('ws-1').kills).toBe(0)
-    expect(latestLaunch('ws-1').status()).toBe('starting')
+    expect(launched.kills).toBe(0)
+    expect(launched.status()).toBe('starting')
   })
 
   test('leaves a launch alone while an exec joined to it runs, and stops it once the exec ends', async () => {
@@ -1032,17 +1098,15 @@ describe('stopIdle', () => {
 describe('stopAll', () => {
   test('stops every starting and running launch, deletes their logs, records them stopped and keeps their saved launch', async () => {
     const running = await bringUp('ws-1')
-    await manager.launch('ws-2', devServer)
-    const starting = latestLaunch('ws-2')
+    const { launched: starting } = await startLaunch('ws-2')
 
     await manager.stopAll()
 
     expect([running.kills, starting.kills]).toEqual([1, 1])
-    expect([running.logsDeleted, starting.logsDeleted]).toEqual([true, true])
+    await until(() => running.logsDeleted && starting.logsDeleted, 'logs deleted')
     expect(workspaces.statuses.get('ws-1')).toBe('stopped')
     expect(workspaces.statuses.get('ws-2')).toBe('stopped')
     expect(workspaces.saved.get('ws-1')).toMatchObject({ command: 'npm run dev' })
-    expect(workspaces.saved.get('ws-2')).toMatchObject({ command: 'npm run dev' })
     expect(manager.count()).toBe(0)
   })
 
@@ -1082,7 +1146,7 @@ describe('placement', () => {
   const told = (id: string) => placement.told.filter(entry => entry.endsWith(` ${id}`))
 
   test('a launch claims the workspace before it starts anything', async () => {
-    await manager.launch('ws-1', devServer)
+    await startLaunch('ws-1')
 
     expect(told('ws-1')).toEqual(['claim ws-1'])
     expect(launchesOf('ws-1')).toHaveLength(1)
@@ -1095,8 +1159,8 @@ describe('placement', () => {
 
     expect(launchesOf('ws-1')).toHaveLength(0)
     expect(workspaces.saved.get('ws-1')).toBeUndefined()
-    await manager.launch('ws-2', devServer)
-    expect(latestLaunch('ws-2').hostPort).toBe(4100)
+    const { launched } = await startLaunch('ws-2')
+    expect(launched.hostPort).toBe(4100)
   })
 
   test('a wake claims the workspace again', async () => {
@@ -1114,8 +1178,8 @@ describe('placement', () => {
   })
 
   test('no free port releases the claim', async () => {
-    await manager.launch('ws-2', devServer)
-    await manager.launch('ws-3', devServer)
+    await startLaunch('ws-2')
+    await startLaunch('ws-3')
 
     await expect(manager.launch('ws-1', devServer)).rejects.toMatchObject({ status: 503 })
 
@@ -1131,6 +1195,23 @@ describe('placement', () => {
     expect(told('ws-1')).toEqual(['claim ws-1', 'release ws-1'])
   })
 
+  test("an old launch's exit doesn't release the claim of a wake that started right after its stop", async () => {
+    const first = await bringUp('ws-1')
+    first.slowToDie = true
+
+    const stopping = manager.stop('ws-1')
+    await until(() => first.kills === 1, 'kill')
+    const woken = manager.wake('ws-1')
+    first.die()
+    await stopping
+    await until(() => launchesOf('ws-1').length === 2, 'relaunch')
+    latestLaunch('ws-1').listen()
+    await woken
+    await Bun.sleep(20)
+
+    expect(told('ws-1')).toEqual(['claim ws-1', 'claim ws-1'])
+  })
+
   test('the idle sweep releases', async () => {
     const launched = await bringUp('ws-1')
     launched.idle = true
@@ -1143,7 +1224,7 @@ describe('placement', () => {
 
   test('shutting down releases every workspace', async () => {
     await bringUp('ws-1')
-    await manager.launch('ws-2', devServer)
+    await startLaunch('ws-2')
 
     await manager.stopAll()
     await until(() => placement.told.length === 4, 'releases')
@@ -1162,17 +1243,16 @@ describe('placement', () => {
   })
 
   test('dying before it listens releases', async () => {
-    await manager.launch('ws-1', devServer)
+    const { launched } = await startLaunch('ws-1')
 
-    latestLaunch('ws-1').crash()
+    launched.crash()
     await until(() => told('ws-1').length === 2, 'release')
 
     expect(told('ws-1')).toEqual(['claim ws-1', 'release ws-1'])
   })
 
   test('timing out before it listens releases once it is killed', async () => {
-    await manager.launch('ws-1', devServer)
-    const timedOut = latestLaunch('ws-1')
+    const { launched: timedOut } = await startLaunch('ws-1')
 
     timedOut.timeOut()
     timedOut.die()
@@ -1182,8 +1262,7 @@ describe('placement', () => {
   })
 
   test('an old launch ending after a newer one took its place does not release', async () => {
-    await manager.launch('ws-1', devServer)
-    const timedOut = latestLaunch('ws-1')
+    const { launched: timedOut } = await startLaunch('ws-1')
     timedOut.timeOut()
     await bringUp('ws-1')
 
@@ -1230,11 +1309,12 @@ describe('activity', () => {
   })
 
   test('records a launch once it listens, as succeeded with its output so far', async () => {
-    await manager.launch('ws-1', devServer)
+    const { pending, launched } = await startLaunch('ws-1')
     expect(activities.rows).toEqual([])
 
-    latestLaunch('ws-1').lines.push('ready on 3000')
-    latestLaunch('ws-1').listen()
+    launched.lines.push('ready on 3000')
+    launched.listen()
+    await pending
 
     await until(() => activities.rows.length === 1, 'recorded')
     expect(activities.rows[0]).toEqual({
@@ -1248,9 +1328,9 @@ describe('activity', () => {
   })
 
   test('records a launch that ends before it listens as failed, with its exit code and last lines', async () => {
-    await manager.launch('ws-1', devServer)
-    latestLaunch('ws-1').lines.push('Error: Cannot find module express')
-    latestLaunch('ws-1').crash()
+    const { launched } = await startLaunch('ws-1')
+    launched.lines.push('Error: Cannot find module express')
+    launched.crash()
 
     await until(() => activities.rows.length === 1, 'recorded')
     expect(activities.rows[0]).toMatchObject({
@@ -1261,8 +1341,8 @@ describe('activity', () => {
   })
 
   test('records a launch with no free pool port as failed, saying so', async () => {
-    await manager.launch('ws-1', devServer)
-    await manager.launch('ws-2', devServer)
+    await startLaunch('ws-1')
+    await startLaunch('ws-2')
 
     await expect(manager.launch('ws-3', devServer)).rejects.toMatchObject({ status: 503 })
 

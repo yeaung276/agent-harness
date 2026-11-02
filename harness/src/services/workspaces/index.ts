@@ -266,7 +266,7 @@ export const createWorkspaceService = ({
       return decryptEnv(row.defaultEnv)
     },
 
-    setStatus: async (id: string, status: 'running' | 'stopped') => {
+    setStatus: async (id: string, status: 'starting' | 'running' | 'stopped') => {
       await db.update(workspaces).set({ status }).where(eq(workspaces.id, id))
     },
 

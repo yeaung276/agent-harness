@@ -362,7 +362,7 @@ describe('workspace page', () => {
       sessions: 0,
     })
     await placement.claimWorkspace(id)
-    await app.redis.set(`launch-logs:${id}`, 'listening on 3000\nGET / 200\nGET /about 200')
+    await app.redis.rpush(`launch-log:${id}`, 'listening on 3000', 'GET / 200', 'GET /about 200')
 
     const logs = await app.inject({ url: `/workspaces/${id}/logs?tail=2`, cookies })
 

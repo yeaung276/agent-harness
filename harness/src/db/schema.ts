@@ -26,7 +26,7 @@ export const workspaces = pgTable('workspaces', {
   id: uuid('id').primaryKey().defaultRandom(),
   name: text('name').notNull().unique(),
   // limited in code only, so a new status needs no migration
-  status: text('status', { enum: ['running', 'stopped'] })
+  status: text('status', { enum: ['starting', 'running', 'stopped'] })
     .notNull()
     .default('stopped'),
   defaultEnv: jsonb('default_env').$type<Record<string, string>>().notNull().default({}),

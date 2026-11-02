@@ -7,7 +7,7 @@ import { chromium as playwright } from 'playwright-core'
 
 import { logger } from '../../logger.ts'
 import { PROXY_PORT } from '../sandbox/network-controller.ts'
-import { createSandbox } from '../sandbox/sandbox.ts'
+import { type Sandbox, createSandbox } from '../sandbox/sandbox.ts'
 
 const log = logger('chromium')
 
@@ -24,7 +24,7 @@ export const createChromium = ({
   portMin: number
   portMax: number
 }) => {
-  let sandbox: ReturnType<typeof createSandbox> | undefined
+  let sandbox: Sandbox | undefined
   let stopping = false
   let cleanup: Promise<unknown> = Promise.resolve()
   const exitHandlers: (() => void)[] = []

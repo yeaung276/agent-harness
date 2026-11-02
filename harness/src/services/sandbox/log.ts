@@ -7,32 +7,38 @@ import { join } from 'node:path'
 import type { Redis } from 'ioredis'
 
 const LOGS_DIR = join(tmpdir(), 'sandbox-logs')
-const COPY_MS = 1000
 const REDIS_MAX_LINES = 1000
 const REDIS_TTL_SECONDS = 24 * 60 * 60
 
-export const createLog = () => {
+export type Log = {
+  write: (text: string) => void
+  tail: (count: number, clean?: boolean) => Promise<string[]>
+  remove: () => Promise<void>
+}
+
+const cleanLines = (text: string) =>
+  text
+    .replace(/\u001b\[[0-9;]*[A-Za-z]/g, '')
+    .split('\n')
+    .filter(line => line.trim())
+
+export const createLog = (): Log => {
   mkdirSync(LOGS_DIR, { recursive: true })
   const path = join(LOGS_DIR, `${randomUUID()}.log`)
   const fd = openSync(path, 'a')
   let removed = false
 
   return {
-    fd,
-
-    write: (text: string) => {
+    write: text => {
       if (!removed) writeSync(fd, text)
     },
 
-    tail: async (count: number, clean = false) => {
+    tail: async (count, clean = false) => {
       if (removed) return []
 
       const file = Bun.file(path)
       const text = await file.slice(Math.max(0, file.size - 1024 * 1024)).text()
-      return (clean ? text.replace(/\u001b\[[0-9;]*[A-Za-z]/g, '') : text)
-        .split('\n')
-        .filter(line => !clean || line.trim())
-        .slice(-count)
+      return (clean ? cleanLines(text) : text.split('\n')).slice(-count)
     },
 
     remove: async () => {
@@ -44,43 +50,45 @@ export const createLog = () => {
   }
 }
 
-export const createRedisLog = (redis: Redis, key: string) => {
-  const log = createLog()
-  let copied = ''
-  let copying = Promise.resolve()
+// lines go to Redis as they are written, colour codes and blank lines left out; one connection keeps them in order
+export const createRedisLog = (redis: Redis, key: string): Log => {
+  let partial = ''
   let removed = false
+  let sent: Promise<unknown> = redis.del(key).catch(() => null)
 
-  const copy = async () => {
-    const text = (await log.tail(REDIS_MAX_LINES, true)).join('\n')
-    if (text === copied) return
-    await redis.set(key, text, 'EX', REDIS_TTL_SECONDS)
-    copied = text
+  const send = (lines: string[]) => {
+    if (lines.length === 0) return
+    sent = redis
+      .multi()
+      .rpush(key, ...lines)
+      .ltrim(key, -REDIS_MAX_LINES, -1)
+      .expire(key, REDIS_TTL_SECONDS)
+      .exec()
+      .catch(() => null)
   }
 
-  void redis.del(key).catch(() => {})
-  const timer = setInterval(() => {
-    copying = copying.then(copy).catch(() => {})
-  }, COPY_MS)
-
   return {
-    fd: log.fd,
+    write: text => {
+      if (removed) return
+      const lines = (partial + text).split('\n')
+      partial = lines.pop()!
+      send(cleanLines(lines.join('\n')))
+    },
 
-    write: log.write,
-
-    tail: async (count: number, clean = false) => (removed ? readRedisLog(redis, key, count) : log.tail(count, clean)),
+    tail: async count => {
+      await sent
+      return [...(await readRedisLog(redis, key, count)), ...cleanLines(partial)].slice(-count)
+    },
 
     remove: async () => {
-      if (removed) return
+      if (!removed) send(cleanLines(partial))
       removed = true
-      clearInterval(timer)
-      await copying
-      await copy().catch(() => {})
-      await log.remove()
+      partial = ''
+      await sent
     },
   }
 }
 
-export const readRedisLog = async (redis: Redis, key: string, count: number) =>
-  ((await redis.get(key)) ?? '').split('\n').filter(Boolean).slice(-count)
+export const readRedisLog = (redis: Redis, key: string, count: number) => redis.lrange(key, -count, -1)
 
 export const removeLeftoverLogs = () => rm(LOGS_DIR, { recursive: true, force: true })

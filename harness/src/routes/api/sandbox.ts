@@ -70,13 +70,8 @@ export const sandbox: FastifyPluginAsyncTypebox = async app => {
         throw err
       })
 
-      if (worker) {
-        await forward(worker, 'stop', { workspaceId: id })
-      } else {
-        // nothing runs, but a swept workspace keeps its saved launch and would wake on its next request
-        await app.services.workspaces.setLaunchOptions(id, null)
-        await app.services.workspaces.setStatus(id, 'stopped')
-      }
+      if (worker) await forward(worker, 'stop', { workspaceId: id })
+      else await app.services.workspaces.setStatus(id, 'stopped')
 
       return reply.status(204).send(null)
     }

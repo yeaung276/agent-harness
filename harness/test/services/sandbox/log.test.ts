@@ -4,13 +4,13 @@ import RedisMock from 'ioredis-mock'
 
 import { createRedisLog, readRedisLog } from '../../../src/services/sandbox/log.ts'
 
-const KEY = 'launch-logs:ws-1'
+const KEY = 'launch-log:ws-1'
 
 let redis: InstanceType<typeof RedisMock>
 const logs: ReturnType<typeof createRedisLog>[] = []
 
-const open = () => {
-  const log = createRedisLog(redis, KEY)
+const open = (key = KEY) => {
+  const log = createRedisLog(redis, key)
   logs.push(log)
   return log
 }
@@ -26,26 +26,45 @@ afterEach(async () => {
 
 describe('a Redis log', () => {
   test('starts the key empty, clearing the last launch', async () => {
-    await redis.set(KEY, 'from the last launch')
+    await redis.rpush(KEY, 'from the last launch')
 
-    open()
-    await Bun.sleep(20)
+    await open().tail(10)
 
-    expect(await redis.get(KEY)).toBeNull()
+    expect(await redis.exists(KEY)).toBe(0)
   })
 
-  test('copies what is written to the key within a second, without colour codes or blank lines', async () => {
+  test('sends each complete line as it is written, without colour codes or blank lines', async () => {
     const log = open()
 
     log.write('\u001b[32mready\u001b[0m\n\n  \nGET / 200\n')
+    await log.tail(10)
 
-    await Bun.sleep(1300)
     expect(await readRedisLog(redis, KEY, 10)).toEqual(['ready', 'GET / 200'])
   })
 
-  test('copies once more on remove, then reads the key as its tail', async () => {
+  test('holds a line until its newline, and joins a line split across writes', async () => {
     const log = open()
-    log.write('exited with code 1\n')
+
+    log.write('listen')
+    await log.tail(10)
+    expect(await readRedisLog(redis, KEY, 10)).toEqual([])
+
+    log.write('ing on 3000\n')
+    await log.tail(10)
+    expect(await readRedisLog(redis, KEY, 10)).toEqual(['listening on 3000'])
+  })
+
+  test('includes a line still waiting for its newline in its tail', async () => {
+    const log = open()
+
+    log.write('one\ntwo')
+
+    expect(await log.tail(10)).toEqual(['one', 'two'])
+  })
+
+  test('sends the last line on remove, and reads the key as its tail after', async () => {
+    const log = open()
+    log.write('exited with code 1')
 
     await log.remove()
 
@@ -53,13 +72,14 @@ describe('a Redis log', () => {
     expect(await log.tail(10)).toEqual(['exited with code 1'])
   })
 
-  test('reads its own file as its tail until removed', async () => {
+  test('ignores writes once removed', async () => {
     const log = open()
+    log.write('one\n')
+    await log.remove()
 
-    log.write('one\ntwo\n')
+    log.write('two\n')
 
-    expect(await log.tail(10, true)).toEqual(['one', 'two'])
-    expect(await redis.get(KEY)).toBeNull()
+    expect(await log.tail(10)).toEqual(['one'])
   })
 
   test('keeps the last 1,000 lines, for 24 hours', async () => {
@@ -76,8 +96,7 @@ describe('a Redis log', () => {
 
   test("keeps each key's lines apart", async () => {
     const first = open()
-    const second = createRedisLog(redis, 'launch-logs:ws-2')
-    logs.push(second)
+    const second = open('launch-log:ws-2')
     first.write('from ws-1\n')
     second.write('from ws-2\n')
 
@@ -85,7 +104,7 @@ describe('a Redis log', () => {
     await second.remove()
 
     expect(await readRedisLog(redis, KEY, 10)).toEqual(['from ws-1'])
-    expect(await readRedisLog(redis, 'launch-logs:ws-2', 10)).toEqual(['from ws-2'])
+    expect(await readRedisLog(redis, 'launch-log:ws-2', 10)).toEqual(['from ws-2'])
   })
 })
 
@@ -95,7 +114,7 @@ describe('readRedisLog', () => {
   })
 
   test('is the last count lines', async () => {
-    await redis.set(KEY, 'one\ntwo\nthree')
+    await redis.rpush(KEY, 'one', 'two', 'three')
 
     expect(await readRedisLog(redis, KEY, 2)).toEqual(['two', 'three'])
   })

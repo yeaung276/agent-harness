@@ -87,6 +87,7 @@
     },
     &quot;status&quot;: {
       &quot;enum&quot;: [
+        &quot;starting&quot;,
         &quot;running&quot;,
         &quot;stopped&quot;
       ]
@@ -561,7 +562,8 @@
 
         <section class="doc-section" id="sandbox">
           <h2>Sandbox</h2>
-          <p>Commands that run inside a workspace, on its files. Exec runs a command to the end and returns its output. Launch starts a long-running process in the background and exposes one of its ports at a public URL. A workspace runs one background process at a time, and its <code>status</code> is <code>running</code> while it does; exec can run alongside it. A background process with no traffic for 15 minutes is stopped, and the next request to its URL starts it again with the same launch. Stop ends that: the URL stops answering until the next launch.</p>
+          <p>Commands that run inside a workspace, on its files. Exec runs a command to the end and returns its output. Launch starts a long-running process in the background and exposes one of its ports at a public URL. A workspace runs one background process at a time, and its <code>status</code> is <code>starting</code> until the process answers on its port, then <code>running</code> while it runs; exec can run alongside it. A background process with no traffic for 15 minutes is stopped, and the next request to its URL starts it again with the same launch. Stop kills the background process the same way, and the next request to its URL starts it again.</p>
+          <p>Deps folders like <code>node_modules</code> stay on the worker that installed them, and a launch, or a restart from a request, can run on another worker where they are empty. Put the install step in the launch command, like <code>npm ci &amp;&amp; npm start</code>, so the process works wherever it starts.</p>
           <p>A command is run with <code>sh -c</code> from the workspace root. Every route here also answers <code>401</code> as described in <a href="#authentication">Authentication</a>.</p>
 
           <h3>Network</h3>
@@ -632,7 +634,7 @@
 }</code></pre>
 <p><code>port</code> is the port the process listens on, and <code>PORT</code> is set to it unless the workspace's env or <code>env</code> sets it. It can't be <code>3128</code>, which the proxy holds; a launch with it answers <code>400</code>. <code>env</code> is added to the workspace's env, and wins where a name is in both. <code>network</code> is described in <a href="#sandbox">Network</a>.</p>
 <h4>Response 201</h4>
-<p>The public URL that reaches <code>port</code>.</p>
+<p>The public URL that reaches <code>port</code>. The call answers once the process listens on <code>port</code>, up to 90 seconds.</p>
 <pre class="schema"><code>{
   &quot;type&quot;: &quot;object&quot;,
   &quot;required&quot;: [
@@ -650,6 +652,8 @@
 <p>No workspace has this id.</p>
 <h4>Errors · 409</h4>
 <p>A background process is already running in this workspace. Stop it first.</p>
+<h4>Errors · 502</h4>
+<p>The process exited, or nothing listened on <code>port</code> within 90 seconds. <code>message</code> is <code>The app didn't start:</code> followed by the last 20 lines of its log, which end with how it ended and the advice to put the install step in the command. The launch isn't kept, so requests to the URL don't start it again.</p>
   </div>
 </details>
 <details class="route">
@@ -697,6 +701,7 @@
 }</code></pre>
 <p><code>timeoutMs</code> is how long the command may run: 2 minutes by default, 4 at most. <code>env</code> is added to the workspace's env, and wins where a name is in both.</p>
 <p>While the background process runs, the command shares its network: it reaches the process on <code>localhost:&lt;port&gt;</code>, <code>PORT</code> is set to that port the same way, and the launch's <code>network</code> applies. With nothing running, it can reach every public host.</p>
+<p>With nothing running, the command can also run on another worker than the last one, where deps folders like <code>node_modules</code> are empty. Put the install step in the same command, like <code>npm ci &amp;&amp; npm test</code>.</p>
 <h4>Response 200</h4>
 <p>A command that fails still answers <code>200</code>; check <code>exitCode</code>. A command still running at <code>timeoutMs</code> is killed, <code>timedOut</code> is <code>true</code> and <code>exitCode</code> is <code>null</code>. <code>output</code> is stdout and stderr together, in the order they were written, cut to the last 16 KB.</p>
 <pre class="schema"><code>{
@@ -748,7 +753,7 @@
   }
 }</code></pre>
 <h4>Response 204</h4>
-<p>No body. The background process is stopped, its URL stops answering, and the workspace's <code>status</code> is <code>stopped</code>. Also <code>204</code> when nothing is running.</p>
+<p>No body. The background process is stopped and the workspace's <code>status</code> is <code>stopped</code>; the next request to its URL starts it again. Also <code>204</code> when nothing is running.</p>
 <h4>Errors · 404</h4>
 <p>No workspace has this id.</p>
   </div>
@@ -783,7 +788,7 @@
 }</code></pre>
 <p><code>tail</code> is how many of the last lines to return, 1,000 at most.</p>
 <h4>Response 200</h4>
-<p>stdout and stderr together, in the order they were written, of the latest launch: while it runs, and after it is stopped or crashes, until the next launch or 24 hours after its last line. Lines arrive about a second after they're written. Once it ends, the last line says how: <code>exited with code &lt;n&gt;</code>, <code>killed by &lt;signal&gt;</code> or <code>stopped</code>, after <code>nothing answered on port &lt;port&gt; within 90 s</code> when it never listened. <code>lines</code> is empty when nothing has been launched.</p>
+<p>stdout and stderr together, in the order they were written, of the latest launch: while it runs, and after it is stopped or crashes, until the next launch or 24 hours after its last line. Each line shows as soon as the process finishes writing it. Once it ends, the last line says how: <code>exited with code &lt;n&gt;</code>, <code>killed by &lt;signal&gt;</code> or <code>stopped</code>, after <code>nothing answered on port &lt;port&gt; within 90 s</code> when it never listened. When it ended on its own, one more line follows, advising to put the install step in the launch command. <code>lines</code> is empty when nothing has been launched.</p>
 <pre class="schema"><code>{
   &quot;type&quot;: &quot;object&quot;,
   &quot;required&quot;: [
