@@ -6,6 +6,7 @@ WORKDIR /usr/src/app
 FROM base AS build
 
 COPY package.json bun.lock ./
+COPY patches patches
 COPY harness/package.json harness/
 RUN bun install --frozen-lockfile --ignore-scripts
 

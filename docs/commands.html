@@ -44,8 +44,8 @@
               <tr><th>Step</th><th>What happens</th></tr>
             </thead>
             <tbody>
-              <tr><td>Read</td><td>The migrations in <code>drizzle/</code>, and the last one applied, from <code>drizzle.__drizzle_migrations</code>.</td></tr>
-              <tr><td>Apply</td><td>Every newer one, in order, in one transaction, each recorded in <code>drizzle.__drizzle_migrations</code>. One fails → all roll back, exit 1.</td></tr>
+              <tr><td>Read</td><td>The migrations in <code>drizzle/</code>, and the last one applied, from <code>__drizzle_migrations</code> in the login's current schema (the first in its <code>search_path</code>), where the tables go too.</td></tr>
+              <tr><td>Apply</td><td>Every newer one, in order, in one transaction, each recorded in <code>__drizzle_migrations</code>. One fails → all roll back, exit 1.</td></tr>
               <tr><td>Done</td><td>Exit 0. Nothing newer → nothing changes.</td></tr>
             </tbody>
           </table>

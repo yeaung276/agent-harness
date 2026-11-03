@@ -11,7 +11,7 @@
     "build:css": "tailwindcss -i src/routes/web/views/styles.css -o src/routes/web/public/app.css --minify",
     "build:server": "bun build src/index.ts --target bun --outdir dist --minify --keep-names --sourcemap=linked --external playwright-core && cp -R src/routes/web/views src/routes/web/public dist/ && mkdir -p dist/node_modules && cp -RL node_modules/playwright-core dist/node_modules/",
     "start": "bun src/index.ts",
-    "db:generate": "bun --bun drizzle-kit generate",
+    "db:generate": "bun --bun drizzle-kit generate && perl -pi -e 's/\"public\"\\.//g' drizzle/*.sql",
     "db:migrate": "bun scripts/migrate.ts",
     "typecheck": "tsc",
     "test": "bun test --isolate",

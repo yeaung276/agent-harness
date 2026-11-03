@@ -7,6 +7,7 @@ RUN apt-get update \
 
 WORKDIR /usr/src/app
 COPY package.json bun.lock ./
+COPY patches patches
 COPY harness/package.json harness/bunfig.toml harness/
 RUN bun install --frozen-lockfile --ignore-scripts && chown -R bun:bun /usr/src/app
 

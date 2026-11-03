@@ -15,5 +15,5 @@ CREATE TABLE "browser_activities" (
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-ALTER TABLE "browser_activities" ADD CONSTRAINT "browser_activities_browser_id_browsers_id_fk" FOREIGN KEY ("browser_id") REFERENCES "public"."browsers"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
+ALTER TABLE "browser_activities" ADD CONSTRAINT "browser_activities_browser_id_browsers_id_fk" FOREIGN KEY ("browser_id") REFERENCES "browsers"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 CREATE INDEX "browser_activities_browser_created_idx" ON "browser_activities" USING btree ("browser_id","created_at");

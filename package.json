@@ -23,5 +23,8 @@
     "@types/bun": "^1.4.3",
     "@types/pg": "^8.23.1",
     "prettier": "3.6.2"
+  },
+  "patchedDependencies": {
+    "drizzle-orm@0.45.4": "patches/drizzle-orm@0.45.4.patch"
   }
 }

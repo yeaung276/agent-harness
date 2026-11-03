@@ -20,7 +20,7 @@ import { web } from '../src/routes/web/index.ts'
 
 export const buildTestApp = async (config: Config) => {
   const database = drizzle({ client: new PGlite(), schema })
-  await migrate(database, { migrationsFolder: join(import.meta.dirname, '..', 'drizzle') })
+  await migrate(database, { migrationsFolder: join(import.meta.dirname, '..', 'drizzle'), migrationsSchema: 'public' })
 
   const app = Fastify({ logger: false }).withTypeProvider<TypeBoxTypeProvider>()
   app.decorate('config', config)
