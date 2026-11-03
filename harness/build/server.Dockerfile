@@ -26,6 +26,7 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/*
 
 COPY --from=build /usr/src/app/harness/dist harness/dist
+COPY harness/drizzle harness/drizzle
 
 USER bun
 

@@ -1,3 +1,5 @@
+import { join } from 'node:path'
+
 import type { TypeBoxTypeProvider } from '@fastify/type-provider-typebox'
 import Fastify, { type FastifyServerOptions } from 'fastify'
 
@@ -45,7 +47,8 @@ export const buildApp = async (config: Config) => {
   bindLogger(app.log)
 
   app.decorate('config', config)
-  await app.register(db)
+  // src/ in dev, dist/ in the bundle: drizzle/ sits next to both
+  await app.register(db, { migrationsFolder: join(import.meta.dirname, '..', 'drizzle') })
   await app.register(redis)
   await app.register(services)
 

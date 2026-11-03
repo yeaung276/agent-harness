@@ -35,7 +35,7 @@
 
         <section class="doc-section" id="database">
           <h2>Database</h2>
-          <p>Migrations are SQL files in <code>harness/drizzle/</code>, committed with the code. <code>bun run db:generate</code> in <code>harness/</code> writes a new one from the changes in <code>src/db/schema.ts</code>. The server never migrates; run <code>migrate:harness</code> by hand before starting a version with new migrations.</p>
+          <p>Migrations are SQL files in <code>harness/drizzle/</code>, committed with the code. <code>bun run db:generate</code> in <code>harness/</code> writes a new one from the changes in <code>src/db/schema.ts</code>. The server applies the new ones when it starts, before it listens; <code>migrate:harness</code> applies them by hand.</p>
 
           <h3>migrate:harness</h3>
           <pre class="schema"><code>bun run migrate:harness</code></pre>
