@@ -1796,6 +1796,126 @@
           </table>
         </section>
 
+        <section class="doc-section" id="security">
+          <h2>Security</h2>
+          <p>The worker pod runs privileged. Only its startup runs as root. The worker runs as <code>bun</code> with no capabilities, and workspace code runs under bwrap below it.</p>
+
+          <figure>
+            <div class="diagram">
+              <svg class="c4" viewBox="0 0 1000 600" role="img" aria-label="The layers from the node down to workspace code on a worker pod under Kubernetes. The worker pod runs with privileged: true and, on containerd, in the node's cgroup namespace. In it, dumb-init is PID 1 as root and forwards signals. The startup, the image's CMD, runs once as root: unshare with its own cgroup and mount namespaces, mount a fresh cgroup2, chown the cgroup root to bun, then setpriv to bun, and it becomes the worker. The worker runs as bun, uid 1000, with no capabilities, in its own cgroup and mount namespaces. The worker process, bun harness/dist/index.js, owns /sys/fs/cgroup, which is the container's own cgroup: no processes in it, memory, cpu and pids turned on, the StatefulSet's limits applied there; runner/ holds the worker and dumb-init, and one cgroup per sandbox is made before it starts and removed after. Cgroups above the container's are hidden from the worker. The worker starts each sandbox under bwrap: its own user, pid, ipc, uts and cgroup namespaces, --cap-drop ALL, no_new_privs, --die-with-parent, --new-session, system paths read-only, /workspace read-write, /tmp empty. Workspace code runs there with sh -c, a launch or an exec, as uid 0 in its user namespace, which is bun, uid 1000, on the pod, with no capabilities, and setuid binaries don't raise it.">
+                <defs>
+                  <marker id="sec-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                    <path d="M0 0L10 5L0 10z" class="arrowhead"/>
+                  </marker>
+                </defs>
+
+                <rect class="boundary" x="16" y="16" width="968" height="568" rx="10"/>
+                <text class="label name" x="28" y="574">node</text>
+
+                <rect class="group" x="32" y="32" width="936" height="520" rx="8"/>
+                <text class="label name" x="44" y="526">worker pod</text>
+                <text class="note" x="44" y="542">privileged: true · on containerd, the node's cgroup namespace</text>
+
+                <rect class="component" x="48" y="48" width="180" height="72" rx="6"/>
+                <text class="on-light name" x="138" y="74" text-anchor="middle">dumb-init</text>
+                <text class="on-light type" x="138" y="91" text-anchor="middle">[PID 1 · root]</text>
+                <text class="on-light type" x="138" y="109" text-anchor="middle">forwards signals</text>
+
+                <rect class="component" x="244" y="48" width="348" height="72" rx="6"/>
+                <text class="on-light name" x="418" y="74" text-anchor="middle">startup</text>
+                <text class="on-light type" x="418" y="91" text-anchor="middle">[root · once · the image's CMD]</text>
+                <text class="on-light type" x="418" y="109" text-anchor="middle">unshare · mount cgroup2 · chown · setpriv bun</text>
+
+                <line class="edge" x1="418" y1="120" x2="418" y2="150" marker-end="url(#sec-arrow)"/>
+                <text class="edge-label" x="426" y="140">exec, as bun</text>
+
+                <rect class="group" x="48" y="152" width="904" height="348" rx="8"/>
+                <text class="label name" x="60" y="474">worker</text>
+                <text class="note" x="60" y="490">bun, uid 1000 · no capabilities · its own cgroup and mount namespaces</text>
+
+                <rect class="component" x="64" y="168" width="528" height="60" rx="6"/>
+                <text class="on-light name" x="328" y="192" text-anchor="middle">worker process</text>
+                <text class="on-light type" x="328" y="210" text-anchor="middle">[bun harness/dist/index.js]</text>
+
+                <line class="edge" x1="328" y1="228" x2="328" y2="254" marker-end="url(#sec-arrow)"/>
+                <text class="edge-label" x="336" y="246">starts each sandbox</text>
+
+                <rect class="group" x="64" y="256" width="528" height="200" rx="8"/>
+                <text class="label name" x="76" y="276">bwrap</text>
+                <text class="note" x="76" y="293">own user · pid · ipc · uts · cgroup namespaces</text>
+                <text class="note" x="76" y="309">--cap-drop ALL · no_new_privs · --die-with-parent · --new-session</text>
+                <text class="note" x="76" y="325">system paths read-only · /workspace read-write · /tmp empty</text>
+
+                <rect class="component" x="80" y="340" width="496" height="100" rx="6"/>
+                <text class="on-light name" x="328" y="364" text-anchor="middle">workspace code</text>
+                <text class="on-light type" x="328" y="381" text-anchor="middle">[sh -c · a launch or an exec]</text>
+                <text class="on-light type" x="328" y="403" text-anchor="middle">uid 0 in its user namespace, bun (1000) on the pod</text>
+                <text class="on-light type" x="328" y="420" text-anchor="middle">no capabilities · setuid binaries don't raise it</text>
+
+                <rect class="component" x="616" y="168" width="320" height="288" rx="6"/>
+                <text class="on-light name" x="776" y="192" text-anchor="middle">/sys/fs/cgroup</text>
+                <text class="on-light type" x="776" y="209" text-anchor="middle">[the container's own cgroup · owned by bun]</text>
+                <text class="on-light type" x="632" y="238">/</text>
+                <text class="on-light type" x="648" y="255">no processes · memory, cpu, pids on</text>
+                <text class="on-light type" x="648" y="271">the StatefulSet's limits apply here</text>
+                <text class="on-light type" x="632" y="299">runner/</text>
+                <text class="on-light type" x="648" y="316">the worker and dumb-init</text>
+                <text class="on-light type" x="632" y="344">one cgroup per sandbox</text>
+                <text class="on-light type" x="648" y="361">made before it starts, removed after</text>
+                <text class="on-light type" x="632" y="392">cgroups above the container's are hidden</text>
+                <text class="on-light type" x="632" y="409">from the worker and everything under it</text>
+
+                <line class="edge" x1="592" y1="198" x2="614" y2="198" marker-end="url(#sec-arrow)"/>
+              </svg>
+            </div>
+            <figcaption>C4 component diagram: the layers from the node down to workspace code on a worker pod under Kubernetes. Each box sits inside the one around it.</figcaption>
+          </figure>
+
+          <h3>Runtimes</h3>
+          <table>
+            <thead>
+              <tr><th>Runtime</th><th>Worker settings</th><th>cgroup namespace it starts in</th><th><code>/sys/fs/cgroup</code> for the worker</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Kubernetes, <code>deploy/k8s</code></td><td><code>privileged: true</code> on <code>harness-default-worker</code>.</td><td>The node's, with containerd.</td><td>The container's own cgroup, from the startup.</td></tr>
+              <tr><td>Docker Compose, <code>docker-compose.yaml</code></td><td><code>privileged: true</code>, <code>cgroup: private</code>.</td><td>Its own.</td><td>The container's own cgroup.</td></tr>
+              <tr><td><code>test:container</code></td><td><code>--privileged --cgroupns=private</code>. Its own entrypoint gives the tree to <code>bun</code> and drops to <code>bun</code>, without <code>unshare</code>.</td><td>Its own.</td><td>The container's own cgroup.</td></tr>
+            </tbody>
+          </table>
+
+          <h3>Startup</h3>
+          <p>The worker image's CMD, in <code>harness/build/default.worker.Dockerfile</code>, then the worker's sandbox plugin, <code>plugins/sandbox.ts</code>.</p>
+          <table>
+            <thead>
+              <tr><th>Step</th><th>Runs as</th><th>What it does</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>dumb-init</code></td><td>root</td><td>PID 1. Forwards signals to the worker and runs nothing else.</td></tr>
+              <tr><td><code>unshare --cgroup --mount</code></td><td>root</td><td>A cgroup namespace whose root is the container's own cgroup, and a mount namespace for the next step.</td></tr>
+              <tr><td><code>mount -t cgroup2</code></td><td>root</td><td>A fresh cgroup2 at <code>/sys/fs/cgroup</code>. It shows the container's cgroup as its root and nothing above it.</td></tr>
+              <tr><td><code>chown</code></td><td>root</td><td>Gives that root's directory, <code>cgroup.procs</code>, <code>cgroup.subtree_control</code> and <code>cgroup.threads</code> to <code>bun</code>.</td></tr>
+              <tr><td><code>setpriv --reuid bun</code></td><td>root, then <code>bun</code></td><td>Becomes <code>bun</code>, uid 1000, which clears every capability, and the same process runs the worker.</td></tr>
+              <tr><td>Checks</td><td><code>bun</code></td><td>Refuses to start without <code>bwrap</code>, <code>pasta</code>, <code>nft</code>, <code>unshare</code>, <code>nsenter</code> and <code>bash</code> on <code>PATH</code>, without cgroup v2 with memory, cpu and pids at <code>/sys/fs/cgroup</code>, without that tree writable by <code>bun</code>, with the pool ports inside <code>ip_local_port_range</code>, or with <code>SANDBOX_MODE=none</code> and <code>NODE_ENV=production</code>.</td></tr>
+              <tr><td>Cgroups</td><td><code>bun</code></td><td>Creates <code>runner/</code>, moves every process in the root into it, and turns on memory, cpu and pids for the root's children.</td></tr>
+            </tbody>
+          </table>
+
+          <h3>Privileges</h3>
+          <table>
+            <thead>
+              <tr><th>Process</th><th>User on the pod</th><th>Capabilities</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>dumb-init</code></td><td>root</td><td>Every one, from <code>privileged: true</code>.</td></tr>
+              <tr><td>Startup, until <code>setpriv</code></td><td>root</td><td>Every one.</td></tr>
+              <tr><td>Worker process</td><td><code>bun</code>, uid 1000</td><td>None.</td></tr>
+              <tr><td>bwrap and workspace code</td><td>uid 0 in its own user namespace, <code>bun</code>, uid 1000, on the pod</td><td>None, from <code>--cap-drop ALL</code>. <code>no_new_privs</code> is set, so setuid binaries don't raise it.</td></tr>
+              <tr><td>Server process</td><td><code>bun</code></td><td>None. Its pod isn't privileged.</td></tr>
+            </tbody>
+          </table>
+          <p><code>privileged: true</code> gives root in the pod every capability and every device of the node, so root in the pod is root on the node. Root in the worker pod is <code>dumb-init</code> and the startup, and the startup becomes the worker, as <code>bun</code>, before the worker starts any sandbox. Workspace code runs as <code>bun</code> on the pod, with no capabilities, under <code>no_new_privs</code>.</p>
+        </section>
+
       </div>
     </main>
   </div>
