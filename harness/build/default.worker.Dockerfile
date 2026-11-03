@@ -49,5 +49,6 @@ EXPOSE 3000
 
 ENTRYPOINT ["dumb-init", "--"]
 # starts as root to delegate the cgroup tree to bun, then runs as bun;
+# its own cgroup namespace and a fresh mount keep /sys/fs/cgroup the container's, even where the runtime gives a privileged pod the node's;
 # run from the repo root: the sandbox hides process.cwd(), so this keeps all of /usr/src/app out of it
-CMD ["sh", "-c", "cg=/sys/fs/cgroup && chown bun:bun $cg $cg/cgroup.procs $cg/cgroup.subtree_control $cg/cgroup.threads && exec setpriv --reuid bun --regid bun --init-groups env HOME=/home/bun bun harness/dist/index.js"]
+CMD ["unshare", "--cgroup", "--mount", "sh", "-c", "cg=/sys/fs/cgroup && mount -t cgroup2 cgroup2 $cg && chown bun:bun $cg $cg/cgroup.procs $cg/cgroup.subtree_control $cg/cgroup.threads && exec setpriv --reuid bun --regid bun --init-groups env HOME=/home/bun bun harness/dist/index.js"]
