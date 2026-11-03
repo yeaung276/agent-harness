@@ -1,27 +1,27 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: server
+  name: harness-server
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: server
+      app: harness-server
   template:
     metadata:
       labels:
-        app: server
+        app: harness-server
     spec:
       containers:
         - name: server
           image: harness-server
           envFrom:
             - configMapRef:
-                name: harness
+                name: harness-config
             - secretRef:
-                name: harness
+                name: harness-secrets
             - secretRef:
-                name: harness-server
+                name: harness-server-secrets
           ports:
             - name: api
               containerPort: 3000
@@ -43,4 +43,4 @@ spec:
       volumes:
         - name: workspaces
           persistentVolumeClaim:
-            claimName: workspaces
+            claimName: harness-workspaces

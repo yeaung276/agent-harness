@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: workspaces
+  name: harness-workspaces
 spec:
   # the server and every worker mount it
   accessModes:

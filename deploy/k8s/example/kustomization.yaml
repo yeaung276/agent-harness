@@ -14,11 +14,11 @@ images:
     newTag: v0.1.0
 
 secretGenerator:
-  - name: harness
+  - name: harness-secrets
     envs:
       - secret.env
   # openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -keyout ca.key -out ca.crt -subj /CN=worker-ca -days 3650
-  - name: harness-server
+  - name: harness-server-secrets
     files:
       - WORKER_CA_KEY=ca.key
       - WORKER_CA_CERT=ca.crt

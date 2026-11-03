@@ -1,7 +1,7 @@
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
-  name: default-worker
+  name: harness-default-worker
 spec:
   # no Service: workers register their pod IP with the server
   serviceName: ""
@@ -9,12 +9,12 @@ spec:
   podManagementPolicy: Parallel
   selector:
     matchLabels:
-      app: worker
+      app: harness-worker
       type: default
   template:
     metadata:
       labels:
-        app: worker
+        app: harness-worker
         type: default
     spec:
       containers:
@@ -22,17 +22,17 @@ spec:
           image: default-harness-worker
           envFrom:
             - configMapRef:
-                name: harness
+                name: harness-config
             - secretRef:
-                name: harness
+                name: harness-secrets
           env:
-            # default-worker-0, default-worker-1, …: deps and placement keys stay with the name
+            # harness-default-worker-0, harness-default-worker-1, …: deps and placement keys stay with the name
             - name: WORKER_NAME
               valueFrom:
                 fieldRef:
                   fieldPath: metadata.name
             - name: SERVER_URL
-              value: http://server:3000
+              value: http://harness-server:3000
           # bwrap, pasta, nft and the sandbox cgroups
           securityContext:
             privileged: true
@@ -51,6 +51,6 @@ spec:
       volumes:
         - name: workspaces
           persistentVolumeClaim:
-            claimName: workspaces
+            claimName: harness-workspaces
         - name: deps
           emptyDir: {}
