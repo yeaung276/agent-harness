@@ -2,11 +2,22 @@ name: release images
 
 on:
   push:
-    tags: ['v*']
+    branches: [main]
+    paths:
+      - 'harness/**'
+      - 'bun.lock'
+      - 'package.json'
+      - 'patches/**'
+      - '.github/workflows/release-images.yml'
+  workflow_dispatch:
 
 permissions:
   contents: write
   packages: write
+
+concurrency:
+  group: release-images
+  cancel-in-progress: false
 
 jobs:
   test:
@@ -22,8 +33,28 @@ jobs:
 
       - run: bun run test:harness
 
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      new: ${{ steps.version.outputs.new }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # a version is released once: when harness/package.json has one with no harness-v<version> tag yet,
+      # nor a v<version> tag from the releases made by tag before
+      - id: version
+        run: |
+          version=$(jq -r .version harness/package.json)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if git ls-remote --exit-code --tags origin "refs/tags/harness-v$version" "refs/tags/v$version" > /dev/null; then
+            echo "new=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "new=true" >> "$GITHUB_OUTPUT"
+          fi
+
   images:
-    needs: test
+    needs: [test, version]
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -32,6 +63,8 @@ jobs:
             dockerfile: harness/build/default.worker.Dockerfile
           - name: server
             dockerfile: harness/build/server.Dockerfile
+    env:
+      IMAGE: ghcr.io/${{ github.repository_owner }}/agent-harness-${{ matrix.name }}
     steps:
       - uses: actions/checkout@v4
 
@@ -49,15 +82,22 @@ jobs:
           file: ${{ matrix.dockerfile }}
           push: true
           tags: |
-            ghcr.io/${{ github.repository_owner }}/agent-harness-${{ matrix.name }}:${{ github.ref_name }}
-            ghcr.io/${{ github.repository_owner }}/agent-harness-${{ matrix.name }}:latest
+            ${{ env.IMAGE }}:sha-${{ github.sha }}
+            ${{ env.IMAGE }}:latest
+            ${{ needs.version.outputs.new == 'true' && format('{0}:v{1}', env.IMAGE, needs.version.outputs.version) || '' }}
           cache-from: type=gha,scope=${{ matrix.name }}
           cache-to: type=gha,mode=max,scope=${{ matrix.name }}
 
   release:
-    needs: images
+    needs: [images, version]
+    if: needs.version.outputs.new == 'true'
     runs-on: ubuntu-latest
     steps:
-      - run: gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --title "$GITHUB_REF_NAME" --generate-notes
+      - run: |
+          gh release create "harness-v${{ needs.version.outputs.version }}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "harness v${{ needs.version.outputs.version }}" \
+            --generate-notes
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

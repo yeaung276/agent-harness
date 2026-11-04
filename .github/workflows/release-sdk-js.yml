@@ -1,0 +1,66 @@
+name: release sdk/js
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'sdk/js/**'
+      - '.github/workflows/release-sdk-js.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  # npm trusted publishing: npm exchanges the workflow's OIDC token for a publish token
+  id-token: write
+
+concurrency:
+  group: release-sdk-js
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sdk/js
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.3
+
+      # trusted publishing needs npm 11.5.1 or later
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      - run: npm install -g npm@latest
+
+      - run: bun install --frozen-lockfile
+
+      - run: bun run typecheck
+
+      - run: bun run build
+
+      # a version is published once: when sdk/js/package.json has one that isn't on npm yet
+      - id: version
+        run: |
+          name=$(jq -r .name package.json)
+          version=$(jq -r .version package.json)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if npm view "$name@$version" version > /dev/null 2>&1; then
+            echo "new=false" >> "$GITHUB_OUTPUT"
+            echo "$name@$version is already on npm; nothing to publish"
+          else
+            echo "new=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - if: steps.version.outputs.new == 'true'
+        run: npm publish --provenance --access public
+
+      - if: steps.version.outputs.new == 'true'
+        run: |
+          git tag "sdk-js-v${{ steps.version.outputs.version }}" "$GITHUB_SHA"
+          git push origin "sdk-js-v${{ steps.version.outputs.version }}"
