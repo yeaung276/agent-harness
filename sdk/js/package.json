@@ -1,6 +1,6 @@
 {
   "name": "@code-harness/sdk",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "TypeScript client for Code-Harness sandboxes and browsers, with a deepagents backend and LangChain middleware",
   "type": "module",
   "repository": {
@@ -18,6 +18,16 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
+    "./client": {
+      "import": {
+        "types": "./dist/core/index.d.ts",
+        "default": "./dist/core/index.js"
+      },
+      "require": {
+        "types": "./dist/cjs/core/index.d.ts",
+        "default": "./dist/cjs/core/index.js"
+      }
+    },
     "./package.json": "./package.json"
   },
   "files": ["dist"],
@@ -25,15 +35,30 @@
     "node": ">=20"
   },
   "scripts": {
-    "build": "rm -rf dist && tsc -p tsconfig.build.json",
+    "build": "rm -rf dist && tsc -p tsconfig.build.json && bun run build:cjs",
     "typecheck": "tsc",
-    "test": "bun test"
+    "test": "bun test",
+    "build:cjs": "bun build src/core/index.ts --format=cjs --target=node --outfile dist/cjs/core/index.js && cp dist/browser.d.ts dist/errors.d.ts dist/cjs/ && cp dist/core/*.d.ts dist/cjs/core/ && echo '{\"type\":\"commonjs\"}' > dist/cjs/package.json"
   },
   "peerDependencies": {
     "@langchain/core": "^1.3.2",
     "deepagents": "^1.16.0",
     "langchain": "^1.6.0",
     "zod": "^4.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@langchain/core": {
+      "optional": true
+    },
+    "deepagents": {
+      "optional": true
+    },
+    "langchain": {
+      "optional": true
+    },
+    "zod": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@langchain/core": "^1.3.4",

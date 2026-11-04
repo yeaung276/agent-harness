@@ -1,5 +1,3 @@
-import { SandboxError } from 'deepagents'
-
 const CODES: Record<number, CodeHarnessErrorCode> = {
   400: 'INVALID_REQUEST',
   401: 'AUTHENTICATION_FAILED',
@@ -23,18 +21,20 @@ export type CodeHarnessErrorCode =
   | 'NETWORK_ERROR'
   | 'UNKNOWN'
 
-export class CodeHarnessError extends SandboxError {
+// deepagents' SandboxError.isInstance checks this symbol, so the client entry needn't load deepagents
+const SANDBOX_ERROR = Symbol.for('sandbox.error')
+
+export class CodeHarnessError extends Error {
   override readonly name: string = 'CodeHarnessError'
-  declare readonly code: CodeHarnessErrorCode
 
   constructor(
     message: string,
-    code: CodeHarnessErrorCode,
+    readonly code: CodeHarnessErrorCode,
     readonly status: number | null = null,
     cause?: Error
   ) {
-    super(message, code, cause)
-    Object.setPrototypeOf(this, CodeHarnessError.prototype)
+    super(message, { cause })
+    Object.defineProperty(this, SANDBOX_ERROR, { value: true })
   }
 
   static async fromResponse(response: Response): Promise<CodeHarnessError> {

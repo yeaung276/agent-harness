@@ -1,4 +1,4 @@
-import type { Client } from './client.js'
+import type { BaseClient } from './core/client.js'
 import { CodeHarnessError } from './errors.js'
 
 export interface WaitFor {
@@ -38,12 +38,12 @@ export interface RunResult {
 export class Browser {
   readonly sandboxId: string | null
   readonly record: boolean
-  readonly #client: Client
+  readonly #client: BaseClient
   #id: string | null
   #creating: Promise<string> | null = null
 
   constructor(
-    client: Client,
+    client: BaseClient,
     { id, sandboxId, record }: { id: string | null; sandboxId: string | null; record: boolean }
   ) {
     this.#client = client

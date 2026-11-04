@@ -246,7 +246,7 @@ page = await browser.type(email.ref, &quot;ada@example.com&quot;, { submit: true
 
         <section class="doc-section" id="errors">
           <h2>Errors</h2>
-          <p>Every method throws <code>CodeHarnessError</code>, except the deepagents file methods, which return <code>{ error }</code>. It extends deepagents' <code>SandboxError</code>.</p>
+          <p>Every method throws <code>CodeHarnessError</code>, except the deepagents file methods, which return <code>{ error }</code>. deepagents' <code>SandboxError.isInstance()</code> recognises it.</p>
           <pre class="schema"><code>import { CodeHarnessError } from &quot;@code-harness/sdk&quot;
 
 try {
