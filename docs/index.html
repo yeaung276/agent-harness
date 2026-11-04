@@ -6,7 +6,7 @@
   <title>Code-Harness Architecture</title>
   <link rel="stylesheet" href="assets/site.css?v=3">
 </head>
-<body data-root="" data-page="appx-preview">
+<body data-root="" data-page="architecture">
   <div class="layout">
     <aside class="sidebar"></aside>
     <main>
@@ -15,12 +15,12 @@
 
         <section class="doc-section" id="overview">
           <h2>Overview</h2>
-          <p>preview-runner runs as one server pod and many worker pods. The server pod is the only entry point: appx calls its API, and users' browsers load previews through its proxy. Worker pods run the app previews and browser sessions. Each app is pinned to one worker pod, so its dev server and its browser sessions share that pod's localhost, and the dev server's port never leaves the pod.</p>
+          <p>code-harness runs as one server pod and many worker pods. The server pod is the only entry point: agents, through the Code Harness SDK, LangChain or MCP, call its API at <code>/api/v1</code> and <code>/mcp</code>, and users' browsers load a workspace's app through its proxy. Worker pods run the sandboxes and browser sessions. Each workspace is pinned to one worker pod, so its sandbox and its browser sessions share that pod's localhost, and the sandbox's port never leaves the pod.</p>
           <p>Placement is decided per call from Redis. A worker pod writes a key for each sandbox and browser session it holds, and the server sends a workspace's calls to the worker pod its key names. A workspace with nothing running goes to the live worker pod with the most free sandbox slots. See <a href="#placement-controller">Placement controller</a>.</p>
 
           <figure>
             <div class="diagram">
-              <svg class="c4" viewBox="0 0 1120 870" role="img" aria-label="preview-runner as one server pod and many worker pods. 1: appx starts a preview, creates a browser session or makes a browser call on the server pod. In the server pod, a stateless Deployment, the preview and browser API reads the rows in Postgres, which the worker pods write with host set to their name, and maps a sessionId to its row and appId. Beside it, the proxy, a reverse proxy for requests carrying the signed preview cookie, serves the app preview to the user's browser over HTTP and WebSocket. Both use the placement controller, a shared module below them, not an API, to find the worker pod of an appId. 2: the controller reads the workspace's or session's placement key in Redis; if it names a worker pod that is still live, that pod is used. 3: if there is none or the pod is gone, it reads every pods:name stats entry and picks the live worker pod with the most free sandbox slots; the worker pod writes the placement key when it starts the sandbox or opens the tab, so a workspace's preview and sessions stay on one worker pod. 4: the API forwards the call to the internal API of the assigned worker pod, at the address in its pods entry. The worker pods are a StatefulSet, so each keeps its name, worker-0, worker-1 and so on, across restarts. On that worker pod, the internal API drives the sandbox, which runs the app's preview dev server on localhost:port, and Chromium, which holds one page per session. 5: because both run on the same pod, Chromium reaches the app's preview on localhost. 6: every worker pod's stats reporter writes pods:name with cpu, memory, previews, sessions and its address every 10 seconds, expiring after 30 seconds. The proxy sends preview traffic to the assigned worker's port forwarder on port 4002, which hands it to the sandbox on localhost:port, so sandbox ports never leave the pod. worker-1, worker-2 and more have the same parts as worker-0.">
+              <svg class="c4" viewBox="0 0 1120 870" role="img" aria-label="code-harness as one server pod and many worker pods. 1: an agent, through the Code Harness SDK, LangChain or MCP, calls /api/v1 or /mcp on the server pod to launch, exec in or stop a workspace's sandbox, or to create a browser session and make browser calls. In the server pod, a stateless Deployment, the sandbox and browser API keeps workspaces, browsers and their activities in Postgres, and maps a browserId to its workspace. Beside it, the proxy, a reverse proxy that names the workspace by subdomain or signed cookie, serves the workspace's app to the user's browser over HTTP and WebSocket. Both use the placement controller, a shared module below them, not an API, to find the worker pod of a workspaceId. 2: the controller reads the workspace's or session's placement key in Redis; if it names a worker pod that is still live, that pod is used. 3: if there is none or the pod is gone, it reads every pods:name stats entry and picks the live worker pod with the most free sandbox slots; the worker pod writes the placement key when it starts the sandbox or opens the tab, so a workspace's sandbox and sessions stay on one worker pod. 4: the API forwards the call to the internal API of the assigned worker pod, at the address in its pods entry. The worker pods are a StatefulSet, so each keeps its name, worker-0, worker-1 and so on, across restarts. On that worker pod, the internal API drives the sandbox, which runs the workspace's app on localhost:port, and Chromium, which holds one page per session. 5: because both run on the same pod, Chromium reaches the workspace's app on localhost. 6: every worker pod's stats reporter writes pods:name with cpu, memory, sandboxes, sessions and its address every 10 seconds, expiring after 30 seconds. The proxy sends app traffic to the assigned worker's port forwarder, which hands it to the sandbox on localhost:port, so sandbox ports never leave the pod. worker-1, worker-2 and more have the same parts as worker-0.">
                 <defs>
                   <marker id="rp-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
                     <path d="M0 0L10 5L0 10z" class="arrowhead"/>
@@ -29,47 +29,47 @@
 
                 <rect class="person" x="60" y="16" width="180" height="56" rx="20"/>
                 <text class="on-dark name" x="150" y="39" text-anchor="middle">User's browser</text>
-                <text class="on-dark type" x="150" y="56" text-anchor="middle">[app preview in an iframe]</text>
+                <text class="on-dark type" x="150" y="56" text-anchor="middle">[a workspace's app at PROXY_URL]</text>
 
                 <rect class="external" x="520" y="16" width="300" height="56" rx="8"/>
-                <text class="on-dark name" x="670" y="39" text-anchor="middle">appx</text>
-                <text class="on-dark type" x="670" y="56" text-anchor="middle">[appId or sessionId on every call]</text>
+                <text class="on-dark name" x="670" y="39" text-anchor="middle">Agents</text>
+                <text class="on-dark type" x="670" y="56" text-anchor="middle">[Code Harness SDK · LangChain · MCP]</text>
 
                 <rect class="boundary" x="20" y="120" width="780" height="360" rx="10"/>
                 <text class="label name" x="400" y="144" text-anchor="middle">server pod</text>
-                <text class="label type" x="400" y="160" text-anchor="middle">[Deployment · stateless · preview-runner API]</text>
+                <text class="label type" x="400" y="160" text-anchor="middle">[Deployment · stateless · APP_MODE=server]</text>
 
                 <rect class="component" x="40" y="180" width="220" height="140" rx="8"/>
                 <text class="on-light name" x="150" y="204" text-anchor="middle">Proxy</text>
-                <text class="on-light type" x="150" y="221" text-anchor="middle">[reverse proxy · signed preview cookie]</text>
-                <text class="on-light type" x="150" y="246" text-anchor="middle">appId → that app's worker pod</text>
+                <text class="on-light type" x="150" y="221" text-anchor="middle">[PROXY_PORT · subdomain or cookie]</text>
+                <text class="on-light type" x="150" y="246" text-anchor="middle">workspaceId → its worker pod</text>
                 <text class="on-light type" x="150" y="263" text-anchor="middle">→ its port forwarder</text>
 
                 <rect class="component" x="540" y="180" width="240" height="140" rx="8"/>
-                <text class="on-light name" x="660" y="204" text-anchor="middle">preview + browser API</text>
-                <text class="on-light type" x="660" y="221" text-anchor="middle">[api/preview · api/browser]</text>
-                <text class="on-light type" x="660" y="246" text-anchor="middle">preview: start · stop · exec</text>
-                <text class="on-light type" x="660" y="263" text-anchor="middle">browser: session · calls · close</text>
-                <text class="on-light type" x="660" y="280" text-anchor="middle">rows with host = worker pod</text>
-                <text class="on-light type" x="660" y="297" text-anchor="middle">sessionId → row → appId</text>
+                <text class="on-light name" x="660" y="204" text-anchor="middle">sandbox + browser API</text>
+                <text class="on-light type" x="660" y="221" text-anchor="middle">[PORT · /api/v1 · /mcp]</text>
+                <text class="on-light type" x="660" y="246" text-anchor="middle">sandbox: launch · exec · stop · logs</text>
+                <text class="on-light type" x="660" y="263" text-anchor="middle">browser: create · calls · close</text>
+                <text class="on-light type" x="660" y="280" text-anchor="middle">activities of each call</text>
+                <text class="on-light type" x="660" y="297" text-anchor="middle">browserId → its workspace</text>
 
                 <rect class="component" x="240" y="350" width="360" height="110" rx="8"/>
                 <text class="on-light name" x="420" y="372" text-anchor="middle">placement controller</text>
-                <text class="on-light type" x="420" y="389" text-anchor="middle">[shared module, not an API · by appId]</text>
+                <text class="on-light type" x="420" y="389" text-anchor="middle">[shared module, not an API · by workspaceId]</text>
                 <text class="on-light type" x="256" y="412"><tspan font-weight="600">2.</tspan> GETEX placement:* → its worker pod, if live</text>
                 <text class="on-light type" x="256" y="429"><tspan font-weight="600">3.</tspan> else the most free sandbox slots in pods:*</text>
-                <text class="on-light type" x="256" y="446">sticky: an app's preview and sessions on one worker pod</text>
+                <text class="on-light type" x="256" y="446">sticky: a workspace's sandbox and sessions on one pod</text>
 
                 <rect class="external" x="840" y="215" width="260" height="70" rx="8"/>
                 <text class="on-dark name" x="970" y="240" text-anchor="middle">Postgres</text>
-                <text class="on-dark type" x="970" y="257" text-anchor="middle">previews · browser_sessions</text>
-                <text class="on-dark type" x="970" y="273" text-anchor="middle">host = worker pod name</text>
+                <text class="on-dark type" x="970" y="257" text-anchor="middle">workspaces · browsers</text>
+                <text class="on-dark type" x="970" y="273" text-anchor="middle">sandbox and browser activities</text>
 
                 <rect class="external" x="840" y="330" width="260" height="150" rx="8"/>
                 <text class="on-dark name" x="970" y="354" text-anchor="middle">Redis</text>
                 <text class="on-dark type" x="970" y="371" text-anchor="middle">[central]</text>
                 <text class="on-dark type" x="970" y="396" text-anchor="middle">pods:&lt;name&gt; → cpu, memory,</text>
-                <text class="on-dark type" x="970" y="412" text-anchor="middle">previews, sessions, address</text>
+                <text class="on-dark type" x="970" y="412" text-anchor="middle">sandboxes, sessions, address</text>
                 <text class="on-dark type" x="970" y="428" text-anchor="middle">expires 30 s after its last write</text>
                 <text class="on-dark type" x="970" y="452" text-anchor="middle">placement:* → &lt;name&gt;:&lt;bootId&gt;</text>
 
@@ -82,7 +82,7 @@
 
                 <rect class="component" x="50" y="550" width="40" height="236" rx="6"/>
                 <text class="on-light name" x="70" y="666" text-anchor="middle" transform="rotate(-90 70 668)">port forwarder</text>
-                <text class="on-light type" x="70" y="680" text-anchor="middle" transform="rotate(-90 70 668)">[&lt;appId&gt; → localhost:&lt;port&gt;]</text>
+                <text class="on-light type" x="70" y="680" text-anchor="middle" transform="rotate(-90 70 668)">[&lt;workspaceId&gt; → localhost:&lt;port&gt;]</text>
 
                 <rect class="component" x="104" y="550" width="660" height="46" rx="6"/>
                 <text class="on-light name" x="434" y="569" text-anchor="middle">internal API</text>
@@ -90,8 +90,8 @@
 
                 <rect class="component" x="104" y="616" width="290" height="84" rx="6"/>
                 <text class="on-light name" x="249" y="640" text-anchor="middle">Sandbox</text>
-                <text class="on-light type" x="249" y="657" text-anchor="middle">[preview dev servers]</text>
-                <text class="on-light type" x="249" y="678" text-anchor="middle">localhost:&lt;port&gt; per app</text>
+                <text class="on-light type" x="249" y="657" text-anchor="middle">[plugins/sandbox.ts]</text>
+                <text class="on-light type" x="249" y="678" text-anchor="middle">localhost:&lt;port&gt; per workspace</text>
 
                 <rect class="component" x="474" y="616" width="290" height="84" rx="6"/>
                 <text class="on-light name" x="619" y="640" text-anchor="middle">Chromium</text>
@@ -112,12 +112,12 @@
                 <text class="note" x="870" y="723" text-anchor="middle">more workers</text>
 
                 <line class="edge" x1="150" y1="180" x2="150" y2="74" marker-end="url(#rp-arrow)"/>
-                <text class="edge-label" x="158" y="92">serves the preview</text>
+                <text class="edge-label" x="158" y="92">serves the workspace's app</text>
                 <text class="note" x="158" y="106">HTTP + WS</text>
 
                 <line class="edge" x1="620" y1="72" x2="620" y2="178" marker-end="url(#rp-arrow)"/>
-                <text class="edge-label" x="628" y="92"><tspan font-weight="600">1.</tspan> start preview · create session · browser calls</text>
-                <text class="note" x="628" y="106">to the server pod</text>
+                <text class="edge-label" x="628" y="92"><tspan font-weight="600">1.</tspan> sandbox calls · browser calls</text>
+                <text class="note" x="628" y="106">workspaceId or browserId on every call</text>
 
                 <line class="edge" x1="780" y1="250" x2="838" y2="250" marker-end="url(#rp-arrow)"/>
                 <text class="edge-label" x="820" y="242" text-anchor="middle">rows</text>
@@ -134,7 +134,7 @@
 
                 <line class="edge" x1="70" y1="320" x2="70" y2="548" marker-end="url(#rp-arrow)"/>
                 <text class="edge-label" x="78" y="496">app traffic</text>
-                <text class="note" x="78" y="510">to the worker's :4002</text>
+                <text class="note" x="78" y="510">mTLS, x-workspace-app</text>
 
                 <line class="edge" x1="249" y1="596" x2="249" y2="614" marker-end="url(#rp-arrow)"/>
                 <line class="edge" x1="619" y1="596" x2="619" y2="614" marker-end="url(#rp-arrow)"/>
@@ -149,7 +149,7 @@
                 <text class="note" x="978" y="634">every 10 s, expires 30 s</text>
               </svg>
             </div>
-            <figcaption>C4 component diagram: preview-runner as one server pod and many worker pods. Numbers follow one call. Solid arrows are calls. Grey boxes are outside preview-runner.</figcaption>
+            <figcaption>C4 component diagram: code-harness as one server pod and many worker pods. Numbers follow one call. Solid arrows are calls. Grey boxes are outside code-harness.</figcaption>
           </figure>
 
           <h3>Components</h3>
@@ -158,12 +158,12 @@
               <tr><th>Component</th><th>Pod</th><th>What it does</th></tr>
             </thead>
             <tbody>
-              <tr><td>Proxy</td><td>Server</td><td>On <code>PROXY_PORT</code>. Takes every request for <code>PREVIEW_DOMAIN</code>, HTTP and WebSocket, and sends it to its workspace's port forwarder. The workspace comes from the subdomain or from a signed cookie, by <code>PREVIEW_MODE</code>. See <a href="#proxy">Proxy</a>.</td></tr>
-              <tr><td>preview + browser API</td><td>Server</td><td>The endpoints appx calls. Finds the app's worker, for a session through its row's appId, and forwards each call to that worker's internal API. The worker writes the rows.</td></tr>
-              <tr><td>Placement controller</td><td>Server</td><td>A module both of the above use: appId → worker pod, through Redis.</td></tr>
+              <tr><td>Proxy</td><td>Server</td><td>On <code>PROXY_PORT</code>. Takes every request for <code>PROXY_URL</code>, HTTP and WebSocket, and sends it to its workspace's port forwarder. The workspace comes from the subdomain or from a signed cookie, by <code>PROXY_MODE</code>. See <a href="#proxy">Proxy</a>.</td></tr>
+              <tr><td>Sandbox + browser API</td><td>Server</td><td>The endpoints agents call, at <code>/api/v1</code> and <code>/mcp</code>, through the Code Harness SDK, LangChain or an MCP client. Finds the workspace's worker, for a browser session through its row's workspaceId, and forwards each call to that worker's internal API.</td></tr>
+              <tr><td>Placement controller</td><td>Server</td><td>A module both of the above use: workspaceId → worker pod, through Redis.</td></tr>
               <tr><td>Internal API</td><td>Worker</td><td><code>/internal/sandbox/*</code> and <code>/internal/chromium/*</code>. Drives this pod's sandbox and Chromium.</td></tr>
               <tr><td>Port forwarder</td><td>Worker</td><td>On the pod's own port, 4002. Hands <code>&lt;appId&gt;</code> traffic to <code>localhost:&lt;port&gt;</code>.</td></tr>
-              <tr><td>Sandbox</td><td>Worker</td><td>Runs each app's dev server on a port from <code>PREVIEW_PORT_MIN</code>–<code>MAX</code>, bound to 127.0.0.1.</td></tr>
+              <tr><td>Sandbox</td><td>Worker</td><td>Runs each workspace's app on a port from <code>SANDBOX_PORT_MIN</code>–<code>MAX</code>, bound to 127.0.0.1.</td></tr>
               <tr><td>Chromium</td><td>Worker</td><td>The chromium plugin, <code>plugins/chromium.ts</code>: one Chromium in its own network namespace, one page per session. See <a href="#browser-sessions">Browsers</a>.</td></tr>
               <tr><td>Stats reporter</td><td>Worker</td><td>Writes this pod's load and address to Redis every 10 s.</td></tr>
             </tbody>
@@ -177,7 +177,7 @@
             </thead>
             <tbody>
               <tr><td>Server</td><td><code>PORT</code>, 3000</td><td>External</td><td><code>HOST</code>, every interface in the image</td><td>HTTP. The API at <code>/api/v1</code>, MCP at <code>/mcp</code>, the web pages, <code>/healthz</code>, and <code>POST /workers/register</code> for workers.</td></tr>
-              <tr><td>Server</td><td><code>PROXY_PORT</code>, 3001</td><td>External</td><td><code>HOST</code>, every interface in the image</td><td>HTTP and WebSocket for <code>PREVIEW_DOMAIN</code>: the proxy. See <a href="#proxy">Proxy</a>.</td></tr>
+              <tr><td>Server</td><td><code>PROXY_PORT</code>, 3001</td><td>External</td><td><code>HOST</code>, every interface in the image</td><td>HTTP and WebSocket for <code>PROXY_URL</code>: the proxy. See <a href="#proxy">Proxy</a>.</td></tr>
               <tr><td>Worker</td><td><code>PORT</code>, 3000</td><td>External</td><td>The pod's IPv4 address, registered in <code>pods:&lt;name&gt;</code></td><td>HTTPS with mTLS, for the server only. The internal API, <code>/internal/sandbox/*</code> and <code>/internal/chromium/*</code>; a request with the <code>x-workspace-app</code> header is app traffic for the port forwarder instead. See <a href="#authentication">Authentication</a>.</td></tr>
               <tr><td>Worker</td><td><code>SANDBOX_PORT_MIN</code>–<code>MAX</code>, 4100–4149</td><td>Internal</td><td>127.0.0.1</td><td>One per running sandbox: its launch's port, mapped from inside the sandbox. Reached only by the port forwarder and by Chromium tabs of the same workspace.</td></tr>
               <tr><td>Worker</td><td>9222</td><td>Internal</td><td>127.0.0.1</td><td>Chromium's CDP, for the chromium manager and the runner of each browser call.</td></tr>
@@ -1802,73 +1802,124 @@
 
           <figure>
             <div class="diagram">
-              <svg class="c4" viewBox="0 0 1000 600" role="img" aria-label="The layers from the node down to workspace code on a worker pod under Kubernetes. The worker pod runs with privileged: true and, on containerd, in the node's cgroup namespace. In it, dumb-init is PID 1 as root and forwards signals. The startup, the image's CMD, runs once as root: unshare with its own cgroup and mount namespaces, mount a fresh cgroup2, chown the cgroup root to bun, then setpriv to bun, and it becomes the worker. The worker runs as bun, uid 1000, with no capabilities, in its own cgroup and mount namespaces. The worker process, bun harness/dist/index.js, owns /sys/fs/cgroup, which is the container's own cgroup: no processes in it, memory, cpu and pids turned on, the StatefulSet's limits applied there; runner/ holds the worker and dumb-init, and one cgroup per sandbox is made before it starts and removed after. Cgroups above the container's are hidden from the worker. The worker starts each sandbox under bwrap: its own user, pid, ipc, uts and cgroup namespaces, --cap-drop ALL, no_new_privs, --die-with-parent, --new-session, system paths read-only, /workspace read-write, /tmp empty. Workspace code runs there with sh -c, a launch or an exec, as uid 0 in its user namespace, which is bun, uid 1000, on the pod, with no capabilities, and setuid binaries don't raise it.">
+              <svg class="c4" viewBox="0 0 1000 960" role="img" aria-label="The layers from the node down to workspace code on a worker pod under Kubernetes. Actors are the users processes run as, processes are what runs, resources are what they act on. The node owns the real cgroup tree in the node's cgroup namespace, its root owned by root with mode 555. The worker pod runs privileged, with every capability and every device, and on containerd in the node's cgroup namespace. Its resource is the container cgroup, the same directory as the worker container in the node's tree, where the StatefulSet's limits apply. Root, uid 0 with every capability, runs dumb-init, PID 1, and the startup, the image's CMD, once. dumb-init starts the startup and forwards signals to the worker process. The startup runs unshare --cgroup, making the worker's cgroup namespace, whose root is the container cgroup; unshare --mount, making the worker's mount namespace; mounts a fresh cgroup2 at /sys/fs/cgroup and chowns it to bun; then setpriv to bun and execs the worker process. bun, uid 1000 with no capabilities, runs the worker process, bun harness/dist/index.js. The worker process creates runner/ and one workspace-id/ cgroup per sandbox in /sys/fs/cgroup, moves the worker and dumb-init into runner/, turns on memory, cpu and pids, and starts each sandbox under bwrap. In bwrap, uid 0 inside its user namespace, mapped to bun on the pod, with no capabilities and no_new_privs, runs workspace code with sh -c, a launch or an exec. bwrap's resources are its cgroup, whose root is the worker's workspace-id/ cgroup with its limits; its own user, pid, ipc, uts and cgroup namespaces; and its files: system paths read-only, /workspace read-write and /tmp empty.">
                 <defs>
                   <marker id="sec-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
                     <path d="M0 0L10 5L0 10z" class="arrowhead"/>
                   </marker>
                 </defs>
 
-                <rect class="boundary" x="16" y="16" width="968" height="568" rx="10"/>
-                <text class="label name" x="28" y="574">node</text>
+                <rect class="boundary" x="16" y="16" width="968" height="928" rx="10"/>
+                <text class="label name" x="32" y="40">node</text>
+                <text class="note" x="32" y="58">kernel · every device</text>
+                <rect class="person" x="32" y="76" width="16" height="12" rx="4"/>
+                <text class="note" x="56" y="86">actor: the user the process it points to runs as</text>
+                <rect class="component" x="32" y="96" width="16" height="12" rx="2"/>
+                <text class="note" x="56" y="106">process</text>
+                <rect class="container" x="32" y="116" width="16" height="12" rx="2"/>
+                <text class="note" x="56" y="126">resource</text>
+                <rect class="container" x="620" y="32" width="340" height="96" rx="6"/>
+                <text class="on-dark name" x="790" y="56" text-anchor="middle">cgroup tree</text>
+                <text class="on-dark type" x="790" y="73" text-anchor="middle">[the node's cgroup namespace]</text>
+                <text class="on-dark type" x="636" y="96">/ · root:root · mode 555</text>
+                <text class="on-dark type" x="636" y="114">contains kubepods.slice/…/&lt;worker container&gt;</text>
 
-                <rect class="group" x="32" y="32" width="936" height="520" rx="8"/>
-                <text class="label name" x="44" y="526">worker pod</text>
-                <text class="note" x="44" y="542">privileged: true · on containerd, the node's cgroup namespace</text>
+                <rect class="group" x="32" y="148" width="936" height="784" rx="8"/>
+                <text class="label name" x="48" y="172">worker pod</text>
+                <text class="note" x="48" y="190">privileged: true · every capability, every device</text>
+                <text class="note" x="48" y="206">on containerd: the node's cgroup namespace</text>
+                <rect class="person" x="48" y="236" width="150" height="48" rx="20"/>
+                <text class="on-dark name" x="123" y="256" text-anchor="middle">root</text>
+                <text class="on-dark type" x="123" y="273" text-anchor="middle">uid 0 · every capability</text>
+                <rect class="component" x="240" y="220" width="270" height="48" rx="6"/>
+                <text class="on-light name" x="375" y="240" text-anchor="middle">dumb-init</text>
+                <text class="on-light type" x="375" y="257" text-anchor="middle">[PID 1]</text>
+                <rect class="component" x="240" y="284" width="270" height="56" rx="6"/>
+                <text class="on-light name" x="375" y="306" text-anchor="middle">startup</text>
+                <text class="on-light type" x="375" y="323" text-anchor="middle">[the image's CMD · once]</text>
+                <rect class="container" x="620" y="164" width="332" height="80" rx="6"/>
+                <text class="on-dark name" x="786" y="186" text-anchor="middle">container cgroup</text>
+                <text class="on-dark type" x="786" y="203" text-anchor="middle">[part of the node's tree]</text>
+                <text class="on-dark type" x="636" y="222">kubepods.slice/…/&lt;worker container&gt;</text>
+                <text class="on-dark type" x="636" y="237">the StatefulSet's limits apply here</text>
 
-                <rect class="component" x="48" y="48" width="180" height="72" rx="6"/>
-                <text class="on-light name" x="138" y="74" text-anchor="middle">dumb-init</text>
-                <text class="on-light type" x="138" y="91" text-anchor="middle">[PID 1 · root]</text>
-                <text class="on-light type" x="138" y="109" text-anchor="middle">forwards signals</text>
+                <rect class="group" x="48" y="376" width="904" height="540" rx="8"/>
+                <text class="label name" x="64" y="400">worker</text>
+                <rect class="container" x="620" y="392" width="316" height="44" rx="6"/>
+                <text class="on-dark name" x="778" y="411" text-anchor="middle">cgroup namespace</text>
+                <text class="on-dark type" x="778" y="427" text-anchor="middle">root = the container cgroup</text>
+                <rect class="container" x="620" y="448" width="316" height="44" rx="6"/>
+                <text class="on-dark name" x="778" y="467" text-anchor="middle">mount namespace</text>
+                <text class="on-dark type" x="778" y="483" text-anchor="middle">the worker's own mounts</text>
+                <rect class="container" x="620" y="504" width="316" height="150" rx="6"/>
+                <text class="on-dark name" x="778" y="528" text-anchor="middle">/sys/fs/cgroup</text>
+                <text class="on-dark type" x="778" y="545" text-anchor="middle">[fresh cgroup2 mount · owned by bun]</text>
+                <text class="on-dark type" x="636" y="572">/ = the container cgroup · nothing above</text>
+                <text class="on-dark type" x="652" y="589">no processes · memory, cpu, pids on</text>
+                <text class="on-dark type" x="636" y="613">runner/ · the worker and dumb-init</text>
+                <text class="on-dark type" x="636" y="637">workspace-&lt;id&gt;/ · one per sandbox</text>
+                <rect class="person" x="64" y="558" width="150" height="48" rx="20"/>
+                <text class="on-dark name" x="139" y="578" text-anchor="middle">bun</text>
+                <text class="on-dark type" x="139" y="595" text-anchor="middle">uid 1000 · no capabilities</text>
+                <rect class="component" x="240" y="552" width="270" height="60" rx="6"/>
+                <text class="on-light name" x="375" y="576" text-anchor="middle">worker process</text>
+                <text class="on-light type" x="375" y="593" text-anchor="middle">[bun harness/dist/index.js]</text>
 
-                <rect class="component" x="244" y="48" width="348" height="72" rx="6"/>
-                <text class="on-light name" x="418" y="74" text-anchor="middle">startup</text>
-                <text class="on-light type" x="418" y="91" text-anchor="middle">[root · once · the image's CMD]</text>
-                <text class="on-light type" x="418" y="109" text-anchor="middle">unshare · mount cgroup2 · chown · setpriv bun</text>
+                <rect class="group" x="64" y="684" width="872" height="216" rx="8"/>
+                <text class="label name" x="80" y="706">bwrap</text>
+                <rect class="person" x="80" y="756" width="190" height="56" rx="20"/>
+                <text class="on-dark name" x="175" y="776" text-anchor="middle">uid 0 inside</text>
+                <text class="on-dark type" x="175" y="793" text-anchor="middle">no capabilities · no_new_privs</text>
+                <rect class="component" x="290" y="752" width="250" height="60" rx="6"/>
+                <text class="on-light name" x="415" y="776" text-anchor="middle">workspace code</text>
+                <text class="on-light type" x="415" y="793" text-anchor="middle">[sh -c · a launch or an exec]</text>
+                <rect class="container" x="620" y="700" width="300" height="44" rx="6"/>
+                <text class="on-dark name" x="770" y="719" text-anchor="middle">cgroup</text>
+                <text class="on-dark type" x="770" y="735" text-anchor="middle">/ = workspace-&lt;id&gt;/ · its limits</text>
+                <rect class="container" x="620" y="752" width="300" height="44" rx="6"/>
+                <text class="on-dark name" x="770" y="771" text-anchor="middle">namespaces</text>
+                <text class="on-dark type" x="770" y="787" text-anchor="middle">own user · pid · ipc · uts · cgroup</text>
+                <rect class="container" x="620" y="804" width="300" height="60" rx="6"/>
+                <text class="on-dark name" x="770" y="823" text-anchor="middle">files</text>
+                <text class="on-dark type" x="770" y="840" text-anchor="middle">system paths read-only</text>
+                <text class="on-dark type" x="770" y="855" text-anchor="middle">/workspace read-write · /tmp empty</text>
+                <text class="note" x="80" y="848">--cap-drop ALL · --die-with-parent · --new-session</text>
 
-                <line class="edge" x1="418" y1="120" x2="418" y2="150" marker-end="url(#sec-arrow)"/>
-                <text class="edge-label" x="426" y="140">exec, as bun</text>
+                <line class="edge" x1="198" y1="252" x2="238" y2="244" marker-end="url(#sec-arrow)"/>
+                <line class="edge" x1="198" y1="270" x2="238" y2="310" marker-end="url(#sec-arrow)"/>
+                <line class="edge" x1="214" y1="582" x2="238" y2="582" marker-end="url(#sec-arrow)"/>
+                <line class="edge" x1="270" y1="782" x2="288" y2="782" marker-end="url(#sec-arrow)"/>
 
-                <rect class="group" x="48" y="152" width="904" height="348" rx="8"/>
-                <text class="label name" x="60" y="474">worker</text>
-                <text class="note" x="60" y="490">bun, uid 1000 · no capabilities · its own cgroup and mount namespaces</text>
+                <line class="edge" x1="300" y1="268" x2="300" y2="282" marker-end="url(#sec-arrow)"/>
+                <text class="edge-label" x="306" y="280">starts</text>
+                <path class="edge" d="M240 256 H226 V536 H300 V550" marker-end="url(#sec-arrow)"/>
+                <text class="edge-label halo" x="232" y="470">forwards signals</text>
 
-                <rect class="component" x="64" y="168" width="528" height="60" rx="6"/>
-                <text class="on-light name" x="328" y="192" text-anchor="middle">worker process</text>
-                <text class="on-light type" x="328" y="210" text-anchor="middle">[bun harness/dist/index.js]</text>
+                <path class="edge" d="M510 296 H566 V414 H618" marker-end="url(#sec-arrow)"/>
+                <text class="edge-label halo" x="560" y="418" text-anchor="end">unshare --cgroup</text>
+                <path class="edge" d="M510 312 H582 V470 H618" marker-end="url(#sec-arrow)"/>
+                <text class="edge-label halo" x="576" y="474" text-anchor="end">unshare --mount</text>
+                <path class="edge" d="M510 328 H598 V524 H618" marker-end="url(#sec-arrow)"/>
+                <text class="edge-label halo" x="592" y="528" text-anchor="end">mount cgroup2 · chown bun</text>
+                <line class="edge" x1="390" y1="340" x2="390" y2="550" marker-end="url(#sec-arrow)"/>
+                <text class="edge-label halo" x="398" y="500">setpriv bun · exec</text>
 
-                <line class="edge" x1="328" y1="228" x2="328" y2="254" marker-end="url(#sec-arrow)"/>
-                <text class="edge-label" x="336" y="246">starts each sandbox</text>
+                <line class="edge" x1="510" y1="590" x2="618" y2="590" marker-end="url(#sec-arrow)"/>
+                <text class="edge-label halo" x="564" y="582" text-anchor="middle">creates cgroups</text>
+                <line class="edge" x1="415" y1="612" x2="415" y2="750" marker-end="url(#sec-arrow)"/>
+                <text class="edge-label halo" x="423" y="664">starts each sandbox</text>
 
-                <rect class="group" x="64" y="256" width="528" height="200" rx="8"/>
-                <text class="label name" x="76" y="276">bwrap</text>
-                <text class="note" x="76" y="293">own user · pid · ipc · uts · cgroup namespaces</text>
-                <text class="note" x="76" y="309">--cap-drop ALL · no_new_privs · --die-with-parent · --new-session</text>
-                <text class="note" x="76" y="325">system paths read-only · /workspace read-write · /tmp empty</text>
-
-                <rect class="component" x="80" y="340" width="496" height="100" rx="6"/>
-                <text class="on-light name" x="328" y="364" text-anchor="middle">workspace code</text>
-                <text class="on-light type" x="328" y="381" text-anchor="middle">[sh -c · a launch or an exec]</text>
-                <text class="on-light type" x="328" y="403" text-anchor="middle">uid 0 in its user namespace, bun (1000) on the pod</text>
-                <text class="on-light type" x="328" y="420" text-anchor="middle">no capabilities · setuid binaries don't raise it</text>
-
-                <rect class="component" x="616" y="168" width="320" height="288" rx="6"/>
-                <text class="on-light name" x="776" y="192" text-anchor="middle">/sys/fs/cgroup</text>
-                <text class="on-light type" x="776" y="209" text-anchor="middle">[the container's own cgroup · owned by bun]</text>
-                <text class="on-light type" x="632" y="238">/</text>
-                <text class="on-light type" x="648" y="255">no processes · memory, cpu, pids on</text>
-                <text class="on-light type" x="648" y="271">the StatefulSet's limits apply here</text>
-                <text class="on-light type" x="632" y="299">runner/</text>
-                <text class="on-light type" x="648" y="316">the worker and dumb-init</text>
-                <text class="on-light type" x="632" y="344">one cgroup per sandbox</text>
-                <text class="on-light type" x="648" y="361">made before it starts, removed after</text>
-                <text class="on-light type" x="632" y="392">cgroups above the container's are hidden</text>
-                <text class="on-light type" x="632" y="409">from the worker and everything under it</text>
-
-                <line class="edge" x1="592" y1="198" x2="614" y2="198" marker-end="url(#sec-arrow)"/>
+                <line class="edge trust" x1="790" y1="128" x2="790" y2="164"/>
+                <text class="edge-label halo" x="798" y="150">same directory</text>
+                <path class="edge trust" d="M944 244 V414 H938"/>
+                <text class="edge-label halo" x="936" y="320" text-anchor="end">root of the worker's cgroup namespace</text>
+                <line class="edge trust" x1="700" y1="654" x2="700" y2="700"/>
+                <text class="edge-label halo" x="708" y="676">workspace-&lt;id&gt;/ is its /</text>
+                <line class="edge trust" x1="139" y1="606" x2="139" y2="756"/>
+                <text class="edge-label halo" x="147" y="664">is bun on the pod</text>
               </svg>
             </div>
-            <figcaption>C4 component diagram: the layers from the node down to workspace code on a worker pod under Kubernetes. Each box sits inside the one around it.</figcaption>
+            <figcaption>C4 component diagram: the layers from the node down to workspace code on a worker pod under Kubernetes. Dark rounded boxes are actors, the user a process runs as; light boxes are processes; mid-blue boxes are resources. Each layer sits inside the one around it. Solid arrows are what a process does; dotted lines join the same thing seen from two layers.</figcaption>
           </figure>
 
           <h3>Runtimes</h3>
