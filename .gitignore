@@ -10,3 +10,4 @@ deploy/k8s/*
 !deploy/k8s/example/
 deploy/k8s/example/secret.env
 deploy/k8s/example/ca.*
+sdk/js/dist
