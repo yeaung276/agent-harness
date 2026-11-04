@@ -57,10 +57,19 @@ jobs:
             echo "new=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - if: steps.version.outputs.new == 'true'
-        run: npm publish --provenance --access public
+      # the registry can refuse a version that npm view doesn't show yet; that version is published already
+      - id: publish
+        if: steps.version.outputs.new == 'true'
+        run: |
+          if npm publish --provenance --access public 2>&1 | tee "$RUNNER_TEMP/publish.log"; then
+            echo "published=true" >> "$GITHUB_OUTPUT"
+          elif grep -q "cannot publish over the previously published" "$RUNNER_TEMP/publish.log"; then
+            echo "${{ steps.version.outputs.version }} is already on npm; nothing to publish"
+          else
+            exit 1
+          fi
 
-      - if: steps.version.outputs.new == 'true'
+      - if: steps.publish.outputs.published == 'true'
         run: |
           git tag "sdk-js-v${{ steps.version.outputs.version }}" "$GITHUB_SHA"
           git push origin "sdk-js-v${{ steps.version.outputs.version }}"
