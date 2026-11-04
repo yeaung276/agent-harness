@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Code-Harness Integrations</title>
+  <link rel="stylesheet" href="assets/site.css?v=4">
+</head>
+<body data-root="" data-page="integrations">
+  <div class="layout">
+    <aside class="sidebar"></aside>
+    <main>
+      <div class="content">
+        <h1>Integrations</h1>
+        <p class="lede">Give an agent framework a Code-Harness sandbox to write code in, run it, launch the app and check it in a browser. Each integration is part of <a href="sdk.html"><code>@code-harness/sdk</code></a>.</p>
+
+        <section class="doc-section" id="langchain">
+          <h2>LangChain</h2>
+          <p>A <a href="sdk.html#sandbox"><code>Sandbox</code></a> is a <a href="https://github.com/langchain-ai/deepagentsjs">deepagents</a> sandbox backend, like <code>@langchain/daytona</code> and <code>@langchain/modal</code>. Passed as <code>backend</code>, it is where deepagents' file tools and <code>execute</code> act. Three LangChain middlewares add the rest:</p>
+          <table class="compact">
+            <thead>
+              <tr><th>Middleware</th><th>Takes</th><th>Adds</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><a href="#code-harness"><code>createCodeHarnessMiddleware</code></a></td><td>a sandbox</td><td>Launching the app and checking it in the sandbox's browser.</td></tr>
+              <tr><td><a href="#browser-use"><code>createBrowserUseMiddleware</code></a></td><td>a browser</td><td>The browser tools alone.</td></tr>
+              <tr><td><a href="#skill-use"><code>createSkillUseMiddleware</code></a></td><td>a sandbox and skill paths</td><td>Agent skills stored and run in the sandbox.</td></tr>
+            </tbody>
+          </table>
+
+          <h3>Installation</h3>
+          <pre class="schema"><code>npm install @code-harness/sdk deepagents langchain @langchain/core zod</code></pre>
+          <p>Set <code>CODE_HARNESS_BASE_URL</code> and <code>CODE_HARNESS_TOKEN</code>, or pass them to <a href="sdk.html#client"><code>Client</code></a>.</p>
+
+          <h3>deepagents tools</h3>
+          <p>With the sandbox as <code>backend</code>, the agent gets deepagents' own tools on it:</p>
+          <table class="compact">
+            <thead>
+              <tr><th>Tool</th><th>Does</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>ls</code>, <code>read_file</code>, <code>write_file</code>, <code>edit_file</code>, <code>glob</code>, <code>grep</code></td><td>Work on the sandbox's files, under <code>/workspace</code>.</td></tr>
+              <tr><td><code>execute</code></td><td>Runs a shell command from <code>/workspace</code>, as <a href="sdk.html#sandbox"><code>sandbox.execute()</code></a>.</td></tr>
+            </tbody>
+          </table>
+
+          <h3 id="code-harness">createCodeHarnessMiddleware()</h3>
+          <pre class="schema"><code>createCodeHarnessMiddleware(options: { sandbox: Sandbox }): AgentMiddleware</code></pre>
+          <p>The tools to launch the sandbox's app and check it in <a href="sdk.html#sandbox-browser"><code>sandbox.browser</code></a>: <code>launch_app</code> and <code>app_logs</code>, and every <a href="#browser-use">browser use</a> tool on <code>sandbox.browser</code>, where a path like <code>/</code> opens the launched app. It also adds a note to the system prompt: files are in <code>/workspace</code>, dependencies are installed in the command that needs them, and the app is opened in the browser at a path like <code>/</code>.</p>
+          <table class="compact">
+            <thead>
+              <tr><th>Tool</th><th>Arguments</th><th>Does</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>launch_app</code></td><td><code>command</code>, <code>port</code>, <code>env?</code></td><td>Stops the running app, starts this one, and returns its URL once it listens on <code>port</code>.</td></tr>
+              <tr><td><code>app_logs</code></td><td><code>tail?</code></td><td>The last lines the app wrote.</td></tr>
+            </tbody>
+          </table>
+          <pre class="schema"><code>import { createDeepAgent } from &quot;deepagents&quot;
+import { ChatAnthropic } from &quot;@langchain/anthropic&quot;
+import { Client, createCodeHarnessMiddleware } from &quot;@code-harness/sdk&quot;
+
+const client = new Client()
+const sandbox = await client.createSandbox({ name: &quot;todo-app&quot;, record: true })
+
+try {
+  const agent = createDeepAgent({
+    model: new ChatAnthropic({ model: &quot;claude-sonnet-5-5&quot; }),
+    backend: sandbox,
+    middleware: [createCodeHarnessMiddleware({ sandbox })],
+  })
+
+  const result = await agent.invoke({
+    messages: [{ role: &quot;user&quot;, content: &quot;Build a todo app with Express and check it works in the browser&quot; }],
+  })
+  console.log(result.messages.at(-1)?.content)
+} finally {
+  await sandbox.close()
+}</code></pre>
+
+          <h3 id="browser-use">createBrowserUseMiddleware()</h3>
+          <pre class="schema"><code>createBrowserUseMiddleware(options: { browser: Browser }): AgentMiddleware</code></pre>
+          <p>The browser tools, on any <a href="sdk.html#browser"><code>Browser</code></a>: a free one from <code>client.createBrowser()</code> to browse the public internet, or <code>sandbox.browser</code>. It needs no backend, so it also works with <code>createAgent</code>. Don't add it next to <code>createCodeHarnessMiddleware</code>, which already has these tools.</p>
+          <table class="compact">
+            <thead>
+              <tr><th>Tool</th><th>Arguments</th><th>Does</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>browser_navigate</code></td><td><code>url</code>, <code>until?</code></td><td>Opens a URL and returns the page as text and numbered refs.</td></tr>
+              <tr><td><code>browser_read</code></td><td><code>maxChars?</code>, <code>waitFor?</code></td><td>The current page as text and numbered refs.</td></tr>
+              <tr><td><code>browser_click</code></td><td><code>ref</code>, <code>waitFor?</code></td><td>Clicks a ref and returns the page after.</td></tr>
+              <tr><td><code>browser_type</code></td><td><code>ref</code>, <code>text</code>, <code>submit?</code>, <code>waitFor?</code></td><td>Types into a ref and returns the page after.</td></tr>
+              <tr><td><code>browser_screenshot</code></td><td><code>fullPage?</code>, <code>waitFor?</code></td><td>Saves a PNG in the sandbox and returns its path, which <code>read_file</code> opens. Only on <code>sandbox.browser</code> of a sandbox created with <code>record</code>.</td></tr>
+            </tbody>
+          </table>
+          <pre class="schema"><code>import { createAgent } from &quot;langchain&quot;
+import { Client, createBrowserUseMiddleware } from &quot;@code-harness/sdk&quot;
+
+const browser = await new Client().createBrowser()
+
+const agent = createAgent({
+  model: &quot;anthropic:claude-sonnet-5-5&quot;,
+  middleware: [createBrowserUseMiddleware({ browser })],
+})
+
+await agent.invoke({ messages: [{ role: &quot;user&quot;, content: &quot;What is the top story on news.ycombinator.com?&quot; }] })</code></pre>
+
+          <h3 id="skill-use">createSkillUseMiddleware()</h3>
+          <pre class="schema"><code>createSkillUseMiddleware(options: { sandbox: Sandbox; sources: string[] }): AgentMiddleware</code></pre>
+          <p>deepagents' standard skills middleware, <code>createSkillsMiddleware</code>, with the sandbox as the place skills are kept and run. A skill is a folder with a <code>SKILL.md</code>, as in <a href="https://github.com/langchain-ai/deepagentsjs">deepagents</a>. <code>sources</code> are folders in the sandbox: a folder of skills, like <code>/workspace/skills/</code>, or one skill, like <code>/workspace/skills/pdf/</code>. A later source wins over an earlier one for a skill with the same name.</p>
+          <p>The middleware lists each skill's name and description in the system prompt. The model opens a skill's <code>SKILL.md</code> with <code>read_file</code> and runs its scripts with <code>execute</code>, both in the sandbox, so the agent's <code>backend</code> must be the same sandbox.</p>
+          <p>Put skills into the sandbox with <a href="sdk.html#sandbox"><code>sandbox.uploadAsZip()</code></a>, or with any file method.</p>
+          <pre class="schema"><code>import { readFile } from &quot;node:fs/promises&quot;
+import { createDeepAgent } from &quot;deepagents&quot;
+import { Client, createSkillUseMiddleware } from &quot;@code-harness/sdk&quot;
+
+const sandbox = await new Client().createSandbox({ name: &quot;reports&quot; })
+await sandbox.uploadAsZip(await readFile(&quot;skills.zip&quot;), { path: &quot;/workspace/skills&quot; })
+
+const agent = createDeepAgent({
+  model: &quot;anthropic:claude-sonnet-5-5&quot;,
+  backend: sandbox,
+  middleware: [createSkillUseMiddleware({ sandbox, sources: [&quot;/workspace/skills/&quot;] })],
+})</code></pre>
+
+          <h3>Lifecycle</h3>
+          <table class="compact">
+            <thead>
+              <tr><th>What</th><th>Lives</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Sandbox, its files and skills</td><td>Until <code>sandbox.close()</code>. Every run given the same sandbox shares them.</td></tr>
+              <tr><td>The launched app</td><td>Until the next <code>launch_app</code> or <code>sandbox.stop()</code>. With no traffic for 15 minutes it stops, and the next request to its URL starts it again.</td></tr>
+              <tr><td>The browser</td><td>Closed when the run ends. The next run's first browser call opens it again, at the same URL with the same cookies. <code>sandbox.browser</code> is created on its first call.</td></tr>
+            </tbody>
+          </table>
+          <p>To keep a sandbox across processes, store <code>sandbox.id</code> and connect again with <a href="sdk.html#client"><code>client.getSandbox(id)</code></a>.</p>
+
+          <h3>Errors</h3>
+          <p>A tool that fails returns <code>Error: &lt;status or code&gt; &lt;message&gt;</code> to the model as its result, and the run goes on, so the model can fix the cause and try again. A failed <code>launch_app</code> returns the last lines of the app's log. Calls outside a tool, like <code>createSandbox</code> or <code>sandbox.close()</code>, throw <a href="sdk.html#errors"><code>CodeHarnessError</code></a>.</p>
+        </section>
+      </div>
+    </main>
+  </div>
+  <script src="assets/site.js?v=4"></script>
+</body>
+</html>

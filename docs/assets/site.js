@@ -1,12 +1,17 @@
 const NAV = [
   { id: "architecture", title: "Architecture", href: "index.html" },
   { id: "api", title: "API", href: "api.html" },
+  { id: "sdk", title: "SDK", href: "sdk.html" },
+  { id: "integrations", title: "Integrations", href: "integrations.html" },
   { id: "commands", title: "Commands", href: "commands.html" },
   { id: "schema", title: "Schema", href: "schema.html" },
   { id: "cache-keys", title: "Cache keys", href: "cache-keys.html" },
 ];
 
 const STATUS_LABEL = { draft: "Draft", soon: "Soon", live: "Current" };
+
+const SUN_ICON = '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>';
+const MOON_ICON = '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg>';
 
 function el(tag, attrs = {}, children = []) {
   const node = document.createElement(tag);
@@ -94,7 +99,8 @@ function renderNav(root, current) {
   ]);
   const themeToggle = el("button", { class: "theme-toggle", type: "button" });
   const nav = el("nav", { class: "nav" }, [el("ul", {}, NAV.map((item) => navItem(item, root, current)))]);
-  sidebar.replaceChildren(head, nav, themeToggle);
+  sidebar.replaceChildren(head, nav);
+  document.querySelector("main").before(el("header", { class: "topbar" }, [themeToggle]));
 
   head.querySelector(".menu-toggle").addEventListener("click", () => sidebar.classList.toggle("is-open"));
   setupTheme(themeToggle);
@@ -118,7 +124,12 @@ function setupTheme(button) {
   const html = document.documentElement;
   const systemDark = () => matchMedia("(prefers-color-scheme: dark)").matches;
   const isDark = () => (html.dataset.theme ? html.dataset.theme === "dark" : systemDark());
-  const label = () => (button.textContent = isDark() ? "Light theme" : "Dark theme");
+  const label = () => {
+    const text = isDark() ? "Switch to light theme" : "Switch to dark theme";
+    button.innerHTML = isDark() ? SUN_ICON : MOON_ICON;
+    button.setAttribute("aria-label", text);
+    button.title = text;
+  };
 
   const saved = readTheme();
   if (saved) html.dataset.theme = saved;

@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Code-Harness SDK</title>
+  <link rel="stylesheet" href="assets/site.css?v=4">
+</head>
+<body data-root="" data-page="sdk">
+  <div class="layout">
+    <aside class="sidebar"></aside>
+    <main>
+      <div class="content">
+        <h1>TypeScript SDK</h1>
+        <p class="lede">The official TypeScript client for Code-Harness. Create sandboxes and browsers, run commands, read and write files, launch apps and drive a browser against them, from your code or from a LangChain agent.</p>
+
+        <section class="doc-section" id="installation">
+          <h2>Installation</h2>
+          <pre class="schema"><code>npm install @code-harness/sdk</code></pre>
+          <p>The SDK runs on Node.js 20+ and Bun. To use a sandbox as a <a href="https://github.com/langchain-ai/deepagentsjs">deepagents</a> backend or to add the <a href="integrations.html#langchain">LangChain middleware</a>, also install the peer dependencies:</p>
+          <pre class="schema"><code>npm install deepagents langchain @langchain/core zod</code></pre>
+        </section>
+
+        <section class="doc-section" id="quickstart">
+          <h2>Quickstart</h2>
+          <p>Create an API token on the <strong>API tokens</strong> page of the web app, then:</p>
+          <pre class="schema"><code>import { Client } from &quot;@code-harness/sdk&quot;
+
+const client = new Client({
+  baseUrl: &quot;https://harness.example.com&quot;,
+  token: process.env.CODE_HARNESS_TOKEN,
+})
+
+const sandbox = await client.createSandbox({ name: &quot;hello&quot; })
+
+await sandbox.write(&quot;/workspace/index.js&quot;, `require(&quot;http&quot;).createServer((_, res) =&gt; res.end(&quot;hi&quot;)).listen(process.env.PORT)`)
+const { url } = await sandbox.launch({ command: &quot;node index.js&quot;, port: 3000 })
+console.log(url)
+
+const page = await sandbox.browser.navigate(&quot;/&quot;)
+console.log(page.text) // &quot;hi&quot;
+
+await sandbox.close()</code></pre>
+        </section>
+
+        <section class="doc-section" id="client">
+          <h2>Client</h2>
+          <p>The entry point. One client holds the server URL and token and creates every <a href="#sandbox">Sandbox</a> and <a href="#browser">Browser</a>.</p>
+
+          <h3>constructor</h3>
+          <pre class="schema"><code>new Client(options?: ClientOptions)</code></pre>
+          <table class="compact">
+            <thead>
+              <tr><th>Option</th><th>Type</th><th>Description</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>baseUrl</code></td><td><code>string</code></td><td>The server's URL. Defaults to <code>CODE_HARNESS_BASE_URL</code>.</td></tr>
+              <tr><td><code>token</code></td><td><code>string</code></td><td>An API token, <code>pat_…</code>. Defaults to <code>CODE_HARNESS_TOKEN</code>.</td></tr>
+              <tr><td><code>fetch</code></td><td><code>typeof fetch</code></td><td>The fetch to send requests with. Defaults to the global <code>fetch</code>.</td></tr>
+            </tbody>
+          </table>
+          <p>Throws <code>CodeHarnessError</code> with code <code>AUTHENTICATION_FAILED</code> when no URL or token is given or found in the environment.</p>
+
+          <h3>client.me()</h3>
+          <pre class="schema"><code>me(): Promise&lt;{ id: string; email: string }&gt;</code></pre>
+          <p>The user who created the token. Useful to check a token works.</p>
+
+          <h3>client.createSandbox()</h3>
+          <pre class="schema"><code>createSandbox(options?: CreateSandboxOptions): Promise&lt;Sandbox&gt;</code></pre>
+          <table class="compact">
+            <thead>
+              <tr><th>Option</th><th>Type</th><th>Description</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>name</code></td><td><code>string</code></td><td>Lowercase letters, digits and <code>-</code>, up to 63 characters, unique. Defaults to <code>sandbox-&lt;timestamp&gt;</code>.</td></tr>
+              <tr><td><code>env</code></td><td><code>Record&lt;string, string&gt;</code></td><td>Env set on every command and launch in the sandbox. Values are stored encrypted and never returned.</td></tr>
+              <tr><td><code>timeoutMs</code></td><td><code>number</code></td><td>How long each <code>execute</code> may run. Default <code>120000</code>, max <code>240000</code>.</td></tr>
+              <tr><td><code>record</code></td><td><code>boolean</code></td><td>Whether <a href="#sandbox-browser"><code>sandbox.browser</code></a> records a video and can take screenshots. Default <code>false</code>.</td></tr>
+            </tbody>
+          </table>
+          <p>Returns the new <a href="#sandbox">Sandbox</a>. Throws <code>CONFLICT</code> when the name is taken.</p>
+          <pre class="schema"><code>const sandbox = await client.createSandbox({ name: &quot;todo-app&quot;, env: { NODE_ENV: &quot;development&quot; } })</code></pre>
+
+          <h3>client.getSandbox()</h3>
+          <pre class="schema"><code>getSandbox(id: string, options?: { timeoutMs?: number; record?: boolean }): Promise&lt;Sandbox&gt;</code></pre>
+          <p>Connects to an existing sandbox, for example one created in an earlier run. Throws <code>NOT_FOUND</code> when no sandbox has this id.</p>
+
+          <h3>client.createBrowser()</h3>
+          <pre class="schema"><code>createBrowser(): Promise&lt;Browser&gt;</code></pre>
+          <p>A free <a href="#browser">Browser</a> on the public internet, not tied to any sandbox. To open an app running in a sandbox, use <a href="#sandbox-browser"><code>sandbox.browser</code></a> instead.</p>
+          <pre class="schema"><code>const browser = await client.createBrowser()
+const page = await browser.navigate(&quot;https://example.com&quot;)
+await browser.close()</code></pre>
+
+          <h3>client.getBrowser()</h3>
+          <pre class="schema"><code>getBrowser(id: string): Browser</code></pre>
+          <p>A handle to an existing free browser, without a request. The next call on it throws <code>NOT_FOUND</code> when no browser has this id.</p>
+        </section>
+
+        <section class="doc-section" id="sandbox">
+          <h2>Sandbox</h2>
+          <p>An isolated Linux environment with its own files, where you run commands and one long-running app. Files live under <code>/workspace</code> and commands run from there. A sandbox is kept, with its files, until it is deleted.</p>
+          <p><code>Sandbox</code> extends deepagents' <code>BaseSandbox</code>, so it can be passed as an agent's <code>backend</code> as is. See <a href="integrations.html#langchain">Integrations</a>.</p>
+
+          <h3>Properties</h3>
+          <table class="compact">
+            <thead>
+              <tr><th>Property</th><th>Type</th><th>Description</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>id</code></td><td><code>string</code></td><td>The sandbox's id.</td></tr>
+              <tr><td><code>name</code></td><td><code>string</code></td><td>The sandbox's name.</td></tr>
+              <tr><td><code>envKeys</code></td><td><code>string[]</code></td><td>The names in its env, sorted.</td></tr>
+              <tr><td><code>createdAt</code></td><td><code>Date</code></td><td>When it was created.</td></tr>
+            </tbody>
+          </table>
+
+          <h3>sandbox.execute()</h3>
+          <pre class="schema"><code>execute(command: string): Promise&lt;ExecuteResponse&gt;</code></pre>
+          <p>Runs <code>command</code> with <code>sh -c</code> from <code>/workspace</code> and waits for it to end. Returns <code>{ output, exitCode, truncated }</code>: <code>output</code> is stdout and stderr together, the last 16 KB of it. A command that fails still resolves; check <code>exitCode</code>. A command still running after the sandbox's <code>timeoutMs</code> is killed, and resolves with <code>exitCode: null</code> and output ending in <code>timed out after &lt;ms&gt; ms</code>.</p>
+          <pre class="schema"><code>const { output, exitCode } = await sandbox.execute(&quot;npm ci &amp;&amp; npm test&quot;)</code></pre>
+          <p>Dependency folders like <code>node_modules</code> may be empty on the next command. Install in the same command that needs them.</p>
+
+          <h3>Files</h3>
+          <p>Paths are absolute under <code>/workspace</code>, or relative to it. A path outside <code>/workspace</code> fails with <code>invalid_path</code>.</p>
+          <table class="compact">
+            <thead>
+              <tr><th>Method</th><th>Description</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>read(path, offset?, limit?)</code></td><td>A text file's lines, numbered, from line <code>offset</code>.</td></tr>
+              <tr><td><code>write(path, content)</code></td><td>Writes a file, with its folders, overwriting it.</td></tr>
+              <tr><td><code>edit(path, oldString, newString, replaceAll?)</code></td><td>Replaces <code>oldString</code>, which must occur once unless <code>replaceAll</code>.</td></tr>
+              <tr><td><code>delete(path)</code></td><td>Deletes a file or folder.</td></tr>
+              <tr><td><code>ls(path)</code></td><td>A folder's entries, with sizes.</td></tr>
+              <tr><td><code>glob(pattern, path?)</code></td><td>Files matching a glob, like <code>**/*.ts</code>.</td></tr>
+              <tr><td><code>grep(pattern, path?, glob?)</code></td><td>Lines matching a literal string, with file and line number.</td></tr>
+              <tr><td><code>uploadFiles(files)</code></td><td>Writes <code>[path, bytes][]</code>, overwriting. Text only; other content fails with <code>invalid_path</code>.</td></tr>
+              <tr><td><code>downloadFiles(paths)</code></td><td>Reads files as bytes.</td></tr>
+            </tbody>
+          </table>
+          <p>These follow the deepagents backend protocol: they don't throw for a missing or bad path, they return <code>{ error }</code>. <code>uploadFiles</code> and <code>downloadFiles</code> return one result per path, so some can succeed while others fail. Folders like <code>node_modules</code> and <code>.git</code> can't be read or written this way; use <code>execute</code>.</p>
+          <pre class="schema"><code>const [result] = await sandbox.downloadFiles([&quot;/workspace/package.json&quot;])
+if (result.error) throw new Error(result.error)
+const pkg = JSON.parse(new TextDecoder().decode(result.content!))</code></pre>
+
+          <h3 id="sandbox-uploadaszip">sandbox.uploadAsZip()</h3>
+          <pre class="schema"><code>uploadAsZip(zip: Blob | Uint8Array | ArrayBuffer, options?: { path?: string }): Promise&lt;{ path: string; files: number }&gt;</code></pre>
+          <p>Uploads a zip and extracts it into the folder at <code>path</code>, under <code>/workspace</code> or relative to it, created if missing. Defaults to <code>/workspace</code>. A file in the zip replaces a file at the same path; other files stay. Use it to load a project or folder into the sandbox in one call.</p>
+          <p>Resolves once the zip is checked, with the folder and how many files it has; the files appear in the sandbox shortly after. At most 100 MB uploaded and 1 GB extracted, otherwise throws <code>TOO_LARGE</code> and nothing is extracted. Throws <code>INVALID_REQUEST</code> when it isn't a zip, <code>path</code> is outside <code>/workspace</code>, or an entry leads outside the folder.</p>
+          <pre class="schema"><code>import { readFile } from &quot;node:fs/promises&quot;
+
+await sandbox.uploadAsZip(await readFile(&quot;site.zip&quot;), { path: &quot;site&quot; })</code></pre>
+
+          <h3>sandbox.launch()</h3>
+          <pre class="schema"><code>launch(options: LaunchOptions): Promise&lt;{ url: string }&gt;</code></pre>
+          <table class="compact">
+            <thead>
+              <tr><th>Option</th><th>Type</th><th>Description</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>command</code></td><td><code>string</code></td><td>Starts the app, like <code>npm ci &amp;&amp; npm start</code>.</td></tr>
+              <tr><td><code>port</code></td><td><code>number</code></td><td>The port the app listens on. <code>PORT</code> is set to it.</td></tr>
+              <tr><td><code>env</code></td><td><code>Record&lt;string, string&gt;</code></td><td>Added to the sandbox's env for this app.</td></tr>
+              <tr><td><code>network</code></td><td><code>{ allow?: string[]; deny?: string[] }</code></td><td>Hosts the app and commands can reach. See <a href="api.html#sandbox">Network</a>.</td></tr>
+            </tbody>
+          </table>
+          <p>Starts the app in the background and resolves once it listens on <code>port</code>, up to 90 seconds, with its public URL. One app runs per sandbox. An app with no traffic for 15 minutes is stopped, and the next request to its URL starts it again.</p>
+          <p>Throws <code>CONFLICT</code> when an app is already running; call <code>stop()</code> first. Throws <code>UPSTREAM_FAILED</code> when the app exits or never listens; the message ends with the last lines of its log.</p>
+
+          <h3>sandbox.logs()</h3>
+          <pre class="schema"><code>logs(options?: { tail?: number }): Promise&lt;string[]&gt;</code></pre>
+          <p>The last <code>tail</code> lines the app wrote, 200 by default, 1,000 at most. After the app ends, the last line says how.</p>
+
+          <h3>sandbox.stop()</h3>
+          <pre class="schema"><code>stop(): Promise&lt;void&gt;</code></pre>
+          <p>Stops the app. Files are kept. Resolves also when nothing is running.</p>
+
+          <h3 id="sandbox-browser">sandbox.browser</h3>
+          <pre class="schema"><code>readonly browser: Browser</code></pre>
+          <p>The sandbox's own <a href="#browser">Browser</a>. It runs next to the sandbox and can open its app: a URL that is a path, like <code>/login</code>, opens the app. Reading the property sends no request; the first call on it creates the browser, and every later call uses the same one. With the sandbox's <code>record</code>, it records a video into the sandbox each time it closes, and can take <a href="#browser-screenshot">screenshots</a>.</p>
+          <pre class="schema"><code>await sandbox.launch({ command: &quot;npm ci &amp;&amp; npm start&quot;, port: 3000 })
+const page = await sandbox.browser.navigate(&quot;/&quot;)</code></pre>
+
+          <h3 id="sandbox-close">sandbox.close()</h3>
+          <pre class="schema"><code>close(): Promise&lt;void&gt;</code></pre>
+          <p>Closes <code>sandbox.browser</code>, stops the app and deletes the sandbox with its files. This can't be undone. Any later call throws <code>NOT_FOUND</code>.</p>
+        </section>
+
+        <section class="doc-section" id="browser">
+          <h2>Browser</h2>
+          <p>A browser tab kept between calls: cookies, storage and URL last across calls. The page is read as text plus numbered refs, and you click and type by ref. A browser with no call for 5 minutes is closed, and its next call opens it again at the same URL with the same cookies.</p>
+
+          <h3>Properties</h3>
+          <table class="compact">
+            <thead>
+              <tr><th>Property</th><th>Type</th><th>Description</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>id</code></td><td><code>string | null</code></td><td>The browser's id. <code>null</code> on <code>sandbox.browser</code> until its first call.</td></tr>
+              <tr><td><code>sandboxId</code></td><td><code>string | null</code></td><td>The sandbox it belongs to, or <code>null</code> for a free browser.</td></tr>
+              <tr><td><code>record</code></td><td><code>boolean</code></td><td>Whether it records.</td></tr>
+            </tbody>
+          </table>
+
+          <h3>Page</h3>
+          <p><code>read</code>, <code>click</code> and <code>type</code> resolve with the page:</p>
+          <pre class="schema"><code>interface Page {
+  title: string
+  url: string
+  text: string
+  refs: { ref: number; tag: string; role: string | null; name: string; value: string; placeholder: string; href: string }[]
+}</code></pre>
+          <p>Each takes a <code>waitFor</code>, and <code>navigate</code> an <code>until</code>: <code>{ selector?, text?, timeoutMs? }</code>. The call waits until an element matching <code>selector</code> is visible and <code>text</code> is on the page, up to <code>timeoutMs</code> (10 seconds by default, 60 at most), then acts. When the wait runs out it throws <code>TIMEOUT</code> without acting.</p>
+
+          <h3>browser.navigate()</h3>
+          <pre class="schema"><code>navigate(url: string, options?: { until?: WaitFor }): Promise&lt;Page &amp; { status: number | null; error: string | null }&gt;</code></pre>
+          <p>Goes to <code>url</code> and resolves once the page loads. A page that fails to load still resolves; check <code>error</code>. <code>until</code> running out also resolves, with <code>error: &quot;waitFor timed out&quot;</code>.</p>
+
+          <h3>browser.read()</h3>
+          <pre class="schema"><code>read(options?: { maxChars?: number; waitFor?: WaitFor }): Promise&lt;Page&gt;</code></pre>
+
+          <h3>browser.click()</h3>
+          <pre class="schema"><code>click(ref: number, options?: { waitFor?: WaitFor }): Promise&lt;Page&gt;</code></pre>
+
+          <h3>browser.type()</h3>
+          <pre class="schema"><code>type(ref: number, text: string, options?: { submit?: boolean; waitFor?: WaitFor }): Promise&lt;Page&gt;</code></pre>
+          <p>Types into the field. <code>submit</code> presses Enter after.</p>
+          <pre class="schema"><code>let page = await browser.navigate(&quot;/login&quot;)
+const email = page.refs.find(r =&gt; r.name === &quot;Email&quot;)!
+page = await browser.type(email.ref, &quot;ada@example.com&quot;, { submit: true, waitFor: { text: &quot;Welcome&quot; } })</code></pre>
+
+          <h3 id="browser-screenshot">browser.screenshot()</h3>
+          <pre class="schema"><code>screenshot(options?: { fullPage?: boolean; waitFor?: WaitFor }): Promise&lt;{ path: string }&gt;</code></pre>
+          <p>Saves a PNG into the sandbox and resolves with its path, which <code>sandbox.downloadFiles</code> reads. Only on <code>sandbox.browser</code> of a sandbox with <code>record</code>; otherwise throws <code>CONFLICT</code>.</p>
+
+          <h3>browser.run()</h3>
+          <pre class="schema"><code>run(code: string, options?: { timeoutMs?: number }): Promise&lt;{ result: unknown; error: string | null; durationMs: number }&gt;</code></pre>
+          <p>Runs Playwright code against the page, with <code>page</code> in scope. <code>timeoutMs</code> defaults to 60 seconds, 120 at most.</p>
+
+          <h3>browser.close()</h3>
+          <pre class="schema"><code>close(): Promise&lt;void&gt;</code></pre>
+          <p>Closes the tab, and saves the video of a recording browser. A later call opens it again.</p>
+        </section>
+
+
+        <section class="doc-section" id="errors">
+          <h2>Errors</h2>
+          <p>Every method throws <code>CodeHarnessError</code>, except the deepagents file methods, which return <code>{ error }</code>. It extends deepagents' <code>SandboxError</code>.</p>
+          <pre class="schema"><code>import { CodeHarnessError } from &quot;@code-harness/sdk&quot;
+
+try {
+  await sandbox.launch({ command: &quot;npm start&quot;, port: 3000 })
+} catch (err) {
+  if (err instanceof CodeHarnessError &amp;&amp; err.code === &quot;CONFLICT&quot;) {
+    await sandbox.stop()
+  } else throw err
+}</code></pre>
+          <table class="compact">
+            <thead>
+              <tr><th>Property</th><th>Type</th><th>Description</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>code</code></td><td><code>string</code></td><td>One of the codes below.</td></tr>
+              <tr><td><code>status</code></td><td><code>number | null</code></td><td>The HTTP status, or <code>null</code> when no response came.</td></tr>
+              <tr><td><code>message</code></td><td><code>string</code></td><td>The server's message.</td></tr>
+            </tbody>
+          </table>
+          <table class="compact">
+            <thead>
+              <tr><th>Code</th><th>Status</th><th>When</th></tr>
+            </thead>
+            <tbody>
+              <tr><td><code>INVALID_REQUEST</code></td><td>400</td><td>An option is out of range or malformed.</td></tr>
+              <tr><td><code>AUTHENTICATION_FAILED</code></td><td>401</td><td>No token, or it is unknown, revoked or expired.</td></tr>
+              <tr><td><code>NOT_FOUND</code></td><td>404</td><td>The sandbox or browser doesn't exist.</td></tr>
+              <tr><td><code>CONFLICT</code></td><td>409</td><td>The name is taken, an app is already running, or screenshot without <code>record</code>.</td></tr>
+              <tr><td><code>TOO_LARGE</code></td><td>413</td><td>A zip is over 100 MB, or extracts to over 1 GB.</td></tr>
+              <tr><td><code>RATE_LIMITED</code></td><td>429</td><td>The sandbox already has 5 open browsers, counting those of other clients on the same sandbox.</td></tr>
+              <tr><td><code>UPSTREAM_FAILED</code></td><td>502</td><td>The app didn't start.</td></tr>
+              <tr><td><code>TIMEOUT</code></td><td>504</td><td>A browser call or its wait ran out.</td></tr>
+              <tr><td><code>NETWORK_ERROR</code></td><td>none</td><td>The server couldn't be reached.</td></tr>
+              <tr><td><code>UNKNOWN</code></td><td>any other</td><td>The server answered with a status not listed here, like 500.</td></tr>
+            </tbody>
+          </table>
+        </section>
+      </div>
+    </main>
+  </div>
+  <script src="assets/site.js?v=4"></script>
+</body>
+</html>
