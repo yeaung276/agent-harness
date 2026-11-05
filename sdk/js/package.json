@@ -1,6 +1,6 @@
 {
   "name": "@code-harness/sdk",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "TypeScript client for Code-Harness sandboxes and browsers, with a deepagents backend and LangChain middleware",
   "type": "module",
   "repository": {
