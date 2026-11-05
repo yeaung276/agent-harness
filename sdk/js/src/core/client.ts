@@ -85,8 +85,8 @@ export class Client extends BaseClient {
     return new Sandbox(this, (await response.json()) as Workspace, options)
   }
 
-  async getSandbox(id: string, options: SandboxOptions = {}): Promise<Sandbox> {
-    const response = await this.request('GET', `/workspaces/${encodeURIComponent(id)}`)
+  async getSandbox(idOrName: string, options: SandboxOptions = {}): Promise<Sandbox> {
+    const response = await this.request('GET', `/workspaces/${encodeURIComponent(idOrName)}`)
 
     return new Sandbox(this, (await response.json()) as Workspace, options)
   }

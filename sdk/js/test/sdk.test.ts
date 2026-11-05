@@ -39,6 +39,15 @@ describe.skipIf(!LIVE)('sdk', () => {
     expect(again.name).toBe(sandbox.name)
   })
 
+  test('getSandbox connects by name too, and throws NOT_FOUND for an unknown one', async () => {
+    const again = await client.getSandbox(sandbox.name)
+    expect(again.id).toBe(sandbox.id)
+
+    const err = await client.getSandbox(`sdk-missing-${Date.now()}`).catch(e => e)
+    expect(err).toBeInstanceOf(CodeHarnessError)
+    expect(err.code).toBe('NOT_FOUND')
+  })
+
   test('a bad token throws AUTHENTICATION_FAILED', async () => {
     const bad = new Client({ token: 'pat_nope' })
     const err = await bad.me().catch(e => e)

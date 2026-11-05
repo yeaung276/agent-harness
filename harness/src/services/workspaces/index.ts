@@ -17,6 +17,7 @@ const log = logger('workspaces-service')
 
 // 1–63 lowercase letters, digits and -, not starting or ending with -
 export const NAME_PATTERN = '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$'
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 export const createWorkspaceService = ({
   db,
@@ -86,6 +87,7 @@ export const createWorkspaceService = ({
     ) => {
       if (!new RegExp(NAME_PATTERN).test(name))
         throw new HttpError(400, 'Use 1–63 lowercase letters, digits and -, not starting or ending with -')
+      if (UUID.test(name)) throw new HttpError(400, "A name can't look like a uuid")
 
       const created = await db.transaction(async tx => {
         const [row] = await tx
@@ -103,6 +105,14 @@ export const createWorkspaceService = ({
     },
 
     get: getOrThrow,
+
+    getByIdOrName: async (idOrName: string) => {
+      if (UUID.test(idOrName)) return getOrThrow(idOrName)
+
+      const [workspace] = await select().where(eq(workspaces.name, idOrName))
+      if (!workspace) throw new HttpError(404, 'Workspace not found')
+      return workspace
+    },
 
     list: async ({ limit, offset }: { limit: number; offset: number }) => {
       const [items, total] = await Promise.all([

@@ -34,4 +34,8 @@ export const UpdateWorkspaceBody = Type.Object({
 
 export const WorkspaceParams = Type.Object({ id: Type.String({ format: 'uuid' }) })
 
+export const WorkspaceIdOrNameParams = Type.Object({
+  id: Type.Union([Type.String({ format: 'uuid' }), Type.String({ pattern: NAME_PATTERN })]),
+})
+
 export const UploadAccepted = Type.Object({ path: Type.String(), files: Type.Integer() })

@@ -84,8 +84,9 @@ await sandbox.close()</code></pre>
           <pre class="schema"><code>const sandbox = await client.createSandbox({ name: &quot;todo-app&quot;, env: { NODE_ENV: &quot;development&quot; } })</code></pre>
 
           <h3>client.getSandbox()</h3>
-          <pre class="schema"><code>getSandbox(id: string, options?: { timeoutMs?: number; record?: boolean }): Promise&lt;Sandbox&gt;</code></pre>
-          <p>Connects to an existing sandbox, for example one created in an earlier run. Throws <code>NOT_FOUND</code> when no sandbox has this id.</p>
+          <pre class="schema"><code>getSandbox(idOrName: string, options?: { timeoutMs?: number; record?: boolean }): Promise&lt;Sandbox&gt;</code></pre>
+          <p>Connects to an existing sandbox by its id or its exact name, for example one created in an earlier run. Throws <code>NOT_FOUND</code> when no sandbox has this id or name.</p>
+          <pre class="schema"><code>const sandbox = await client.getSandbox(&quot;todo-app&quot;)</code></pre>
 
           <h3>client.createBrowser()</h3>
           <pre class="schema"><code>createBrowser(): Promise&lt;Browser&gt;</code></pre>

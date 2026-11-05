@@ -145,6 +145,41 @@ describe('workspaces on the API', () => {
     expect(res.json().message).toBe('Workspace not found')
   })
 
+  test('I can get a workspace by its name, or by its id in capitals', async () => {
+    const name = uniqueName()
+    const created = (await createWorkspace(name)).json()
+
+    const byName = await getWorkspace(name)
+    const byId = await getWorkspace(created.id.toUpperCase())
+
+    expect([byName.statusCode, byId.statusCode]).toEqual([200, 200])
+    expect(byName.json()).toEqual(created)
+    expect(byId.json()).toEqual(created)
+  })
+
+  test('an unknown name is not found, and one that is no name is refused', async () => {
+    const unknown = await getWorkspace(uniqueName())
+
+    expect(unknown.statusCode).toBe(404)
+    expect(unknown.json().message).toBe('Workspace not found')
+    expect((await getWorkspace('My%20App')).statusCode).toBe(400)
+  })
+
+  test('a name that looks like a workspace id is refused', async () => {
+    const res = await createWorkspace(crypto.randomUUID())
+
+    expect(res.statusCode).toBe(400)
+    expect(res.json().message).toBe("A name can't look like a uuid")
+  })
+
+  test('only getting a workspace takes its name; changing one takes its id', async () => {
+    const name = uniqueName()
+    await createWorkspace(name)
+
+    expect((await updateWorkspace(name, { defaultEnv: { A: '1' } })).statusCode).toBe(400)
+    expect((await deleteWorkspace(name)).statusCode).toBe(400)
+  })
+
   test('deleting a workspace removes it, its files and its installed deps', async () => {
     const { id } = (await createWorkspace(uniqueName())).json()
     await writeFile(join(dir, id, 'index.html'), '<h1>hi</h1>')

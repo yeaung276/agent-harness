@@ -134,7 +134,7 @@ const agent = createDeepAgent({
               <tr><td>The browser</td><td>Closed when the run ends. The next run's first browser call opens it again, at the same URL with the same cookies. <code>sandbox.browser</code> is created on its first call.</td></tr>
             </tbody>
           </table>
-          <p>To keep a sandbox across processes, store <code>sandbox.id</code> and connect again with <a href="sdk.html#client"><code>client.getSandbox(id)</code></a>.</p>
+          <p>To keep a sandbox across processes, store <code>sandbox.id</code>, or give it a name, and connect again with <a href="sdk.html#client"><code>client.getSandbox(idOrName)</code></a>.</p>
 
           <h3>Errors</h3>
           <p>A tool that fails returns <code>Error: &lt;status or code&gt; &lt;message&gt;</code> to the model as its result, and the run goes on, so the model can fix the cause and try again. A failed <code>launch_app</code> returns the last lines of the app's log. Calls outside a tool, like <code>createSandbox</code> or <code>sandbox.close()</code>, throw <a href="sdk.html#errors"><code>CodeHarnessError</code></a>.</p>

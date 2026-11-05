@@ -191,13 +191,13 @@
 <h4>Response 201</h4>
 <p>The workspace object, with <code>status</code> <code>stopped</code>.</p>
 <h4>Errors · 400</h4>
-<p>The name doesn't match the pattern, a value in <code>defaultEnv</code> isn't a string, or <code>network</code> isn't lists of strings. Fastify's validation body: <code>statusCode</code>, <code>code</code>, <code>error</code>, <code>message</code>.</p>
+<p>The name doesn't match the pattern, a value in <code>defaultEnv</code> isn't a string, or <code>network</code> isn't lists of strings. Fastify's validation body: <code>statusCode</code>, <code>code</code>, <code>error</code>, <code>message</code>. A name shaped like a UUID answers <code>{&quot;message&quot;: &quot;A name can't look like a uuid&quot;}</code>.</p>
 <h4>Errors · 409</h4>
 <p>A workspace already has this name.</p>
   </div>
 </details>
 <details class="route">
-  <summary><span class="method get">GET</span><code class="route-path">/api/v1/workspaces/:id</code><span class="route-summary">One workspace</span></summary>
+  <summary><span class="method get">GET</span><code class="route-path">/api/v1/workspaces/:id</code><span class="route-summary">One workspace, by its id or its name</span></summary>
   <div class="route-body">
 <h4>Params</h4>
 <pre class="schema"><code>{
@@ -207,15 +207,26 @@
   ],
   &quot;properties&quot;: {
     &quot;id&quot;: {
-      &quot;format&quot;: &quot;uuid&quot;,
-      &quot;type&quot;: &quot;string&quot;
+      &quot;anyOf&quot;: [
+        {
+          &quot;format&quot;: &quot;uuid&quot;,
+          &quot;type&quot;: &quot;string&quot;
+        },
+        {
+          &quot;pattern&quot;: &quot;^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$&quot;,
+          &quot;type&quot;: &quot;string&quot;
+        }
+      ]
     }
   }
 }</code></pre>
+<p><code>id</code> is the workspace's id or its exact name. A UUID is always taken as an id, as no name can look like one. Only this route takes a name; the others take the id.</p>
 <h4>Response 200</h4>
 <p>The workspace object.</p>
+<h4>Errors · 400</h4>
+<p><code>id</code> is neither a UUID nor a name. Fastify's validation body: <code>statusCode</code>, <code>code</code>, <code>error</code>, <code>message</code>.</p>
 <h4>Errors · 404</h4>
-<p>No workspace has this id.</p>
+<p>No workspace has this id or name.</p>
   </div>
 </details>
 <details class="route">

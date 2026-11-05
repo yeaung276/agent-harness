@@ -9,6 +9,7 @@ import {
   UpdateWorkspaceBody,
   UploadAccepted,
   Workspace,
+  WorkspaceIdOrNameParams,
   WorkspaceParams,
 } from './schemas/workspaces.ts'
 
@@ -29,8 +30,10 @@ export const workspaces: FastifyPluginAsyncTypebox = async app => {
         )
   )
 
-  app.get('/workspaces/:id', { schema: { params: WorkspaceParams, response: { 200: Workspace } } }, async request =>
-    app.services.workspaces.get(request.params.id)
+  app.get(
+    '/workspaces/:id',
+    { schema: { params: WorkspaceIdOrNameParams, response: { 200: Workspace } } },
+    async request => app.services.workspaces.getByIdOrName(request.params.id)
   )
 
   app.patch(
