@@ -170,6 +170,31 @@ export class Sandbox {
     }>
   }
 
+  async readFile(
+    path: string,
+    { offset, limit }: { offset?: number; limit?: number } = {}
+  ): Promise<{ content: string; totalLines: number }> {
+    const query = new URLSearchParams()
+    if (offset !== undefined) query.set('offset', String(offset))
+    if (limit !== undefined) query.set('limit', String(limit))
+
+    const suffix = query.size ? `?${query}` : ''
+    const response = await this.#client.request('GET', `/workspaces/${this.id}/files/${encodePath(path)}${suffix}`)
+
+    return response.json() as Promise<{ content: string; totalLines: number }>
+  }
+
+  async editFile(path: string, search: string, replace: string): Promise<void> {
+    await this.#client.request('PATCH', `/workspaces/${this.id}/files/${encodePath(path)}`, { search, replace })
+  }
+
+  async tree(path = ''): Promise<string[]> {
+    const query = new URLSearchParams({ path })
+    const response = await this.#client.request('GET', `/workspaces/${this.id}/tree?${query}`)
+
+    return ((await response.json()) as { paths: string[] }).paths
+  }
+
   async launch(options: LaunchOptions): Promise<{ url: string }> {
     return (await this.#client.request('POST', `/workspaces/${this.id}/sandbox/launch`, options)).json() as Promise<{
       url: string
