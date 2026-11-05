@@ -16,6 +16,7 @@ const createServices = (app: FastifyInstance) => ({
     workerName: app.config.WORKER_NAME,
     sandboxIdleMs: app.config.SANDBOX_IDLE_MS,
     browserIdleMs: app.config.BROWSER_IDLE_MS,
+    minFreeMemoryMb: app.config.PLACEMENT_MIN_FREE_MEMORY_MB,
   }),
   tokens: createTokenService({ db: app.db }),
   workspaces: createWorkspaceService({

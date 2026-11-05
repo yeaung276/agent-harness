@@ -413,6 +413,18 @@ describe('screenshot', () => {
   })
 })
 
+describe('onChange', () => {
+  test('tells its listeners of every tab opened and closed', async () => {
+    const events: string[] = []
+    manager.onChange(event => events.push(event))
+
+    const { id } = await manager.create('user-1', { workspaceId: null, record: false })
+    await manager.close(id)
+
+    expect(events).toEqual(['open', 'close'])
+  })
+})
+
 describe('closing', () => {
   test('close closes the tab, saves where it is to the row and marks it closed', async () => {
     const { id } = await manager.create('user-1', { workspaceId: null, record: false })

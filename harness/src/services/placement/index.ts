@@ -14,20 +14,24 @@ const workspaceKey = (workspaceId: string) => `placement:workspace:${workspaceId
 const sessionKey = (sessionId: string) => `placement:session:${sessionId}`
 
 const freeSlots = (pod: Record<string, string>) => Number(pod.sandboxSlots) - Number(pod.sandboxes)
-const memoryUsed = (pod: Record<string, string>) =>
-  pod.memoryLimitBytes ? Number(pod.memoryBytes) / Number(pod.memoryLimitBytes) : 0
+// a worker whose sandboxes have no memory limit has no bound here
+const freeMemory = (pod: Record<string, string>) =>
+  pod.sandboxMemoryFreeBytes === undefined ? Infinity : Number(pod.sandboxMemoryFreeBytes)
 
 export const createPlacementService = ({
   redis,
   workerName,
   sandboxIdleMs,
   browserIdleMs,
+  minFreeMemoryMb,
 }: {
   redis: Redis
   workerName: string | undefined
   sandboxIdleMs: number
   browserIdleMs: number
+  minFreeMemoryMb: number
 }) => {
+  const minFreeMemory = minFreeMemoryMb * 1024 * 1024
   const bootId = crypto.randomUUID()
   const owner = `${workerName}:${bootId}`
 
@@ -54,13 +58,22 @@ export const createPlacementService = ({
       keys.push(...batch)
     } while (cursor !== '0')
 
-    const live = (await Promise.all(keys.map(key => redis.hgetall(key)))).filter(pod => pod.reportedAt && pod.bootId)
-    live.sort(
-      (a, b) => freeSlots(b) - freeSlots(a) || memoryUsed(a) - memoryUsed(b) || Number(a.sessions) - Number(b.sessions)
+    const eligible = (await Promise.all(keys.map(key => redis.hgetall(key)))).filter(
+      pod => pod.reportedAt && pod.bootId && freeSlots(pod) > 0 && freeMemory(pod) >= minFreeMemory
     )
-    if (!live[0]) throw new HttpError(503, 'No worker is available')
+    eligible.sort(
+      (a, b) => freeSlots(b) - freeSlots(a) || freeMemory(b) - freeMemory(a) || Number(a.sessions) - Number(b.sessions)
+    )
+    const pod = eligible[0]
+    if (!pod) throw new HttpError(503, 'No worker is available')
 
-    return live[0].hostname!
+    // counted until the worker's next report, so a burst of picks spreads instead of landing on the same worker
+    const key = `pods:${pod.hostname}`
+    const reserve = redis.multi().hincrby(key, 'sandboxes', 1)
+    if (pod.sandboxMemoryFreeBytes !== undefined) reserve.hincrby(key, 'sandboxMemoryFreeBytes', -minFreeMemory)
+    await reserve.exec()
+
+    return pod.hostname!
   }
 
   const workspace = async (workspaceId: string, need: Need) => {

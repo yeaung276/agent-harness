@@ -31,6 +31,7 @@ describe('loadConfig', () => {
       SANDBOX_PORT_MIN: 4100,
       SANDBOX_PORT_MAX: 4149,
       BROWSER_IDLE_MS: 300_000,
+      PLACEMENT_MIN_FREE_MEMORY_MB: 128,
       ...required,
     })
   })

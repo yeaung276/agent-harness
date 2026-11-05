@@ -44,6 +44,7 @@ const placement = createPlacementService({
   workerName: 'worker-0',
   sandboxIdleMs: 15 * 60 * 1000,
   browserIdleMs: 5 * 60 * 1000,
+  minFreeMemoryMb: 300,
 })
 
 beforeEach(async () => {
@@ -170,7 +171,7 @@ describe('workspaces on the API', () => {
   test('deleting a running workspace whose worker answers an error keeps it', async () => {
     const { id } = (await createWorkspace(uniqueName())).json()
     await placement.claimWorkspace(id)
-    answer =() => Response.json({ message: 'boom' }, { status: 500 })
+    answer = () => Response.json({ message: 'boom' }, { status: 500 })
 
     const res = await deleteWorkspace(id)
 

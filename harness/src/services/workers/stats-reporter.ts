@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import fp from 'fastify-plugin'
 
 import { logger } from '../../logger.ts'
+import { SANDBOXES_CGROUP } from '../sandbox/sandbox.ts'
 
 const log = logger('stats-reporter')
 
@@ -16,6 +17,17 @@ const readCgroup = (file: string) =>
     text => text.trim(),
     () => null
   )
+
+// kubelet's working set: memory.current less the inactive page cache, which the kernel reclaims first
+const workingSet = async (cgroup: string) => {
+  const [current, stat] = await Promise.all([
+    readCgroup(join(cgroup, 'memory.current')),
+    readCgroup(join(cgroup, 'memory.stat')),
+  ])
+  if (current === null) return null
+
+  return Math.max(0, Number(current) - Number(stat?.match(/^inactive_file (\d+)$/m)?.[1] ?? 0))
+}
 
 export const createStatsReporter = ({
   statsKey,
@@ -32,10 +44,12 @@ export const createStatsReporter = ({
       let timer: ReturnType<typeof setInterval> | undefined
 
       const collect = async () => {
-        const [cpuStat, memory, memoryMax] = await Promise.all([
+        const [cpuStat, memory, memoryMax, sandboxesMemory, sandboxesMemoryMax] = await Promise.all([
           readCgroup('cpu.stat'),
-          readCgroup('memory.current'),
+          workingSet(''),
           readCgroup('memory.max'),
+          workingSet(SANDBOXES_CGROUP),
+          readCgroup(join(SANDBOXES_CGROUP, 'memory.max')),
         ])
         const usageUsec = Number(cpuStat?.match(/^usage_usec (\d+)$/m)?.[1] ?? Number.NaN)
         const now = Date.now()
@@ -52,6 +66,10 @@ export const createStatsReporter = ({
           cpuPercent,
           memoryBytes: memory,
           memoryLimitBytes: memoryMax === 'max' ? null : memoryMax,
+          sandboxMemoryFreeBytes:
+            sandboxesMemoryMax === null || sandboxesMemoryMax === 'max' || sandboxesMemory === null
+              ? null
+              : Math.max(0, Number(sandboxesMemoryMax) - sandboxesMemory),
           sandboxes: app.sandbox.count(),
           sandboxSlots: app.config.SANDBOX_PORT_MAX - app.config.SANDBOX_PORT_MIN + 1,
           sessions: app.chromium.count(),
@@ -63,7 +81,28 @@ export const createStatsReporter = ({
         await app.redis.multi().hset(statsKey, stats).expire(statsKey, STATS_TTL_S).exec()
       }
 
-      const tick = () => void report().catch(err => log.error({ err }, 'stats report failed'))
+      // one report at a time; a tick during one sends one more after it
+      let running = false
+      let again = false
+      const tick = () => {
+        if (running) {
+          again = true
+          return
+        }
+        running = true
+        void report()
+          .catch(err => log.error({ err }, 'stats report failed'))
+          .finally(() => {
+            running = false
+            if (again) {
+              again = false
+              tick()
+            }
+          })
+      }
+
+      app.sandbox.onChange(tick)
+      app.chromium.onChange(tick)
 
       app.addHook('onListen', async () => {
         tick()

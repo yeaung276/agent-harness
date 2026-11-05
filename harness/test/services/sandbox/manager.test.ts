@@ -1146,6 +1146,24 @@ describe('stopAll', () => {
   })
 })
 
+describe('onChange', () => {
+  test('tells its listeners of every launch, exec start and end, stop and idle stop', async () => {
+    const events: string[] = []
+    manager.onChange(event => events.push(event))
+
+    await bringUp('ws-1')
+    const { pending, child } = await startExec('ws-1')
+    child.finish(0)
+    await pending
+    await manager.stop('ws-1')
+    const idle = await bringUp('ws-2')
+    idle.idle = true
+    await manager.stopIdle()
+
+    expect(events).toEqual(['launch', 'exec-start', 'exec-end', 'stop', 'launch', 'idle-stop'])
+  })
+})
+
 describe('placement', () => {
   const told = (id: string) => placement.told.filter(entry => entry.endsWith(` ${id}`))
 

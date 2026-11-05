@@ -59,6 +59,7 @@ beforeEach(async () => {
     workerName: 'worker-0',
     sandboxIdleMs,
     browserIdleMs: app.config.BROWSER_IDLE_MS,
+    minFreeMemoryMb: app.config.PLACEMENT_MIN_FREE_MEMORY_MB,
   })
   await app.redis.hset('pods:worker-0', {
     address: `127.0.0.1:${(worker.address() as AddressInfo).port}`,

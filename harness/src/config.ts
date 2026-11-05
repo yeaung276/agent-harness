@@ -43,6 +43,7 @@ export const ConfigSchema = Type.Object({
   SANDBOX_PORT_MAX: Type.Number({ default: 4149 }),
 
   BROWSER_IDLE_MS: Type.Number({ default: 5 * 60 * 1000 }),
+  PLACEMENT_MIN_FREE_MEMORY_MB: Type.Number({ default: 128 }),
 
   DATA_ENCRYPTION_KEY: Type.String({ pattern: '^[0-9a-f]{64}$' }),
   WORKER_JOIN_SECRET: Type.Optional(Type.String({ minLength: 32 })),

@@ -7,6 +7,7 @@ import { createPlacementService } from '../../../src/services/placement/index.ts
 const SANDBOX_IDLE_MS = 15 * 60 * 1000
 const BROWSER_IDLE_MS = 5 * 60 * 1000
 const GB = 1024 ** 3
+const MB = 1024 ** 2
 
 const redis = new RedisMock()
 
@@ -16,11 +17,18 @@ const placement = (workerName?: string) =>
     workerName,
     sandboxIdleMs: SANDBOX_IDLE_MS,
     browserIdleMs: BROWSER_IDLE_MS,
+    minFreeMemoryMb: 300,
   })
 
 const server = placement()
 
-type Load = { sandboxes?: number; memoryGb?: number; memoryLimitGb?: number | null; sessions?: number }
+type Load = {
+  sandboxes?: number
+  memoryGb?: number
+  memoryLimitGb?: number | null
+  sandboxMemoryFreeMb?: number | null
+  sessions?: number
+}
 
 // a worker that reports as the stats reporter does: HSET pods:<name>, then EXPIRE 30
 const startWorker = (name: string, address: string) => {
@@ -29,7 +37,13 @@ const startWorker = (name: string, address: string) => {
   return {
     ...own,
     name,
-    report: async ({ sandboxes = 0, memoryGb = 1, memoryLimitGb = 8, sessions = 0 }: Load = {}) => {
+    report: async ({
+      sandboxes = 0,
+      memoryGb = 1,
+      memoryLimitGb = 8,
+      sandboxMemoryFreeMb = 4096,
+      sessions = 0,
+    }: Load = {}) => {
       await redis
         .multi()
         .hset(`pods:${name}`, {
@@ -40,6 +54,7 @@ const startWorker = (name: string, address: string) => {
           cpuPercent: 12,
           memoryBytes: memoryGb * GB,
           ...(memoryLimitGb === null ? {} : { memoryLimitBytes: memoryLimitGb * GB }),
+          ...(sandboxMemoryFreeMb === null ? {} : { sandboxMemoryFreeBytes: sandboxMemoryFreeMb * MB }),
           sandboxes,
           sandboxSlots: 50,
           sessions,
@@ -86,18 +101,45 @@ describe('the most free worker', () => {
     expect(await server.workspace('ws-1', 'new')).toBe('worker-1')
   })
 
-  test('equal slots: the lower share of memory wins', async () => {
-    await startWorker('worker-0', '10.0.0.5:3000').report({ sandboxes: 4, memoryGb: 6, memoryLimitGb: 8 })
-    await startWorker('worker-1', '10.0.0.6:3000').report({ sandboxes: 4, memoryGb: 6, memoryLimitGb: 16 })
+  test('equal slots: the more free sandbox memory wins', async () => {
+    await startWorker('worker-0', '10.0.0.5:3000').report({ sandboxes: 4, sandboxMemoryFreeMb: 500 })
+    await startWorker('worker-1', '10.0.0.6:3000').report({ sandboxes: 4, sandboxMemoryFreeMb: 900 })
 
     expect(await server.workspace('ws-1', 'new')).toBe('worker-1')
   })
 
-  test('a worker without a memory limit counts as using none of it', async () => {
-    await startWorker('worker-0', '10.0.0.5:3000').report({ sandboxes: 4, memoryGb: 1, memoryLimitGb: 8 })
-    await startWorker('worker-1', '10.0.0.6:3000').report({ sandboxes: 4, memoryGb: 6, memoryLimitGb: null })
+  test('a worker whose sandboxes have no memory limit counts as having all of it free', async () => {
+    await startWorker('worker-0', '10.0.0.5:3000').report({ sandboxes: 4, sandboxMemoryFreeMb: 4096 })
+    await startWorker('worker-1', '10.0.0.6:3000').report({ sandboxes: 4, sandboxMemoryFreeMb: null })
 
     expect(await server.workspace('ws-1', 'new')).toBe('worker-1')
+  })
+
+  test('a worker with free slots but under the minimum free memory is not picked', async () => {
+    await startWorker('worker-0', '10.0.0.5:3000').report({ sandboxes: 0, sandboxMemoryFreeMb: 299 })
+    await startWorker('worker-1', '10.0.0.6:3000').report({ sandboxes: 40, sandboxMemoryFreeMb: 300 })
+
+    expect(await server.workspace('ws-1', 'new')).toBe('worker-1')
+  })
+
+  test('workers with no free slot or no free memory are a 503', async () => {
+    await startWorker('worker-0', '10.0.0.5:3000').report({ sandboxes: 50 })
+    await startWorker('worker-1', '10.0.0.6:3000').report({ sandboxMemoryFreeMb: 100 })
+
+    await expect(server.workspace('ws-1', 'new')).rejects.toMatchObject({ status: 503 })
+  })
+
+  test('a pick counts a sandbox and the minimum memory against the worker, so a burst spreads', async () => {
+    await startWorker('worker-0', '10.0.0.5:3000').report({ sandboxMemoryFreeMb: 700 })
+    await startWorker('worker-1', '10.0.0.6:3000').report({ sandboxMemoryFreeMb: 700 })
+
+    const picks = []
+    for (const id of ['ws-1', 'ws-2', 'ws-3', 'ws-4']) picks.push(await server.workspace(id, 'new'))
+
+    expect(new Set(picks.slice(0, 2))).toEqual(new Set(['worker-0', 'worker-1']))
+    for (const name of ['worker-0', 'worker-1'])
+      expect(await redis.hmget(`pods:${name}`, 'sandboxes', 'sandboxMemoryFreeBytes')).toEqual(['2', String(100 * MB)])
+    await expect(server.workspace('ws-5', 'new')).rejects.toMatchObject({ status: 503 })
   })
 
   test('equal slots and memory: the fewer sessions win', async () => {

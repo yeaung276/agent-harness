@@ -61,6 +61,7 @@ const startWorker = async (name: string, sandboxes: number) => {
     workerName: name,
     sandboxIdleMs: 15 * 60 * 1000,
     browserIdleMs: 5 * 60 * 1000,
+    minFreeMemoryMb: 300,
   })
   await app.redis.hset(`pods:${name}`, {
     hostname: name,

@@ -26,6 +26,8 @@ export type LaunchOptions = { command: string; port: number; env: Record<string,
 
 export type ExecOptions = { command: string; timeoutMs: number; env: Record<string, string> }
 
+export type SandboxEvent = 'launch' | 'stop' | 'idle-stop' | 'exec-start' | 'exec-end'
+
 export const createSandboxManager = ({
   workspaces,
   activities,
@@ -57,6 +59,8 @@ export const createSandboxManager = ({
   const ports = portPool(portMin, portMax)
   const deps = depsCache(depsRoot)
   const locks = new Map<string, Promise<unknown>>()
+  const listeners: ((event: SandboxEvent) => void)[] = []
+  const changed = (event: SandboxEvent) => listeners.forEach(listener => listener(event))
 
   const locked = async <T>(workspaceId: string, fn: () => Promise<T>) => {
     const previous = locks.get(workspaceId) ?? Promise.resolve()
@@ -121,6 +125,7 @@ export const createSandboxManager = ({
       log: launchLog,
     })
     sandboxes.set(workspaceId, launched)
+    changed('launch')
     await workspaces.setStatus(workspaceId, 'starting')
     log.info({ workspaceId, port: hostPort }, 'workspace app launching')
 
@@ -195,6 +200,7 @@ export const createSandboxManager = ({
         joinPid: server?.pid,
       })
 
+      changed('exec-start')
       const release = server?.use()
       let timedOut = false
       const timer = setTimeout(() => {
@@ -220,6 +226,7 @@ export const createSandboxManager = ({
       } finally {
         release?.()
         await child.deleteLogs()
+        changed('exec-end')
       }
     },
 
@@ -227,11 +234,14 @@ export const createSandboxManager = ({
       locked(workspaceId, async () => {
         await sandboxes.get(workspaceId)?.kill()
         sandboxes.delete(workspaceId)
+        changed('stop')
         await workspaces.setStatus(workspaceId, 'stopped')
         log.info({ workspaceId }, 'workspace app stopped')
       }),
 
     count: () => sandboxes.size,
+
+    onChange: (listener: (event: SandboxEvent) => void) => void listeners.push(listener),
 
     hostPort: (workspaceId: string) => {
       const launched = sandboxes.get(workspaceId)
@@ -263,6 +273,7 @@ export const createSandboxManager = ({
             await launched.kill()
             if (sandboxes.get(workspaceId) !== launched) return
             sandboxes.delete(workspaceId)
+            changed('idle-stop')
             await workspaces.setStatus(workspaceId, 'stopped')
           })
       )
@@ -276,6 +287,7 @@ export const createSandboxManager = ({
             await launched.kill()
             if (sandboxes.get(workspaceId) !== launched) return
             sandboxes.delete(workspaceId)
+            changed('stop')
             await workspaces.setStatus(workspaceId, 'stopped')
           })
       )

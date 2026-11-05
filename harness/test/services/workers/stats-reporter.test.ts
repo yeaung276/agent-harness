@@ -9,6 +9,10 @@ import { createStatsReporter } from '../../../src/services/workers/stats-reporte
 
 const redis = new RedisMock()
 
+const counts = { sandboxes: 2, sessions: 3 }
+const listeners: (() => void)[] = []
+const manager = (count: () => number) => ({ count, onChange: (listener: () => void) => void listeners.push(listener) })
+
 const startWorker = async () => {
   const app = Fastify()
   app.decorate(
@@ -19,8 +23,12 @@ const startWorker = async () => {
   await app.register(
     fp(async app => void app.decorate('services', { placement: { bootId: 'boot-1' } } as never), { name: 'services' })
   )
-  await app.register(fp(async app => void app.decorate('sandbox', { count: () => 2 } as never), { name: 'sandbox' }))
-  await app.register(fp(async app => void app.decorate('chromium', { count: () => 3 } as never), { name: 'chromium' }))
+  await app.register(
+    fp(async app => void app.decorate('sandbox', manager(() => counts.sandboxes) as never), { name: 'sandbox' })
+  )
+  await app.register(
+    fp(async app => void app.decorate('chromium', manager(() => counts.sessions) as never), { name: 'chromium' })
+  )
   await app.register(createStatsReporter({ statsKey: 'pods:worker-0', hostname: 'worker-0', address: '10.0.0.5:3000' }))
   await app.listen({ host: '127.0.0.1', port: 0 })
   return app
@@ -44,5 +52,27 @@ describe('the stats reporter', () => {
     await app.close()
 
     expect(await redis.exists('pods:worker-0')).toBe(0)
+  })
+
+  test('reports at once when a sandbox or browser manager changes, without waiting for the next tick', async () => {
+    listeners.length = 0
+    const app = await startWorker()
+    await Bun.sleep(50)
+    expect(listeners).toHaveLength(2)
+
+    counts.sandboxes = 5
+    listeners[0]!()
+    await Bun.sleep(50)
+    expect(await redis.hget('pods:worker-0', 'sandboxes')).toBe('5')
+
+    counts.sessions = 7
+    listeners[1]!()
+    listeners[1]!()
+    listeners[1]!()
+    await Bun.sleep(50)
+    expect(await redis.hget('pods:worker-0', 'sessions')).toBe('7')
+
+    await app.close()
+    Object.assign(counts, { sandboxes: 2, sessions: 3 })
   })
 })

@@ -23,6 +23,8 @@ const MAX_SESSIONS = 30
 
 type BrowserSession = NonNullable<Awaited<ReturnType<ReturnType<typeof createBrowserService>['get']>>>
 
+export type BrowserEvent = 'open' | 'close' | 'lost'
+
 export const createChromiumManager = ({
   workspaces,
   sandboxes,
@@ -48,6 +50,8 @@ export const createChromiumManager = ({
   const runner = createRunner({ mode, chromium })
   const tabs = new Map<string, Session>()
   const locks = new Map<string, Promise<unknown>>()
+  const listeners: ((event: BrowserEvent) => void)[] = []
+  const changed = (event: BrowserEvent) => listeners.forEach(listener => listener(event))
   let connection: Browser | undefined
   let stopping = false
 
@@ -89,6 +93,7 @@ export const createChromiumManager = ({
       storageState,
     })
     tabs.set(id, tab)
+    changed('open')
     await placement.claimSession(id)
 
     return tab
@@ -97,6 +102,7 @@ export const createChromiumManager = ({
   const closeTab = async ({ id, workspaceId, record }: Pick<BrowserSession, 'id' | 'workspaceId' | 'record'>) => {
     const tab = tabs.get(id)
     tabs.delete(id)
+    changed('close')
     await placement.releaseSession(id)
     // keep where the tab is, so it reopens there
     const state = tab?.isOpen() ? await tab.state().catch(() => ({})) : {}
@@ -153,6 +159,7 @@ export const createChromiumManager = ({
             .releaseSession(sessionId)
             .catch(err => log.warn({ err, sessionId }, 'placement release failed'))
         tabs.clear()
+        changed('lost')
         connection = undefined
         void restart()
       })
@@ -273,6 +280,8 @@ export const createChromiumManager = ({
       }),
 
     count: () => tabs.size,
+
+    onChange: (listener: (event: BrowserEvent) => void) => void listeners.push(listener),
 
     stopIdle: async () => {
       await Promise.all(
