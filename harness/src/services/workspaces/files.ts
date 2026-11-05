@@ -3,7 +3,7 @@ import { dirname, isAbsolute, join, posix, relative, sep } from 'node:path'
 
 import { HttpError } from '../http-error.ts'
 
-const IGNORED = new Set(['node_modules', '.git', 'dist', '.next', '.turbo', 'coverage'])
+const IGNORED = new Set(['node_modules', '.git', 'dist', '.next', '.turbo', 'coverage', '.home'])
 
 export const isIgnored = (name: string) => IGNORED.has(name)
 

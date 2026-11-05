@@ -70,6 +70,7 @@ describe('the tree on the API', () => {
       'src/lib/util.ts': '',
       'node_modules/pkg/index.js': '',
       '.git/HEAD': '',
+      '.home/.npm/_cacache/index': '',
     })
 
     const root = await getTree(id)
