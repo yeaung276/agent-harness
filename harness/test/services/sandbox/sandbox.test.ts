@@ -45,7 +45,7 @@ const workspace = async (files: Record<string, string> = {}): Promise<Workspace>
 }
 
 const start = ({ id, dir }: Workspace, options: Partial<SandboxOptions> & { command: string }) => {
-  const sandbox = createSandbox(id, {
+  const sandbox = createSandbox(`sandboxes/workspace-${id}`, {
     dir,
     mounts: [],
     mode,
@@ -96,7 +96,7 @@ const until = async (check: () => Promise<boolean>, what: string) => {
 }
 
 const cgroupProcs = async (workspaceId: string) =>
-  (await readFile(join('/sys/fs/cgroup', `workspace-${workspaceId}`, 'cgroup.procs'), 'utf8').catch(() => ''))
+  (await readFile(join('/sys/fs/cgroup/sandboxes', `workspace-${workspaceId}`, 'cgroup.procs'), 'utf8').catch(() => ''))
     .split('\n')
     .filter(Boolean).length
 
@@ -422,10 +422,22 @@ describe.if(linux)('confinement', () => {
     start(ws, { command: 'sleep 30' })
     await until(async () => (await cgroupProcs(ws.id)) >= 2, 'both in the cgroup')
 
-    const cgroup = join('/sys/fs/cgroup', `workspace-${ws.id}`)
+    const cgroup = join('/sys/fs/cgroup/sandboxes', `workspace-${ws.id}`)
     expect((await readFile(join(cgroup, 'memory.max'), 'utf8')).trim()).toBe(String(256 * 1024 * 1024))
     expect((await readFile(join(cgroup, 'cpu.max'), 'utf8')).trim()).toBe('100000 100000')
     expect((await readFile(join(cgroup, 'pids.max'), 'utf8')).trim()).toBe('128')
+  }, 30_000)
+
+  test("sees its own cgroup's limits at /sys/fs/cgroup, read-only, so Node sizes its heap to them", async () => {
+    const { output } = await run(
+      await workspace(),
+      'cat /sys/fs/cgroup/memory.max; echo 1 > /sys/fs/cgroup/memory.max || echo refused; ' +
+        `bun -e "console.log('constrained', process.constrainedMemory())"`
+    )
+
+    expect(output).toContain(String(256 * 1024 * 1024))
+    expect(output).toContain('refused')
+    expect(output).toContain(`constrained ${256 * 1024 * 1024}`)
   }, 30_000)
 
   test('stops a workspace that forks without end at its process limit', async () => {

@@ -14,7 +14,7 @@ const linux = process.env.CONTAINER_TEST === '1'
 const mode = linux ? 'bwrap' : 'none'
 
 const LAUNCH = 'http://127.0.0.1:4100/'
-const CGROUP = '/sys/fs/cgroup/workspace-chromium'
+const CGROUP = '/sys/fs/cgroup/chromium'
 
 const servers: ReturnType<typeof Bun.serve>[] = []
 let browser: Chromium | undefined

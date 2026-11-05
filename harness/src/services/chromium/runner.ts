@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
 import { logger } from '../../logger.ts'
-import { createSandbox } from '../sandbox/sandbox.ts'
+import { SANDBOXES_CGROUP, createSandbox } from '../sandbox/sandbox.ts'
 import { CDP_PORT, type Chromium } from './chromium.ts'
 
 const log = logger('chromium-runner')
@@ -81,7 +81,7 @@ export const createRunner = ({ mode, chromium }: { mode: 'bwrap' | 'none'; chrom
     const script = `const input = ${JSON.stringify(input)}\n${RUN_SCRIPT}`
 
     const startedAt = Date.now()
-    const sandbox = createSandbox(`run-${crypto.randomUUID()}`, {
+    const sandbox = createSandbox(join(SANDBOXES_CGROUP, `workspace-run-${crypto.randomUUID()}`), {
       dir,
       mounts: [{ source: PLAYWRIGHT_CORE, target: 'node_modules/playwright-core', readOnly: true }],
       mode,

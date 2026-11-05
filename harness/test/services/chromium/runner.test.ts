@@ -405,7 +405,8 @@ describe.if(linux)('ops', () => {
 describe.if(linux)('a confined runner', () => {
   const clusterIp = process.env.TEST_DB_HOST ?? ''
 
-  const runCgroups = async () => (await readdir('/sys/fs/cgroup')).filter(name => name.startsWith('workspace-run-'))
+  const runCgroups = async () =>
+    (await readdir('/sys/fs/cgroup/sandboxes')).filter(name => name.startsWith('workspace-run-'))
 
   test("can't see the server's files", async () => {
     const { targetId } = await sessionPage()
@@ -464,7 +465,7 @@ describe.if(linux)('a confined runner', () => {
     const ran = runner.exec(targetId, `await new Promise(r => setTimeout(r, 3000)); return 1`, 30_000)
 
     const [cgroup] = await until(runCgroups, names => names.length > 0)
-    const read = (file: string) => readFile(join('/sys/fs/cgroup', cgroup!, file), 'utf8')
+    const read = (file: string) => readFile(join('/sys/fs/cgroup/sandboxes', cgroup!, file), 'utf8')
     expect((await read('memory.max')).trim()).toBe(String(512 * 1024 * 1024))
     expect((await read('pids.max')).trim()).toBe('128')
 

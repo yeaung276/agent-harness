@@ -36,7 +36,7 @@ export const ConfigSchema = Type.Object({
   SANDBOX_MODE: Type.Union([Type.Literal('bwrap'), Type.Literal('none')], { default: 'none' }),
   SANDBOX_DEPS_ROOT: Type.String({ default: '/tmp/workspace-deps' }),
   SANDBOX_IDLE_MS: Type.Number({ default: 15 * 60 * 1000 }),
-  SANDBOX_MEMORY_MAX_MB: Type.Number({ default: 2048 }),
+  SANDBOX_MEMORY_MAX_MB: Type.Number({ default: 1024 }),
   SANDBOX_CPU_MAX: Type.Number({ default: 2 }),
   SANDBOX_PIDS_MAX: Type.Number({ default: 512 }),
   SANDBOX_PORT_MIN: Type.Number({ default: 4100 }),

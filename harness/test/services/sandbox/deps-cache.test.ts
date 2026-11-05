@@ -31,8 +31,11 @@ describe('mounts', () => {
 
     const { mounts, env } = await cache.mounts(id, dir)
 
-    expect(mounts).toEqual([{ source: join(root, 'deps', id, 'node_modules'), target: 'node_modules' }])
-    expect(env).toEqual({})
+    expect(mounts).toEqual([
+      { source: join(root, 'deps', id, 'node_modules'), target: 'node_modules' },
+      { source: join(root, 'deps', id, '.home'), target: '.home' },
+    ])
+    expect(env).toEqual({ HOME: '/workspace/.home' })
     expect(existsSync(mounts[0]!.source)).toBe(true)
     expect(existsSync(join(dir, 'node_modules'))).toBe(false)
   })
@@ -50,15 +53,19 @@ describe('mounts', () => {
 
       const found = await cache.mounts(id, dir)
 
-      expect(found.mounts.map(mount => mount.target)).toEqual([target])
-      expect(found.env).toEqual(env)
+      expect(found.mounts.map(mount => mount.target)).toEqual([target, '.home'])
+      expect(found.env).toEqual({ ...env, HOME: '/workspace/.home' })
     }
   })
 
   test('mounts vendor before vendor/bundle when a folder has both composer.json and a Gemfile', async () => {
     const { id, dir } = await workspace({ 'composer.json': '{}', Gemfile: '' })
 
-    expect((await cache.mounts(id, dir)).mounts.map(mount => mount.target)).toEqual(['vendor', 'vendor/bundle'])
+    expect((await cache.mounts(id, dir)).mounts.map(mount => mount.target)).toEqual([
+      'vendor',
+      'vendor/bundle',
+      '.home',
+    ])
   })
 
   test('mounts the deps of every package in a monorepo, down to three folders deep', async () => {
@@ -71,6 +78,7 @@ describe('mounts', () => {
     })
 
     expect(await targets(ws)).toEqual([
+      '.home',
       'a/b/c/node_modules',
       'apps/web/node_modules',
       'node_modules',
@@ -88,14 +96,21 @@ describe('mounts', () => {
     await symlink(outside.dir, join(ws.dir, 'linked'))
     await symlink(join(outside.dir, 'package.json'), join(ws.dir, 'package.json'))
 
-    expect(await targets(ws)).toEqual([])
+    expect(await targets(ws)).toEqual(['.home'])
   })
 
-  test('gives nothing to a workspace without a manifest, or without a folder', async () => {
+  test('gives only its home folder to a workspace without a manifest, or without a folder', async () => {
     const empty = await workspace({ 'index.html': '' })
 
-    expect(await cache.mounts(empty.id, empty.dir)).toEqual({ mounts: [], env: {} })
-    expect(await cache.mounts('gone', join(root, 'workspaces', 'gone'))).toEqual({ mounts: [], env: {} })
+    expect(await cache.mounts(empty.id, empty.dir)).toEqual({
+      mounts: [{ source: join(root, 'deps', empty.id, '.home'), target: '.home' }],
+      env: { HOME: '/workspace/.home' },
+    })
+    expect(await cache.mounts('gone', join(root, 'workspaces', 'gone'))).toEqual({
+      mounts: [{ source: join(root, 'deps', 'gone', '.home'), target: '.home' }],
+      env: { HOME: '/workspace/.home' },
+    })
+    expect(existsSync(join(root, 'deps', empty.id, '.home'))).toBe(true)
   })
 
   test("keeps each workspace's deps apart", async () => {

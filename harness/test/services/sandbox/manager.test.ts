@@ -103,8 +103,10 @@ const fakeSandbox = (workspaceId: string, options: SandboxOptions) => {
 const fakes: ReturnType<typeof fakeSandbox>[] = []
 
 mock.module('../../../src/services/sandbox/sandbox.ts', () => ({
-  createSandbox: (workspaceId: string, options: SandboxOptions) => {
-    const fake = fakeSandbox(workspaceId, options)
+  SANDBOXES_CGROUP: 'sandboxes',
+  createSandbox: (cgroupPath: string, options: SandboxOptions) => {
+    expect(cgroupPath).toStartWith('sandboxes/workspace-')
+    const fake = fakeSandbox(cgroupPath.slice('sandboxes/workspace-'.length), options)
     fakes.push(fake)
     return fake
   },
@@ -364,6 +366,7 @@ describe('launch', () => {
     const { launched } = await startLaunch('ws-1', { ...devServer, env: { API_URL: 'https://b.example' } })
 
     expect(launched.options.env).toEqual({
+      HOME: '/workspace/.home',
       PORT: '3000',
       NODE_ENV: 'production',
       API_URL: 'https://b.example',
@@ -409,6 +412,7 @@ describe('launch', () => {
     expect(latestLaunch('ws-1').options.mounts).toEqual([
       { source: join(dirs, 'deps', 'ws-1', 'node_modules'), target: 'node_modules' },
       { source: join(dirs, 'deps', 'ws-1', 'api', 'vendor/bundle'), target: 'api/vendor/bundle' },
+      { source: join(dirs, 'deps', 'ws-1', '.home'), target: '.home' },
     ])
     expect(latestLaunch('ws-1').options.env.BUNDLE_PATH).toBe('vendor/bundle')
     expect(workspaces.saved.get('ws-1')?.env.BUNDLE_PATH).toBeUndefined()
@@ -933,8 +937,8 @@ describe('wake', () => {
     latestLaunch('ws-1').listen()
     await woken
 
-    expect(first.options.mounts).toEqual([])
-    expect(latestLaunch('ws-1').options.mounts!.map(mount => mount.target)).toEqual(['node_modules'])
+    expect(first.options.mounts!.map(mount => mount.target)).toEqual(['.home'])
+    expect(latestLaunch('ws-1').options.mounts!.map(mount => mount.target)).toEqual(['node_modules', '.home'])
   })
 
   test('starts a workspace this pod never ran from its saved launch', async () => {

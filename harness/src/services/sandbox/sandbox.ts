@@ -11,6 +11,9 @@ import { createNetworkController, type NetworkRules, PROXY_ENV, PROXY_PORT } fro
 
 const CGROUP_ROOT = '/sys/fs/cgroup'
 const CGROUP_CONTROLLERS = ['memory', 'cpu', 'pids']
+const WORKER_RESERVE_MB = 450
+
+export const SANDBOXES_CGROUP = 'sandboxes'
 
 export type SandboxOptions = {
   dir: string
@@ -36,7 +39,7 @@ export type SandboxStatus = 'starting' | 'running' | 'failed' | 'stopped'
 export type Sandbox = ReturnType<typeof createSandbox>
 
 export const createSandbox = (
-  workspaceId: string,
+  cgroupPath: string,
   {
     dir,
     mounts = [],
@@ -58,7 +61,7 @@ export const createSandbox = (
   let inUse = 0
   let lastUsedAt = Date.now()
   let status: SandboxStatus = ports ? 'starting' : 'running'
-  const cgroup = join(CGROUP_ROOT, `workspace-${workspaceId}`)
+  const cgroup = join(CGROUP_ROOT, cgroupPath)
   const controller = mode === 'bwrap' && joinPid === undefined ? createNetworkController(network ?? {}) : null
 
   const namespace =
@@ -68,7 +71,6 @@ export const createSandbox = (
           '--config-net',
           '--quiet',
           '-4',
-          // outbound goes through the proxy, which resolves names itself
           '--dns',
           'none',
           '-t',
@@ -124,9 +126,6 @@ export const createSandbox = (
     '/dev',
     '--tmpfs',
     '/tmp',
-    '--setenv',
-    'HOME',
-    '/tmp',
     '--bind',
     dir,
     '/workspace',
@@ -151,6 +150,9 @@ export const createSandbox = (
       '/etc/hosts',
       '/etc/fonts',
     ].flatMap(path => ['--ro-bind-try', path, path]),
+    '--ro-bind',
+    cgroup,
+    CGROUP_ROOT,
     '--tmpfs',
     process.cwd(),
     '--',
@@ -189,6 +191,7 @@ export const createSandbox = (
       ...(mode === 'bwrap' ? PROXY_ENV : {}),
       ...env,
       ...(mode === 'none' && ports ? { PORT: String(ports.host) } : {}),
+      ...(mode === 'none' ? { HOME: tmpdir() } : {}),
     },
     detached: true,
     stdio: ['ignore', 'pipe', 'ignore'],
@@ -202,7 +205,10 @@ export const createSandbox = (
     // bwrap ignores SIGTERM and pasta's SIGKILL to it can be refused by AppArmor, so every process under the sandbox gets the signal itself
     const descendants = (pid: number): number[] => {
       try {
-        const children = readFileSync(`/proc/${pid}/task/${pid}/children`, 'utf8').split(' ').filter(Boolean).map(Number)
+        const children = readFileSync(`/proc/${pid}/task/${pid}/children`, 'utf8')
+          .split(' ')
+          .filter(Boolean)
+          .map(Number)
         return children.flatMap(next => [next, ...descendants(next)])
       } catch {
         return []
@@ -384,8 +390,17 @@ export const setupCgroups = async (mode: 'bwrap' | 'none') => {
     }
   }
 
-  await writeFile(
-    join(CGROUP_ROOT, 'cgroup.subtree_control'),
-    CGROUP_CONTROLLERS.map(controller => `+${controller}`).join(' ')
+  const controllers = CGROUP_CONTROLLERS.map(controller => `+${controller}`).join(' ')
+  await writeFile(join(CGROUP_ROOT, 'cgroup.subtree_control'), controllers)
+
+  const sandboxes = join(CGROUP_ROOT, SANDBOXES_CGROUP)
+  await mkdir(sandboxes, { recursive: true })
+  await writeFile(join(sandboxes, 'cgroup.subtree_control'), controllers)
+  // a pod without a memory limit, or the host's root cgroup that has no memory.max, leaves the sandboxes unlimited too
+  const podMax = await readFile(join(CGROUP_ROOT, 'memory.max'), 'utf8').then(
+    text => text.trim(),
+    () => 'max'
   )
+  if (podMax !== 'max')
+    await writeFile(join(sandboxes, 'memory.max'), String(Number(podMax) - WORKER_RESERVE_MB * 1024 * 1024))
 }

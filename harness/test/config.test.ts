@@ -25,7 +25,7 @@ describe('loadConfig', () => {
       SANDBOX_MODE: 'none',
       SANDBOX_DEPS_ROOT: '/tmp/workspace-deps',
       SANDBOX_IDLE_MS: 900_000,
-      SANDBOX_MEMORY_MAX_MB: 2048,
+      SANDBOX_MEMORY_MAX_MB: 1024,
       SANDBOX_CPU_MAX: 2,
       SANDBOX_PIDS_MAX: 512,
       SANDBOX_PORT_MIN: 4100,

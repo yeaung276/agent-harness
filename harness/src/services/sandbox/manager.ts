@@ -1,3 +1,5 @@
+import { join } from 'node:path'
+
 import type { Redis } from 'ioredis'
 
 import { logger } from '../../logger.ts'
@@ -9,7 +11,7 @@ import { depsCache } from './deps-cache.ts'
 import { createRedisLog } from './log.ts'
 import { type NetworkRules, PROXY_PORT } from './network-controller.ts'
 import { portPool } from './port-pool.ts'
-import { type Sandbox, createSandbox } from './sandbox.ts'
+import { SANDBOXES_CGROUP, type Sandbox, createSandbox } from './sandbox.ts'
 
 const log = logger('sandbox-manager')
 
@@ -104,7 +106,7 @@ export const createSandboxManager = ({
     }
 
     const launchLog = createRedisLog(redis, launchLogKey(workspaceId))
-    const launched = createSandbox(workspaceId, {
+    const launched = createSandbox(join(SANDBOXES_CGROUP, `workspace-${workspaceId}`), {
       dir,
       mounts,
       mode,
@@ -181,7 +183,7 @@ export const createSandboxManager = ({
       const dir = workspaces.getWorkspaceRoot(workspaceId)
       const { mounts, env: depsEnv } = await deps.mounts(workspaceId, dir)
 
-      const child = createSandbox(workspaceId, {
+      const child = createSandbox(join(SANDBOXES_CGROUP, `workspace-${workspaceId}`), {
         dir,
         mounts,
         mode,

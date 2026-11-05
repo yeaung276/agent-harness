@@ -40,6 +40,11 @@ export const depsCache = (root: string) => ({
 
     await visit('', 0)
 
+    const home = join(root, workspaceId, '.home')
+    await mkdir(home, { recursive: true })
+    mounts.push({ source: home, target: '.home' })
+    env.HOME = '/workspace/.home'
+
     return { mounts, env }
   },
 
