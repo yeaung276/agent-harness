@@ -19,6 +19,7 @@
           <pre class="schema"><code>npm install @code-harness/sdk</code></pre>
           <p>The SDK runs on Node.js 20+ and Bun. To use a sandbox as a <a href="https://github.com/langchain-ai/deepagentsjs">deepagents</a> backend or to add the <a href="integrations.html#langchain">LangChain middleware</a>, also install the peer dependencies:</p>
           <pre class="schema"><code>npm install deepagents langchain @langchain/core zod</code></pre>
+          <p>Without them, import from <code>@code-harness/sdk/client</code>: the same <code>Client</code>, <code>Sandbox</code> and <code>Browser</code>, in ESM and CommonJS, with no deepagents, LangChain or zod. Its <code>Sandbox</code> has no deepagents file methods; it reads, edits and lists files with <code>readFile</code>, <code>editFile</code> and <code>tree</code>.</p>
         </section>
 
         <section class="doc-section" id="quickstart">

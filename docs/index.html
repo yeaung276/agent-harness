@@ -16,7 +16,7 @@
         <section class="doc-section" id="overview">
           <h2>Overview</h2>
           <p>code-harness runs as one server pod and many worker pods. The server pod is the only entry point: agents, through the Code Harness SDK, LangChain or MCP, call its API at <code>/api/v1</code> and <code>/mcp</code>, and users' browsers load a workspace's app through its proxy. Worker pods run the sandboxes and browser sessions. Each workspace is pinned to one worker pod, so its sandbox and its browser sessions share that pod's localhost, and the sandbox's port never leaves the pod.</p>
-          <p>Placement is decided per call from Redis. A worker pod writes a key for each sandbox and browser session it holds, and the server sends a workspace's calls to the worker pod its key names. A workspace with nothing running goes to the live worker pod with the most free sandbox slots. See <a href="#placement-controller">Placement controller</a>.</p>
+          <p>Placement is decided per call from Redis. A worker pod writes a key for each sandbox and browser session it holds, and the server sends a workspace's calls to the worker pod its key names. A workspace with nothing running goes to the live worker pod with the most free sandbox slots, among those with a free slot and enough free sandbox memory. See <a href="#placement-controller">Placement controller</a>.</p>
 
           <figure>
             <div class="diagram">
@@ -57,7 +57,7 @@
                 <text class="on-light name" x="420" y="372" text-anchor="middle">placement controller</text>
                 <text class="on-light type" x="420" y="389" text-anchor="middle">[shared module, not an API · by workspaceId]</text>
                 <text class="on-light type" x="256" y="412"><tspan font-weight="600">2.</tspan> GETEX placement:* → its worker pod, if live</text>
-                <text class="on-light type" x="256" y="429"><tspan font-weight="600">3.</tspan> else the most free sandbox slots in pods:*</text>
+                <text class="on-light type" x="256" y="429"><tspan font-weight="600">3.</tspan> else the most free worker in pods:*</text>
                 <text class="on-light type" x="256" y="446">sticky: a workspace's sandbox and sessions on one pod</text>
 
                 <rect class="external" x="840" y="215" width="260" height="70" rx="8"/>
@@ -100,7 +100,7 @@
 
                 <rect class="component" x="104" y="740" width="660" height="46" rx="6"/>
                 <text class="on-light name" x="434" y="759" text-anchor="middle">stats reporter</text>
-                <text class="on-light type" x="434" y="775" text-anchor="middle">[every 10 s]</text>
+                <text class="on-light type" x="434" y="775" text-anchor="middle">[on change + every 10 s]</text>
 
                 <rect class="component" x="800" y="580" width="140" height="50" rx="6"/>
                 <text class="on-light name" x="870" y="601" text-anchor="middle">worker-1</text>
@@ -146,7 +146,8 @@
                 <line class="edge" x1="940" y1="605" x2="970" y2="605"/>
                 <line class="edge" x1="940" y1="665" x2="970" y2="665"/>
                 <text class="edge-label" x="978" y="620"><tspan font-weight="600">6.</tspan> SET pods:&lt;name&gt;</text>
-                <text class="note" x="978" y="634">every 10 s, expires 30 s</text>
+                <text class="note" x="978" y="634">on change + every 10 s</text>
+                <text class="note" x="978" y="648">expires 30 s</text>
               </svg>
             </div>
             <figcaption>C4 component diagram: code-harness as one server pod and many worker pods. Numbers follow one call. Solid arrows are calls. Grey boxes are outside code-harness.</figcaption>
@@ -165,7 +166,7 @@
               <tr><td>Port forwarder</td><td>Worker</td><td>On the pod's own port, 4002. Hands <code>&lt;appId&gt;</code> traffic to <code>localhost:&lt;port&gt;</code>.</td></tr>
               <tr><td>Sandbox</td><td>Worker</td><td>Runs each workspace's app on a port from <code>SANDBOX_PORT_MIN</code>–<code>MAX</code>, bound to 127.0.0.1.</td></tr>
               <tr><td>Chromium</td><td>Worker</td><td>The chromium plugin, <code>plugins/chromium.ts</code>: one Chromium in its own network namespace, one page per session. See <a href="#browser-sessions">Browsers</a>.</td></tr>
-              <tr><td>Stats reporter</td><td>Worker</td><td>Writes this pod's load and address to Redis every 10 s.</td></tr>
+              <tr><td>Stats reporter</td><td>Worker</td><td>Writes this pod's load and address to Redis every 10 s, and at once when a sandbox, an exec or a browser tab starts or ends.</td></tr>
             </tbody>
           </table>
 
@@ -309,7 +310,7 @@
                 <text class="note" x="198" y="582">requires a client cert from the CA</text>
 
                 <line class="edge" x1="150" y1="632" x2="658" y2="632" marker-end="url(#au-arrow)"/>
-                <text class="edge-label" x="290" y="624" text-anchor="middle"><tspan font-weight="600">8.</tspan> stats every 10 s</text>
+                <text class="edge-label" x="290" y="624" text-anchor="middle"><tspan font-weight="600">8.</tspan> stats on change + every 10 s</text>
                 <text class="note" x="290" y="646" text-anchor="middle">EXPIRE, then HSET stats</text>
                 <text class="note" x="290" y="660" text-anchor="middle">key gone → register again</text>
 
@@ -343,13 +344,13 @@
               <tr><td>Request</td><td><code>hostname</code> (the pod name), <code>csr</code> (PEM, subject and SAN the hostname), <code>address</code>, <code>time</code>.</td></tr>
               <tr><td>Reply</td><td><code>cert</code>, the worker's certificate signed with <code>WORKER_CA_KEY</code>, valid for one year; <code>caCert</code>, <code>WORKER_CA_CERT</code>, which the worker checks client certificates against; <code>statsKey</code>, <code>pods:&lt;hostname&gt;</code>, a pattern fixed by the server; additional data, TBD.</td></tr>
               <tr><td>CA</td><td><code>WORKER_CA_KEY</code> and <code>WORKER_CA_CERT</code>, in the Kubernetes Secret, mounted into the server only. The server signs each CSR whose hostname matches the request's, and on every boot signs <code>server.crt</code> for itself: CN <code>server</code>, client auth only, kept in memory. A worker registers again 7 days before its certificate expires and swaps the new one into its listener without restarting.</td></tr>
-              <tr><td>Redis</td><td>The server writes <code>hostname</code> and <code>address</code> to <code>pods:&lt;hostname&gt;</code> with a 30 s expiry. Once the worker serves HTTPS, its stats reporter runs every 10 s: <code>EXPIRE pods:&lt;hostname&gt; 30</code>, then <code>HSET</code> its stats. An <code>EXPIRE</code> that finds no key means the key was lost, and the worker registers again. Placement and calls use only a key that holds stats, so a worker is called only once it serves HTTPS.</td></tr>
+              <tr><td>Redis</td><td>The server writes <code>hostname</code> and <code>address</code> to <code>pods:&lt;hostname&gt;</code> with a 30 s expiry. Once the worker serves HTTPS, its stats reporter runs every 10 s and on each change: <code>EXPIRE pods:&lt;hostname&gt; 30</code>, then <code>HSET</code> its stats. An <code>EXPIRE</code> that finds no key means the key was lost, and the worker registers again. Placement and calls use only a key that holds stats, so a worker is called only once it serves HTTPS.</td></tr>
               <tr><td>Calls</td><td>Internal API only, <code>/internal/sandbox/*</code> and <code>/internal/chromium/*</code>. mTLS to the address in <code>pods:&lt;hostname&gt;</code>. The server presents <code>server.crt</code> and checks the worker's certificate against <code>WORKER_CA_CERT</code> with the hostname as the server name; one connection pool serves every worker. The worker requires a client certificate signed by the CA, or the handshake fails, and answers 403 to one whose CN isn't <code>server</code>.</td></tr>
             </tbody>
           </table>
 
           <h3 id="stats-reporter">Stats reporter</h3>
-          <p>Once a worker serves HTTPS, it writes the hash below to the key the server gave it at registration, <code>pods:&lt;name&gt;</code>, every 10 s with <code>HSET</code>, then <code>EXPIRE 30</code>. It writes its hostname and address each time, so a key lost in Redis is whole again after the next report. A worker whose key has expired is gone as far as placement is concerned. The machines page lists every worker in the <code>workers</code> table and shows it live when <code>reportedAt</code> is under 30 s old, stale otherwise.</p>
+          <p>Once a worker serves HTTPS, it writes the hash below to the key the server gave it at registration, <code>pods:&lt;name&gt;</code>, every 10 s with <code>HSET</code>, then <code>EXPIRE 30</code>. It also reports at once when the sandbox manager launches, stops or sweeps a sandbox or starts or ends an exec, and when the Chromium manager opens or closes a tab or loses them all to a restart; one report runs at a time, and a change during one sends one more after it. It writes its hostname and address each time, so a key lost in Redis is whole again after the next report. A worker whose key has expired is gone as far as placement is concerned. The machines page lists every worker in the <code>workers</code> table and shows it live when <code>reportedAt</code> is under 30 s old, stale otherwise.</p>
           <table>
             <thead>
               <tr><th>Field</th><th>Value</th><th>Read from</th></tr>
@@ -359,7 +360,8 @@
               <tr><td><code>bootId</code></td><td>A random id the worker makes when it starts, in the value of every placement key it writes; a new one after a restart makes its old keys stop counting</td><td>The worker's boot</td></tr>
               <tr><td><code>reportedAt</code></td><td>Time of the report, ms since the epoch</td><td>The clock</td></tr>
               <tr><td><code>cpuPercent</code></td><td>CPU used since the last report, % of one core</td><td>The change in <code>usage_usec</code> in the worker's <code>cpu.stat</code></td></tr>
-              <tr><td><code>memoryBytes</code>, <code>memoryLimitBytes</code></td><td>Memory in use and the worker's limit; no limit is left out</td><td>The worker's <code>memory.current</code> and <code>memory.max</code></td></tr>
+              <tr><td><code>memoryBytes</code>, <code>memoryLimitBytes</code></td><td>Memory in use, as kubelet's working set, without the inactive page cache the kernel reclaims first; and the worker's limit; no limit is left out</td><td>The worker's <code>memory.current</code> less <code>inactive_file</code> in <code>memory.stat</code>, and <code>memory.max</code></td></tr>
+              <tr><td><code>sandboxMemoryFreeBytes</code></td><td>Memory the sandboxes can still use; left out when they have no limit</td><td>The <code>sandboxes</code> cgroup's <code>memory.max</code> less its working set</td></tr>
               <tr><td><code>sandboxes</code>, <code>sandboxSlots</code></td><td>Running workspace apps, and how many fit: one per pool port</td><td>The sandbox manager; <code>SANDBOX_PORT_MIN</code>..<code>SANDBOX_PORT_MAX</code></td></tr>
               <tr><td><code>sessions</code></td><td>Open browser tabs</td><td>The Chromium manager</td></tr>
             </tbody>
@@ -435,7 +437,7 @@
 
                 <rect class="component" x="560" y="520" width="200" height="90" rx="6"/>
                 <text class="on-light name" x="660" y="543" text-anchor="middle">Stats reporter</text>
-                <text class="on-light type" x="660" y="560" text-anchor="middle">[every 10 s]</text>
+                <text class="on-light type" x="660" y="560" text-anchor="middle">[on change + every 10 s]</text>
                 <text class="on-light type" x="660" y="583" text-anchor="middle">bootId · load</text>
 
                 <rect class="component" x="40" y="650" width="500" height="70" rx="6"/>
@@ -512,7 +514,7 @@
             </thead>
             <tbody>
               <tr><td>Live worker</td><td><code>pods:&lt;name&gt;</code> holds <code>reportedAt</code> and the same <code>bootId</code> as the key. A worker that stops reporting expires in 30 s; one that restarts under the same name reports a new <code>bootId</code>. Either way its sandboxes and tabs are gone, and so are its keys.</td></tr>
-              <tr><td>Most free worker</td><td>Among live workers, the most free sandbox slots, <code>sandboxSlots − sandboxes</code>; then the lower <code>memoryBytes / memoryLimitBytes</code>; then the fewer <code>sessions</code>. <code>503</code> when no worker is live.</td></tr>
+              <tr><td>Most free worker</td><td>Among live workers with a free sandbox slot and at least <code>PLACEMENT_MIN_FREE_MEMORY_MB</code>, 128 MB by default, of <code>sandboxMemoryFreeBytes</code>: the most free sandbox slots, <code>sandboxSlots − sandboxes</code>; then the most <code>sandboxMemoryFreeBytes</code>, a worker that reports none counting as unbounded; then the fewer <code>sessions</code>. The pick adds 1 to the worker's <code>sandboxes</code> and takes <code>PLACEMENT_MIN_FREE_MEMORY_MB</code> off its <code>sandboxMemoryFreeBytes</code> in Redis, so picks made before its next report spread across workers. <code>503</code> when no worker qualifies.</td></tr>
             </tbody>
           </table>
 
@@ -925,9 +927,9 @@
             </thead>
             <tbody>
               <tr><td>Namespaces</td><td>Its own user, pid, ipc, uts, cgroup and network namespaces.</td></tr>
-              <tr><td>Files</td><td><code>/workspace</code> is <code>WORKSPACES_DIR/&lt;workspaceId&gt;</code> on the shared volume, read-write. Deps folders come from the deps cache at <code>SANDBOX_DEPS_ROOT/&lt;workspaceId&gt;</code>, picked by the manifests the workspace has, at its root and up to 3 folders down: <code>package.json</code> → <code>node_modules</code>, <code>composer.json</code> → <code>vendor</code>, <code>pyproject.toml</code> or <code>requirements.txt</code> → <code>.venv</code>, <code>Gemfile</code> → <code>vendor/bundle</code> with <code>BUNDLE_PATH</code> set under the workspace's env. They stay on the worker whose sandbox wrote them. A launch, wake or exec placed on another worker finds them empty, so an app whose deps are missing there fails to start; a launch command that includes its install step works on any worker. Deleting the workspace removes its deps from the server's disk only; each worker keeps its copy under <code>SANDBOX_DEPS_ROOT</code> until the pod's <code>/tmp</code> is cleared. System paths read-only. <code>/tmp</code> empty; <code>HOME=/tmp</code>.</td></tr>
+              <tr><td>Files</td><td><code>/workspace</code> is <code>WORKSPACES_DIR/&lt;workspaceId&gt;</code> on the shared volume, read-write. Deps folders come from the deps cache at <code>SANDBOX_DEPS_ROOT/&lt;workspaceId&gt;</code>, picked by the manifests the workspace has, at its root and up to 3 folders down: <code>package.json</code> → <code>node_modules</code>, <code>composer.json</code> → <code>vendor</code>, <code>pyproject.toml</code> or <code>requirements.txt</code> → <code>.venv</code>, <code>Gemfile</code> → <code>vendor/bundle</code> with <code>BUNDLE_PATH</code> set under the workspace's env. They stay on the worker whose sandbox wrote them. A launch, wake or exec placed on another worker finds them empty, so an app whose deps are missing there fails to start; a launch command that includes its install step works on any worker. Deleting the workspace removes its deps from the server's disk only; each worker keeps its copy under <code>SANDBOX_DEPS_ROOT</code> until the pod's <code>/tmp</code> is cleared. <code>HOME</code> is <code>/workspace/.home</code>, the workspace's own folder in the deps cache, <code>SANDBOX_DEPS_ROOT/&lt;workspaceId&gt;/.home</code>, mounted like the deps folders: tool caches such as <code>~/.npm</code> and <code>~/.cache</code> are on disk, as page cache the kernel can reclaim, and last across execs. The sandbox's own cgroup is at <code>/sys/fs/cgroup</code>, read-only, so runtimes that size their heap from <code>memory.max</code>, like Node and the JVM, size it to the sandbox's limit. System paths read-only. <code>/tmp</code> empty.</td></tr>
               <tr><td>Network</td><td>One namespace per workspace through pasta, made by launch; an exec joins it while the background process runs, else gets its own. Inbound: only the launch's <code>port</code>, mapped to the pod's <code>127.0.0.1:&lt;port&gt;</code>. Outbound: only loopback leaves the namespace. The internet is reached through the network controller, an HTTP proxy at <code>127.0.0.1:3128</code> inside every namespace, mapped by pasta to the controller's own port on the pod. It applies the launch's <code>allow</code> and <code>deny</code> lists to each host name and refuses private addresses; an exec's own namespace reaches every public host. Tools that ignore the proxy settings can't reach the internet. Nothing on the pod or cluster: not other sandboxes, not Chromium, not the internal API on 4002.</td></tr>
-              <tr><td>Limits</td><td>One cgroup per workspace, shared by its launch and every exec, caps memory, CPU and process count, so one workspace can't starve the pod.</td></tr>
+              <tr><td>Limits</td><td>One cgroup per workspace, <code>sandboxes/workspace-&lt;workspaceId&gt;</code>, shared by its launch and every exec, caps memory at <code>SANDBOX_MEMORY_MAX_MB</code>, 1024 MB by default, and CPU and process count, so one workspace can't starve the pod. Every workspace's cgroup, and every browser run's, sits under <code>sandboxes</code>, whose <code>memory.max</code> is the pod's limit less 450 MB kept for the worker and Chromium: when the sandboxes run out together, the kernel kills a process inside them, never the worker.</td></tr>
               <tr><td>Environment</td><td><code>PORT</code> = the launch's <code>port</code>, the workspace's env over it, the command's <code>env</code> on top, plus <code>PATH</code>, <code>LANG</code>, <code>LC_ALL</code>, <code>TZ</code>. Under them, the proxy settings that point at the network controller: <code>HTTP_PROXY</code>, <code>HTTPS_PROXY</code> and their lowercase forms, <code>NO_PROXY</code> for <code>localhost</code>, and <code>NODE_USE_ENV_PROXY</code>. Nothing else from the runner.</td></tr>
               <tr><td>Local dev</td><td><code>SANDBOX_MODE=none</code> runs unconfined, allowed only with <code>NODE_ENV=development</code>.</td></tr>
             </tbody>
@@ -1800,7 +1802,7 @@
               <tr><td>Files</td><td>System paths and the browser build read-only. <code>/tmp</code> empty, holding the profile. No workspace, no service account token.</td><td>System paths, Node and the runner's <code>playwright</code> read-only. <code>/tmp</code> empty.</td></tr>
               <tr><td>Network</td><td>Its own namespace through pasta. Inbound: only CDP, from the pod's <code>127.0.0.1:&lt;BROWSER_CDP_PORT&gt;</code>. Outbound: DNS, public addresses, and the pool ports 4100–4149 on the pod's loopback. Private ranges are dropped: not the internal API on 4002, not the cluster, not cloud metadata.</td><td>Its own namespace through pasta. Outbound: only Chromium's CDP port on the pod's loopback.</td></tr>
               <tr><td>Per-context rule</td><td>Each session's context allows public addresses and its own app's preview port. It keeps one app's session off another app's preview; <code>run</code> can get past it, not past the namespace.</td><td>—</td></tr>
-              <tr><td>Limits</td><td>One cgroup caps memory, CPU and process count for the whole browser.</td><td>One cgroup per run.</td></tr>
+              <tr><td>Limits</td><td>One cgroup, <code>chromium</code>, caps memory, CPU and process count for the whole browser. It sits next to the worker's, outside <code>sandboxes</code>, so workspace code running out of memory can't kill it.</td><td>One cgroup per run, under <code>sandboxes</code>.</td></tr>
               <tr><td>Environment</td><td><code>PATH</code>, <code>LANG</code>, <code>TZ</code>, <code>HOME=/tmp</code>. Nothing else from the runner.</td><td>The same, plus the CDP address.</td></tr>
               <tr><td>Local dev</td><td colspan="2"><code>SANDBOX_MODE=none</code> runs both unconfined, allowed only with <code>ENVIRONMENT=local</code>.</td></tr>
             </tbody>
@@ -1958,7 +1960,7 @@
               <tr><td><code>chown</code></td><td>root</td><td>Gives that root's directory, <code>cgroup.procs</code>, <code>cgroup.subtree_control</code> and <code>cgroup.threads</code> to <code>bun</code>.</td></tr>
               <tr><td><code>setpriv --reuid bun</code></td><td>root, then <code>bun</code></td><td>Becomes <code>bun</code>, uid 1000, which clears every capability, and the same process runs the worker.</td></tr>
               <tr><td>Checks</td><td><code>bun</code></td><td>Refuses to start without <code>bwrap</code>, <code>pasta</code>, <code>nft</code>, <code>unshare</code>, <code>nsenter</code> and <code>bash</code> on <code>PATH</code>, without cgroup v2 with memory, cpu and pids at <code>/sys/fs/cgroup</code>, without that tree writable by <code>bun</code>, with the pool ports inside <code>ip_local_port_range</code>, or with <code>SANDBOX_MODE=none</code> and <code>NODE_ENV=production</code>.</td></tr>
-              <tr><td>Cgroups</td><td><code>bun</code></td><td>Creates <code>runner/</code>, moves every process in the root into it, and turns on memory, cpu and pids for the root's children.</td></tr>
+              <tr><td>Cgroups</td><td><code>bun</code></td><td>Creates <code>runner/</code>, moves every process in the root into it, and turns on memory, cpu and pids for the root's children. Creates <code>sandboxes/</code> with the same controllers for its children, and sets its <code>memory.max</code> to the root's less 450 MB; a root without a limit leaves it unlimited.</td></tr>
             </tbody>
           </table>
 
