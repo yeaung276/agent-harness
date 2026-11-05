@@ -75,7 +75,7 @@ await sandbox.close()</code></pre>
               <tr><td><code>name</code></td><td><code>string</code></td><td>Lowercase letters, digits and <code>-</code>, up to 63 characters, unique. Defaults to <code>sandbox-&lt;timestamp&gt;</code>.</td></tr>
               <tr><td><code>env</code></td><td><code>Record&lt;string, string&gt;</code></td><td>Env set on every command and launch in the sandbox. Values are stored encrypted and never returned.</td></tr>
               <tr><td><code>timeoutMs</code></td><td><code>number</code></td><td>How long each <code>execute</code> may run. Default <code>120000</code>, max <code>240000</code>.</td></tr>
-              <tr><td><code>record</code></td><td><code>boolean</code></td><td>Whether <a href="#sandbox-browser"><code>sandbox.browser</code></a> records a video and can take screenshots. Default <code>false</code>.</td></tr>
+              <tr><td><code>record</code></td><td><code>boolean</code></td><td>Whether <a href="#sandbox-browser"><code>sandbox.browser</code></a> records a video. Default <code>false</code>.</td></tr>
             </tbody>
           </table>
           <p>Returns the new <a href="#sandbox">Sandbox</a>. Throws <code>CONFLICT</code> when the name is taken.</p>
@@ -178,7 +178,7 @@ await sandbox.uploadAsZip(await readFile(&quot;site.zip&quot;), { path: &quot;si
 
           <h3 id="sandbox-browser">sandbox.browser</h3>
           <pre class="schema"><code>readonly browser: Browser</code></pre>
-          <p>The sandbox's own <a href="#browser">Browser</a>. It runs next to the sandbox and can open its app: a URL that is a path, like <code>/login</code>, opens the app. Reading the property sends no request; the first call on it creates the browser, and every later call uses the same one. With the sandbox's <code>record</code>, it records a video into the sandbox each time it closes, and can take <a href="#browser-screenshot">screenshots</a>.</p>
+          <p>The sandbox's own <a href="#browser">Browser</a>. It runs next to the sandbox and can open its app: a URL that is a path, like <code>/login</code>, opens the app. Reading the property sends no request; the first call on it creates the browser, and every later call uses the same one. With the sandbox's <code>record</code>, it records a video into the sandbox each time it closes. Its <a href="#browser-screenshot">screenshots</a> are also saved into the sandbox.</p>
           <pre class="schema"><code>await sandbox.launch({ command: &quot;npm ci &amp;&amp; npm start&quot;, port: 3000 })
 const page = await sandbox.browser.navigate(&quot;/&quot;)</code></pre>
 
@@ -231,8 +231,8 @@ const email = page.refs.find(r =&gt; r.name === &quot;Email&quot;)!
 page = await browser.type(email.ref, &quot;ada@example.com&quot;, { submit: true, waitFor: { text: &quot;Welcome&quot; } })</code></pre>
 
           <h3 id="browser-screenshot">browser.screenshot()</h3>
-          <pre class="schema"><code>screenshot(options?: { fullPage?: boolean; waitFor?: WaitFor }): Promise&lt;{ path: string }&gt;</code></pre>
-          <p>Saves a PNG into the sandbox and resolves with its path, which <code>sandbox.downloadFiles</code> reads. Only on <code>sandbox.browser</code> of a sandbox with <code>record</code>; otherwise throws <code>CONFLICT</code>.</p>
+          <pre class="schema"><code>screenshot(options?: { fullPage?: boolean; waitFor?: WaitFor }): Promise&lt;{ png: Uint8Array; path: string | null }&gt;</code></pre>
+          <p>Takes a PNG and resolves with its bytes. On <code>sandbox.browser</code>, it is also saved into the sandbox and <code>path</code> is where, which <code>sandbox.downloadFiles</code> reads; on a free browser, <code>path</code> is <code>null</code>.</p>
 
           <h3>browser.run()</h3>
           <pre class="schema"><code>run(code: string, options?: { timeoutMs?: number }): Promise&lt;{ result: unknown; error: string | null; durationMs: number }&gt;</code></pre>
@@ -274,7 +274,7 @@ try {
               <tr><td><code>INVALID_REQUEST</code></td><td>400</td><td>An option is out of range or malformed.</td></tr>
               <tr><td><code>AUTHENTICATION_FAILED</code></td><td>401</td><td>No token, or it is unknown, revoked or expired.</td></tr>
               <tr><td><code>NOT_FOUND</code></td><td>404</td><td>The sandbox or browser doesn't exist.</td></tr>
-              <tr><td><code>CONFLICT</code></td><td>409</td><td>The name is taken, an app is already running, or screenshot without <code>record</code>.</td></tr>
+              <tr><td><code>CONFLICT</code></td><td>409</td><td>The name is taken, or an app is already running.</td></tr>
               <tr><td><code>TOO_LARGE</code></td><td>413</td><td>A zip is over 100 MB, or extracts to over 1 GB.</td></tr>
               <tr><td><code>RATE_LIMITED</code></td><td>429</td><td>The sandbox already has 5 open browsers, counting those of other clients on the same sandbox.</td></tr>
               <tr><td><code>UPSTREAM_FAILED</code></td><td>502</td><td>The app didn't start.</td></tr>

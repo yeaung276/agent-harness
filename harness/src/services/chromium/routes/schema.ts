@@ -80,7 +80,7 @@ export const ScreenshotBody = Type.Object({
   waitFor: Type.Optional(WaitFor),
 })
 
-export const Screenshot = Type.Object({ path: Type.String() })
+export const Screenshot = Type.Object({ png: Type.String(), path: Type.Union([Type.String(), Type.Null()]) })
 
 export const RunBody = Type.Object({
   sessionId: Id,

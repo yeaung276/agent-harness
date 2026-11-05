@@ -72,8 +72,11 @@ export class Browser {
     return this.#call('type', { ref, text, ...options })
   }
 
-  screenshot(options: { fullPage?: boolean; waitFor?: WaitFor } = {}): Promise<{ path: string }> {
-    return this.#call('screenshot', options)
+  async screenshot(
+    options: { fullPage?: boolean; waitFor?: WaitFor } = {}
+  ): Promise<{ png: Uint8Array; path: string | null }> {
+    const { png, path } = await this.#call<{ png: string; path: string | null }>('screenshot', options)
+    return { png: Uint8Array.from(atob(png), char => char.charCodeAt(0)), path }
   }
 
   run(code: string, options: { timeoutMs?: number } = {}): Promise<RunResult> {

@@ -816,7 +816,7 @@
           <h2>Browser</h2>
           <p>A session is one browser tab, kept between calls: its cookies, local storage and URL last across calls, and across a close. Calls read the page as text and numbered refs, click and type by ref, and run Playwright code against the page. A session answers one call at a time; a second call waits for the first.</p>
           <p>Created with a <code>workspaceId</code>, the session's tab can also reach that workspace's background process, and a URL that is a path, like <code>/orders</code>, opens it. Without one, the tab reaches public hosts only. Private addresses are never reachable, and one workspace's session can't reach another workspace's process.</p>
-          <p>Created with <code>record</code>, the session films its tab and can take screenshots, both saved into the workspace: a video at <code>browser/&lt;sessionId&gt;-&lt;time&gt;.webm</code> each time the session closes, each screenshot at <code>screenshot/&lt;sessionId&gt;-&lt;time&gt;.png</code>. They are read with the <a href="#files">Files</a> routes. <code>record</code> needs a <code>workspaceId</code>.</p>
+          <p>Created with <code>record</code>, the session films its tab and saves the video into the workspace at <code>browser/&lt;sessionId&gt;-&lt;time&gt;.webm</code> each time the session closes. <code>record</code> needs a <code>workspaceId</code>. Every session can take screenshots; a session with a workspace also saves each one there, at <code>screenshot/&lt;sessionId&gt;-&lt;time&gt;.png</code>. Both are read with the <a href="#files">Files</a> routes.</p>
           <p>A session with no call for 5 minutes is closed, the same as closing it: its tab is closed, a recorded session's video is saved, and its <code>status</code> becomes <code>closed</code>. A closed session, or one whose tab is lost because the browser restarted or the page closed itself, is opened again by its next call, at the URL it was on and with its cookies, and its <code>status</code> becomes <code>alive</code>. Every route here also answers <code>401</code> as described in <a href="#authentication">Authentication</a>.</p>
 
           <h3>The session object</h3>
@@ -891,7 +891,7 @@
     }
   }
 }</code></pre>
-<p><code>workspaceId</code> lets the tab reach that workspace's background process. <code>record</code> films the tab and allows screenshots; it needs <code>workspaceId</code>.</p>
+<p><code>workspaceId</code> lets the tab reach that workspace's background process. <code>record</code> films the tab; it needs <code>workspaceId</code>.</p>
 <h4>Response 201</h4>
 <p>The session object. Its tab starts on <code>about:blank</code>.</p>
 <h4>Errors · 400</h4>
@@ -1236,7 +1236,7 @@
   </div>
 </details>
 <details class="route">
-  <summary><span class="method post">POST</span><code class="route-path">/api/v1/browser/:id/screenshot</code><span class="route-summary">Save a screenshot into the workspace</span></summary>
+  <summary><span class="method post">POST</span><code class="route-path">/api/v1/browser/:id/screenshot</code><span class="route-summary">Take a screenshot, saved into the workspace when the session has one</span></summary>
   <div class="route-body">
 <h4>Params</h4>
 <pre class="schema"><code>{
@@ -1283,22 +1283,31 @@
 <p><code>waitFor</code> is described in <a href="#browser-waiting">Waiting</a>.</p>
 <p>Without <code>fullPage</code>, only what fits in the 1280×800 window.</p>
 <h4>Response 201</h4>
-<p>The screenshot's path in the workspace, a PNG at <code>screenshot/&lt;sessionId&gt;-&lt;time&gt;.png</code>.</p>
+<p><code>png</code> is the PNG, base64-encoded. <code>path</code> is where it was saved in the workspace, <code>screenshot/&lt;sessionId&gt;-&lt;time&gt;.png</code>, or <code>null</code> for a session without a workspace, which saves nothing.</p>
 <pre class="schema"><code>{
   &quot;type&quot;: &quot;object&quot;,
   &quot;required&quot;: [
+    &quot;png&quot;,
     &quot;path&quot;
   ],
   &quot;properties&quot;: {
-    &quot;path&quot;: {
+    &quot;png&quot;: {
       &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;path&quot;: {
+      &quot;anyOf&quot;: [
+        {
+          &quot;type&quot;: &quot;string&quot;
+        },
+        {
+          &quot;type&quot;: &quot;null&quot;
+        }
+      ]
     }
   }
 }</code></pre>
 <h4>Errors · 404</h4>
 <p>No session has this id.</p>
-<h4>Errors · 409</h4>
-<p>The session wasn't created with <code>record</code>.</p>
 <h4>Errors · 504</h4>
 <p>The call didn't finish in time. <code>waitFor</code> running out also answers <code>504</code>, without acting.</p>
   </div>

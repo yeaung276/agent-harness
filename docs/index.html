@@ -939,7 +939,7 @@
 
           <figure>
             <div class="diagram">
-              <svg class="c4" viewBox="0 0 1000 802" role="img" aria-label="Browser sessions on a worker pod. Calls come from the server pod's /api/v1/browser to the worker's internal API: create, navigate, read, click, type, screenshot, run or close. The internal API, at /internal/chromium from services/chromium/routes, drives the chromium plugin in plugins/chromium.ts, app.chromium, which owns the session manager and the sweeper. The session manager starts one Chromium in its own network namespace and restarts it if it exits. It maps a session to its tab in memory; one session is one tab. Create inserts the row and opens a tab. A call returns 404 if the row's status is closed, closes the session and returns 404 if its tab is gone, runs one call at a time per session, and writes url, storageState and lastUsedAt back. Close saves the video if the session is recorded and sets the row's status to closed. It reads and writes the session row in Postgres browser_sessions, a workspace having many, or none for a session without one. Over CDP it opens and closes tabs in Chromium, where each session has its own context and one tab. Its ops turn navigate, read, click, type and screenshot, with their waitFor, into code. For every call it hands the code, its own ops or the caller's run code, and the tab's id to a runner, a Bun process under bubblewrap started per call, with no secrets and a network that reaches only Chromium's CDP port. Chromium's namespace lets out only public addresses and the pool ports 4100 to 4149 on the pod's loopback, and its files hold no workspace and no secrets. A recorded session's video and screenshots are saved into its workspace. The sweeper runs every minute and closes tabs idle for 5 minutes, ending recorded sessions. Every request a session's tab makes also goes through the network rule on its context: public addresses, and loopback on its own workspace's launch port, are allowed; anything else is blocked. Allowed requests reach public sites and the workspace's launch at localhost:port.">
+              <svg class="c4" viewBox="0 0 1000 802" role="img" aria-label="Browser sessions on a worker pod. Calls come from the server pod's /api/v1/browser to the worker's internal API: create, navigate, read, click, type, screenshot, run or close. The internal API, at /internal/chromium from services/chromium/routes, drives the chromium plugin in plugins/chromium.ts, app.chromium, which owns the session manager and the sweeper. The session manager starts one Chromium in its own network namespace and restarts it if it exits. It maps a session to its tab in memory; one session is one tab. Create inserts the row and opens a tab. A call returns 404 if the row's status is closed, closes the session and returns 404 if its tab is gone, runs one call at a time per session, and writes url, storageState and lastUsedAt back. Close saves the video if the session is recorded and sets the row's status to closed. It reads and writes the session row in Postgres browser_sessions, a workspace having many, or none for a session without one. Over CDP it opens and closes tabs in Chromium, where each session has its own context and one tab. Its ops turn navigate, read, click, type and screenshot, with their waitFor, into code. For every call it hands the code, its own ops or the caller's run code, and the tab's id to a runner, a Bun process under bubblewrap started per call, with no secrets and a network that reaches only Chromium's CDP port. Chromium's namespace lets out only public addresses and the pool ports 4100 to 4149 on the pod's loopback, and its files hold no workspace and no secrets. A recorded session's video, and the screenshots of any session with a workspace, are saved into its workspace. The sweeper runs every minute and closes tabs idle for 5 minutes, ending recorded sessions. Every request a session's tab makes also goes through the network rule on its context: public addresses, and loopback on its own workspace's launch port, are allowed; anything else is blocked. Allowed requests reach public sites and the workspace's launch at localhost:port.">
                 <defs>
                   <marker id="bs-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
                     <path d="M0 0L10 5L0 10z" class="arrowhead"/>
@@ -982,7 +982,7 @@
                 <text class="note" x="76" y="622">own network namespace · pasta + nft</text>
                 <text class="note" x="76" y="638">out: public addresses + pool ports 4100–4149</text>
                 <text class="note" x="76" y="654">in: CDP only · bwrap: no workspace, no secrets</text>
-                <text class="note" x="76" y="670">record: video + screenshots → workspace</text>
+                <text class="note" x="76" y="670">video (record) + screenshots → workspace</text>
 
                 <rect class="component" x="400" y="432" width="224" height="84" rx="8"/>
                 <text class="on-light name" x="512" y="454" text-anchor="middle">runner</text>
@@ -1618,7 +1618,7 @@
   </div>
 </details>
 <details class="route">
-  <summary><span class="method post">POST</span><code class="route-path">/internal/chromium/screenshot</code><span class="route-summary">Wait for waitFor, then save a PNG of a recorded session into its workspace</span></summary>
+  <summary><span class="method post">POST</span><code class="route-path">/internal/chromium/screenshot</code><span class="route-summary">Wait for waitFor, then take a PNG, saved into the session's workspace when it has one</span></summary>
   <div class="route-body">
 <h4>Request body</h4>
 <pre class="schema"><code>{
@@ -1661,19 +1661,30 @@
   }
 }</code></pre>
 <h4>Response 201</h4>
-<p>The PNG's path in the workspace, <code>screenshot/&lt;sessionId&gt;-&lt;time&gt;.png</code>.</p>
+<p>The PNG, base64-encoded, and its path in the workspace, <code>screenshot/&lt;sessionId&gt;-&lt;time&gt;.png</code>, or <code>null</code> for a session without a workspace.</p>
 <pre class="schema"><code>{
   &quot;type&quot;: &quot;object&quot;,
   &quot;required&quot;: [
+    &quot;png&quot;,
     &quot;path&quot;
   ],
   &quot;properties&quot;: {
-    &quot;path&quot;: {
+    &quot;png&quot;: {
       &quot;type&quot;: &quot;string&quot;
+    },
+    &quot;path&quot;: {
+      &quot;anyOf&quot;: [
+        {
+          &quot;type&quot;: &quot;string&quot;
+        },
+        {
+          &quot;type&quot;: &quot;null&quot;
+        }
+      ]
     }
   }
 }</code></pre>
-<h4>Errors · 400, 404, 409, 504</h4>
+<h4>Errors · 400, 404, 504</h4>
 <pre class="schema"><code>{&quot;type&quot;:&quot;object&quot;,&quot;required&quot;:[&quot;error&quot;],&quot;properties&quot;:{&quot;error&quot;:{&quot;type&quot;:&quot;string&quot;}}}</code></pre>
   </div>
 </details>

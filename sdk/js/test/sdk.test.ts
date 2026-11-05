@@ -103,9 +103,10 @@ describe.skipIf(!LIVE)('sdk', () => {
     expect(page.text).toContain('hello from the sandbox')
     expect(sandbox.browser.id).not.toBeNull()
 
-    const { path } = await sandbox.browser.screenshot()
-    const [shot] = await sandbox.downloadFiles([path])
-    expect(shot?.content?.slice(1, 4)).toEqual(UTF8.encode('PNG'))
+    const { png, path } = await sandbox.browser.screenshot()
+    expect(png.slice(1, 4)).toEqual(UTF8.encode('PNG'))
+    const [shot] = await sandbox.downloadFiles([path!])
+    expect(shot?.content).toEqual(png)
 
     await sandbox.stop()
     expect((await sandbox.logs()).at(-1)).toBe('stopped')
@@ -135,9 +136,16 @@ describe.skipIf(!LIVE)('sdk', () => {
     const browser = await client.createBrowser()
     const middleware = createBrowserUseMiddleware({ browser })
     const tools = new Map(middleware.tools?.map(t => [t.name, t]))
-    expect([...tools.keys()]).toEqual(['browser_navigate', 'browser_read', 'browser_click', 'browser_type'])
+    expect([...tools.keys()]).toEqual([
+      'browser_navigate',
+      'browser_read',
+      'browser_click',
+      'browser_type',
+      'browser_screenshot',
+    ])
 
     expect(JSON.parse(await tools.get('browser_read')!.invoke({})).url).toBe('about:blank')
+    expect(await tools.get('browser_screenshot')!.invoke({})).toMatchObject([{ type: 'image', mimeType: 'image/png' }])
     await (middleware.afterAgent as () => Promise<void>)()
     expect((await browser.read()).url).toBe('about:blank')
     await browser.close()

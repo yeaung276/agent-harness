@@ -232,7 +232,6 @@ export const createChromiumManager = ({
     screenshot: async (sessionId: string, fullPage: boolean, waitFor?: WaitFor) => {
       const browserSession = await browsers.get(sessionId)
       if (!browserSession) throw new HttpError(404, 'No session has this id')
-      if (!browserSession.record) throw new HttpError(409, "The session wasn't created with record")
 
       const ran = await exec(sessionId, ops.screenshot(fullPage, waitFor), CALL_TIMEOUT_MS + (waitFor?.timeoutMs ?? 0))
       await activities.record(sessionId, 'screenshot', fullPage ? 'full page' : 'viewport', ran)
@@ -241,12 +240,15 @@ export const createChromiumManager = ({
       if (ran.error === 'wait_for_timed_out') throw new HttpError(504, "What waitFor names didn't show up in time")
       if (ran.error !== null) throw new HttpError(400, ran.error)
 
-      const root = workspaces.getWorkspaceRoot(browserSession.workspaceId!)
+      const { png } = ran.result as { png: string }
+      if (!browserSession.workspaceId) return { png, path: null }
+
+      const root = workspaces.getWorkspaceRoot(browserSession.workspaceId)
       const path = join('screenshot', `${sessionId}-${Date.now()}.png`)
       await mkdir(join(root, 'screenshot'), { recursive: true })
-      await writeFile(join(root, path), Buffer.from((ran.result as { png: string }).png, 'base64'))
+      await writeFile(join(root, path), Buffer.from(png, 'base64'))
 
-      return { path }
+      return { png, path }
     },
 
     run: async (sessionId: string, code: string, timeoutMs: number) => {

@@ -56,20 +56,21 @@ export const browserTools = (browser: Browser): StructuredTool[] => {
         waitFor: WaitFor,
       }),
     }),
+    tool(
+      async ({ fullPage, waitFor }) => {
+        const shot = await browser.screenshot({ fullPage, waitFor }).catch(err => attempt(() => Promise.reject(err)))
+        if (typeof shot === 'string') return shot
+        if (shot.path) return `${ROOT}/${shot.path}`
+        return [{ type: 'image', mimeType: 'image/png', data: Buffer.from(shot.png).toString('base64') }]
+      },
+      {
+        name: 'browser_screenshot',
+        description:
+          "Take a PNG screenshot of the page. In a sandbox, it returns the PNG's path, which read_file opens; otherwise it returns the image.",
+        schema: z.object({ fullPage: z.boolean().optional(), waitFor: WaitFor }),
+      }
+    ),
   ]
-
-  if (browser.record)
-    tools.push(
-      tool(
-        ({ fullPage, waitFor }) =>
-          attempt(async () => `${ROOT}/${(await browser.screenshot({ fullPage, waitFor })).path}`),
-        {
-          name: 'browser_screenshot',
-          description: 'Take a PNG screenshot of the page and return its path, which read_file opens.',
-          schema: z.object({ fullPage: z.boolean().optional(), waitFor: WaitFor }),
-        }
-      )
-    )
 
   return tools
 }

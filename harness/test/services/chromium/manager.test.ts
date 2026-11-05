@@ -389,21 +389,27 @@ describe('activity', () => {
 })
 
 describe('screenshot', () => {
-  test('is refused on a session created without record', async () => {
-    const { id } = await manager.create('user-1', { workspaceId: 'ws-1', record: false })
+  test('returns the PNG and saves nothing for a session without a workspace', async () => {
+    const { id } = await manager.create('user-1', { workspaceId: null, record: false })
+    const png = Buffer.from('png bytes').toString('base64')
+    next.push(ok({ png }))
 
-    await expect(manager.screenshot(id, false)).rejects.toMatchObject({ status: 409 })
-    expect(runs).toEqual([])
+    expect(await manager.screenshot(id, false)).toEqual({ png, path: null })
   })
 
-  test('saves the PNG into the workspace and returns its path there', async () => {
-    const { id } = await manager.create('user-1', { workspaceId: 'ws-1', record: true })
-    next.push(ok({ png: Buffer.from('png bytes').toString('base64') }))
+  test('returns the PNG and saves it into the workspace, with or without record', async () => {
+    const png = Buffer.from('png bytes').toString('base64')
 
-    const { path } = await manager.screenshot(id, true)
+    for (const record of [false, true]) {
+      const { id } = await manager.create('user-1', { workspaceId: 'ws-1', record })
+      next.push(ok({ png }))
 
-    expect(path).toMatch(new RegExp(`^screenshot/${id}-\\d+\\.png$`))
-    expect(await readFile(join(workspaceRoot('ws-1'), path), 'utf8')).toBe('png bytes')
+      const shot = await manager.screenshot(id, true)
+
+      expect(shot.png).toBe(png)
+      expect(shot.path).toMatch(new RegExp(`^screenshot/${id}-\\d+\\.png$`))
+      expect(await readFile(join(workspaceRoot('ws-1'), shot.path!), 'utf8')).toBe('png bytes')
+    }
   })
 })
 
@@ -451,7 +457,7 @@ describe('closing', () => {
     expect(tabOf(1).closes).toBe(0)
   })
 
-  test("stopIdle closes an idle tab whose row went with its workspace, and records nothing", async () => {
+  test('stopIdle closes an idle tab whose row went with its workspace, and records nothing', async () => {
     const { id } = await manager.create('user-1', { workspaceId: 'ws-1', record: true })
     browsers.rows.delete(id)
     tabOf(0).idle = true

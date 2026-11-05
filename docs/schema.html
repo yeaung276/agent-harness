@@ -110,7 +110,7 @@
             <tbody>
               <tr><td><code>id</code></td><td><code>uuid</code></td><td>Primary key, <code>gen_random_uuid()</code>. The session id in the API.</td></tr>
               <tr><td><code>workspace_id</code></td><td><code>uuid</code></td><td>References <code>workspaces.id</code>: the workspace whose background process the tab can reach. Null for a session that reaches only public sites. Deleted with the workspace.</td></tr>
-              <tr><td><code>record</code></td><td><code>boolean</code></td><td>Whether the tab is filmed and allows screenshots. Only with a workspace. Default <code>false</code>.</td></tr>
+              <tr><td><code>record</code></td><td><code>boolean</code></td><td>Whether the tab is filmed. Only with a workspace. Default <code>false</code>.</td></tr>
               <tr><td><code>status</code></td><td><code>text</code></td><td><code>alive</code> while its tab is open, <code>closed</code> once it is closed: by the API, after 5 minutes unused, when the worker shuts down, or when a call finds its tab gone. A closed session answers <code>404</code>.</td></tr>
               <tr><td><code>url</code></td><td><code>text</code></td><td>Where the tab is, saved after each call. Null on a blank tab.</td></tr>
               <tr><td><code>storage_state</code></td><td><code>jsonb</code></td><td>The tab's cookies and local storage, saved after each call.</td></tr>

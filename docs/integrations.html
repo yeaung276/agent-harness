@@ -90,7 +90,7 @@ try {
               <tr><td><code>browser_read</code></td><td><code>maxChars?</code>, <code>waitFor?</code></td><td>The current page as text and numbered refs.</td></tr>
               <tr><td><code>browser_click</code></td><td><code>ref</code>, <code>waitFor?</code></td><td>Clicks a ref and returns the page after.</td></tr>
               <tr><td><code>browser_type</code></td><td><code>ref</code>, <code>text</code>, <code>submit?</code>, <code>waitFor?</code></td><td>Types into a ref and returns the page after.</td></tr>
-              <tr><td><code>browser_screenshot</code></td><td><code>fullPage?</code>, <code>waitFor?</code></td><td>Saves a PNG in the sandbox and returns its path, which <code>read_file</code> opens. Only on <code>sandbox.browser</code> of a sandbox created with <code>record</code>.</td></tr>
+              <tr><td><code>browser_screenshot</code></td><td><code>fullPage?</code>, <code>waitFor?</code></td><td>Takes a PNG. On <code>sandbox.browser</code>, saves it in the sandbox and returns its path, which <code>read_file</code> opens; on a free browser, returns the image.</td></tr>
             </tbody>
           </table>
           <pre class="schema"><code>import { createAgent } from &quot;langchain&quot;

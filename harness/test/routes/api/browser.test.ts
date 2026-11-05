@@ -32,7 +32,7 @@ const answers: Record<string, (call: Sent) => Response | Promise<Response>> = {
       { status: 201 }
     ),
   '/internal/chromium/read': () => Response.json(page),
-  '/internal/chromium/screenshot': () => Response.json({ path: 'screenshot/shot.png' }, { status: 201 }),
+  '/internal/chromium/screenshot': () => Response.json({ png: 'cG5n', path: 'screenshot/shot.png' }, { status: 201 }),
   '/internal/chromium/close': () => new Response(null, { status: 204 }),
 }
 
@@ -223,13 +223,13 @@ describe('a call on a session', () => {
     expect(res.json().message).toBe('No element on the page has this ref')
   })
 
-  test('a screenshot answers 201 with its path', async () => {
+  test('a screenshot answers 201 with its PNG and its path', async () => {
     const id = await openSession(workspaceId)
 
     const res = await post(`/api/v1/browser/${id}/screenshot`)
 
     expect(res.statusCode).toBe(201)
-    expect(res.json()).toEqual({ path: 'screenshot/shot.png' })
+    expect(res.json()).toEqual({ png: 'cG5n', path: 'screenshot/shot.png' })
   })
 
   test('closing goes to the worker holding its tab, and answers 204', async () => {
