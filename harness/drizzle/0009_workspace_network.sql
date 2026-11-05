@@ -1,0 +1,2 @@
+ALTER TABLE "workspaces" ADD COLUMN "network" jsonb DEFAULT '{}'::jsonb NOT NULL;--> statement-breakpoint
+UPDATE "workspaces" SET "network" = "launch_options"->'network', "launch_options" = "launch_options" - 'network' WHERE "launch_options" ? 'network';

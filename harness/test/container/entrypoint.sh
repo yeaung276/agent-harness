@@ -4,8 +4,10 @@ set -e
 cg=/sys/fs/cgroup
 chown bun:bun "$cg" "$cg/cgroup.procs" "$cg/cgroup.subtree_control" "$cg/cgroup.threads"
 
-# a sandbox shares the container's own IP, so the test database needs an address of its own
-ip addr add 10.250.0.1/32 dev eth0
+# a sandbox gets every address on eth0, so the test cluster's address sits on an interface of its own, off the pod's like a real one
+ip link add cluster0 type dummy
+ip addr add 10.250.0.1/32 dev cluster0
+ip link set cluster0 up
 
 cd /usr/src/app/harness
 exec setpriv --reuid bun --regid bun --init-groups \

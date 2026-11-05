@@ -6,7 +6,6 @@ import { createInterface } from 'node:readline'
 import { chromium as playwright } from 'playwright-core'
 
 import { logger } from '../../logger.ts'
-import { PROXY_PORT } from '../sandbox/network-controller.ts'
 import { type Sandbox, createSandbox } from '../sandbox/sandbox.ts'
 
 const log = logger('chromium')
@@ -58,11 +57,10 @@ export const createChromium = ({
         '--no-sandbox',
         '--disable-extensions',
         '--disable-component-extensions-with-background-pages',
-        ...(mode === 'bwrap' ? [`--proxy-server=http://127.0.0.1:${PROXY_PORT}`] : []),
         'about:blank',
       ]
 
-      const launched = createSandbox('chromium', {
+      const launched = await createSandbox('chromium', {
         dir,
         mode,
         memoryMaxMb: 2048,

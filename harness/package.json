@@ -26,6 +26,7 @@
     "@fastify/view": "^12.0.1",
     "@peculiar/x509": "1.14.3",
     "ajv-formats": "^3.0.1",
+    "dns2": "3.1.1",
     "drizzle-orm": "^0.45.4",
     "eta": "^4.6.0",
     "fastify": "^5.12.7",

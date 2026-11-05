@@ -182,7 +182,7 @@
               <tr><td>Worker</td><td><code>PORT</code>, 3000</td><td>External</td><td>The pod's IPv4 address, registered in <code>pods:&lt;name&gt;</code></td><td>HTTPS with mTLS, for the server only. The internal API, <code>/internal/sandbox/*</code> and <code>/internal/chromium/*</code>; a request with the <code>x-workspace-app</code> header is app traffic for the port forwarder instead. See <a href="#authentication">Authentication</a>.</td></tr>
               <tr><td>Worker</td><td><code>SANDBOX_PORT_MIN</code>–<code>MAX</code>, 4100–4149</td><td>Internal</td><td>127.0.0.1</td><td>One per running sandbox: its launch's port, mapped from inside the sandbox. Reached only by the port forwarder and by Chromium tabs of the same workspace.</td></tr>
               <tr><td>Worker</td><td>9222</td><td>Internal</td><td>127.0.0.1</td><td>Chromium's CDP, for the chromium manager and the runner of each browser call.</td></tr>
-              <tr><td>Worker</td><td>3128</td><td>Internal</td><td>127.0.0.1 inside each sandbox's and Chromium's network namespace</td><td>The network controller's proxy, their only way to the internet; it listens on a random 127.0.0.1 port on the pod.</td></tr>
+              <tr><td>Worker</td><td>53, UDP and TCP</td><td>Internal</td><td>127.0.0.1 inside each sandbox's and Chromium's network namespace</td><td>Its network controller's nameserver, the only one it can ask; it listens on random 127.0.0.1 ports on the pod. See <a href="#sandbox-networks">Sandbox networks</a>.</td></tr>
             </tbody>
           </table>
         </section>
@@ -627,7 +627,7 @@
 
           <figure>
             <div class="diagram">
-              <svg class="c4" viewBox="0 0 1000 720" role="img" aria-label="A sandbox on a worker pod. Calls come from the server pod's sandbox API to the worker's internal API: launch, exec or stop with a workspaceId. App traffic comes from the proxy to the worker's port forwarder on port 4002, the same port as the internal API: a request with the x-workspace-app header is taken over before routing and forwarded, and any other request is an internal API call. The internal API, at /internal/sandbox from services/sandbox/routes, drives the sandbox plugin in plugins/sandbox.ts, app.sandbox. Its sandbox manager maps a workspaceId to its sandbox in memory, runs one launch at a time per workspace, and writes status and the saved launch to the workspace's row in Postgres. It takes a port from the pod's pool, 4100 to 4149, and spawns the sandbox under bubblewrap. The sweeper stops sandboxes idle for 15 minutes. The port forwarder sends a workspace's traffic to 127.0.0.1 on its port, and when the workspace has no running sandbox it wakes it through the manager. Each sandbox has its own network namespace and holds the workspace's launch server, for example npm run dev, with PORT 3000 inside mapped to 127.0.0.1 on the pool port; and exec, sh -c with a 2 minute default and 4 minute maximum, returning the exit code and the last 16 KB of output. A sandbox mounts the workspace's folder from the shared workspace volume at /workspace, and its deps folders, such as node_modules, vendor or .venv, from the deps cache at SANDBOX_DEPS_ROOT. Its only egress is the internet, including the npm registry, through the network controller, which applies each command's allow and deny lists. Other workspaces get one sandbox each on the same pod.">
+              <svg class="c4" viewBox="0 0 1000 720" role="img" aria-label="A sandbox on a worker pod. Calls come from the server pod's sandbox API to the worker's internal API: launch, exec or stop with a workspaceId. App traffic comes from the proxy to the worker's port forwarder on port 4002, the same port as the internal API: a request with the x-workspace-app header is taken over before routing and forwarded, and any other request is an internal API call. The internal API, at /internal/sandbox from services/sandbox/routes, drives the sandbox plugin in plugins/sandbox.ts, app.sandbox. Its sandbox manager maps a workspaceId to its sandbox in memory, runs one launch at a time per workspace, and writes status and the saved launch to the workspace's row in Postgres. It takes a port from the pod's pool, 4100 to 4149, and spawns the sandbox under bubblewrap. The sweeper stops sandboxes idle for 15 minutes. The port forwarder sends a workspace's traffic to 127.0.0.1 on its port, and when the workspace has no running sandbox it wakes it through the manager. Each sandbox has its own network namespace and holds the workspace's launch server, for example npm run dev, with PORT 3000 inside mapped to 127.0.0.1 on the pool port; and exec, sh -c with a 2 minute default and 4 minute maximum, returning the exit code and the last 16 KB of output. A sandbox mounts the workspace's folder from the shared workspace volume at /workspace, and its deps folders, such as node_modules, vendor or .venv, from the deps cache at SANDBOX_DEPS_ROOT. It looks names up through its network controller, which applies the workspace's allow and deny lists and adds the addresses it answers to the sandbox's allowed set, and it reaches only those addresses, such as the npm registry. Other workspaces get one sandbox each on the same pod.">
                 <defs>
                   <marker id="sb-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
                     <path d="M0 0L10 5L0 10z" class="arrowhead"/>
@@ -683,7 +683,7 @@
 
                 <rect class="component" x="604" y="422" width="44" height="158" rx="6"/>
                 <text class="on-light name" x="626" y="499" text-anchor="middle" transform="rotate(-90 626 501)">network controller</text>
-                <text class="on-light type" x="626" y="513" text-anchor="middle" transform="rotate(-90 626 501)">[allow · deny]</text>
+                <text class="on-light type" x="626" y="513" text-anchor="middle" transform="rotate(-90 626 501)">[DNS · allowed set]</text>
 
                 <rect class="component" x="116" y="616" width="240" height="44" rx="6"/>
                 <text class="on-light name" x="236" y="635" text-anchor="middle">deps cache</text>
@@ -692,7 +692,7 @@
                 <rect class="external" x="720" y="214" width="260" height="62" rx="8"/>
                 <text class="on-dark name" x="850" y="235" text-anchor="middle">Postgres</text>
                 <text class="on-dark type" x="850" y="252" text-anchor="middle">workspaces: one row per workspace</text>
-                <text class="on-dark type" x="850" y="267" text-anchor="middle">status · launch_options</text>
+                <text class="on-dark type" x="850" y="267" text-anchor="middle">status · launch_options · network</text>
 
                 <rect class="external" x="720" y="382" width="260" height="64" rx="8"/>
                 <text class="on-dark name" x="850" y="404" text-anchor="middle">Workspace volume</text>
@@ -780,23 +780,6 @@
       &quot;patternProperties&quot;: {
         &quot;^.*$&quot;: {
           &quot;type&quot;: &quot;string&quot;
-        }
-      }
-    },
-    &quot;network&quot;: {
-      &quot;type&quot;: &quot;object&quot;,
-      &quot;properties&quot;: {
-        &quot;allow&quot;: {
-          &quot;type&quot;: &quot;array&quot;,
-          &quot;items&quot;: {
-            &quot;type&quot;: &quot;string&quot;
-          }
-        },
-        &quot;deny&quot;: {
-          &quot;type&quot;: &quot;array&quot;,
-          &quot;items&quot;: {
-            &quot;type&quot;: &quot;string&quot;
-          }
         }
       }
     }
@@ -909,7 +892,7 @@
               <tr><td>Request, <code>running</code></td><td>The port forwarder sends it to <code>127.0.0.1:&lt;port&gt;</code>. Requests, open WebSockets and running execs joined to it count as use.</td></tr>
               <tr><td>Request, <code>stopped</code></td><td>The port forwarder wakes it through the manager: the row has <code>launch_options</code> → start it again exactly as launched and hold the request until <code>running</code>, up to 90 s. Still starting after that → <code>503</code> with <code>Retry-After</code>. No <code>launch_options</code> → <code>503</code>.</td></tr>
               <tr><td>Request, <code>failed</code></td><td><code>502</code>. Traffic doesn't relaunch it; launch does.</td></tr>
-              <tr><td>Exec</td><td><code>sh -c</code> in the workspace's confinement, with the workspace's env and <code>env</code> on top. While the background process runs, it joins that process's network namespace: <code>localhost:&lt;port&gt;</code> reaches it, it gets <code>PORT</code> = that <code>port</code>, and the launch's <code>network</code> applies. With nothing running, its own namespace with open egress and no <code>PORT</code>. Its stdout and stderr go together to its own log, and <code>output</code> is the last 16 KB of it; the log is deleted once read. At <code>timeoutMs</code> (2 min default, 4 min max) the process tree is killed, <code>timedOut</code> is <code>true</code> and <code>exitCode</code> is <code>null</code>.</td></tr>
+              <tr><td>Exec</td><td><code>sh -c</code> in the workspace's confinement, with the workspace's env and <code>env</code> on top. While the background process runs, it joins that process's network namespace: <code>localhost:&lt;port&gt;</code> reaches it, it gets <code>PORT</code> = that <code>port</code>, and the network rules that process started with apply. With nothing running, its own namespace with the workspace's <code>network</code> and no <code>PORT</code>. Its stdout and stderr go together to its own log, and <code>output</code> is the last 16 KB of it; the log is deleted once read. At <code>timeoutMs</code> (2 min default, 4 min max) the process tree is killed, <code>timedOut</code> is <code>true</code> and <code>exitCode</code> is <code>null</code>.</td></tr>
               <tr><td>Activity</td><td>Every launch, a relaunch woken by a request included, and every exec adds a <code>sandbox_activities</code> row as <code>running</code> before it starts. An exec settles when it ends: <code>succeeded</code> on exit code 0, else <code>failed</code>, with its <code>output</code>. A launch settles at ready: <code>succeeded</code> once it answers on its port, <code>failed</code> if it exits or times out first, with the last 16 KB of its log so far; one with no free pool port is <code>failed</code> at once. Later crashes show in its logs, not here. The workspace page's Sandbox activity tab lists them, newest first, 20 to a page. Kept until the workspace is deleted.</td></tr>
               <tr><td>Stop</td><td>Kill the process tree → free the port → <code>stopped</code>. The row's <code>launch_options</code> stay, so the next request wakes it. Nothing running → already <code>stopped</code>.</td></tr>
               <tr><td>Logs</td><td>The last <code>tail</code> lines, 1,000 at most, of the latest launch's stdout and stderr together, in the order written, with blank lines and terminal colour codes left out. Both go to one pipe the worker reads, and it appends each complete line to the list <code>launch-log:&lt;workspaceId&gt;</code> in Redis as it arrives, keeping the last 1,000. The server reads them from there without calling a worker, so they stay readable after a stop, a crash, the idle sweep or the worker's death. The last line says how it ended: <code>exited with code &lt;n&gt;</code>, <code>killed by &lt;signal&gt;</code> or <code>stopped</code>, after <code>nothing answered on port &lt;port&gt; within 90 s</code> when it never listened. A <code>failed</code> end adds one line after it: put the install step in the launch command, e.g. <code>npm ci &amp;&amp; npm start</code>. A new launch clears them.</td></tr>
@@ -928,12 +911,126 @@
             <tbody>
               <tr><td>Namespaces</td><td>Its own user, pid, ipc, uts, cgroup and network namespaces.</td></tr>
               <tr><td>Files</td><td><code>/workspace</code> is <code>WORKSPACES_DIR/&lt;workspaceId&gt;</code> on the shared volume, read-write. Deps folders come from the deps cache at <code>SANDBOX_DEPS_ROOT/&lt;workspaceId&gt;</code>, picked by the manifests the workspace has, at its root and up to 3 folders down: <code>package.json</code> → <code>node_modules</code>, <code>composer.json</code> → <code>vendor</code>, <code>pyproject.toml</code> or <code>requirements.txt</code> → <code>.venv</code>, <code>Gemfile</code> → <code>vendor/bundle</code> with <code>BUNDLE_PATH</code> set under the workspace's env. They stay on the worker whose sandbox wrote them. A launch, wake or exec placed on another worker finds them empty, so an app whose deps are missing there fails to start; a launch command that includes its install step works on any worker. Deleting the workspace removes its deps from the server's disk only; each worker keeps its copy under <code>SANDBOX_DEPS_ROOT</code> until the pod's <code>/tmp</code> is cleared. <code>HOME</code> is <code>/workspace/.home</code>, the workspace's own folder in the deps cache, <code>SANDBOX_DEPS_ROOT/&lt;workspaceId&gt;/.home</code>, mounted like the deps folders: tool caches such as <code>~/.npm</code> and <code>~/.cache</code> are on disk, as page cache the kernel can reclaim, and last across execs. The sandbox's own cgroup is at <code>/sys/fs/cgroup</code>, read-only, so runtimes that size their heap from <code>memory.max</code>, like Node and the JVM, size it to the sandbox's limit. System paths read-only. <code>/tmp</code> empty.</td></tr>
-              <tr><td>Network</td><td>One namespace per workspace through pasta, made by launch; an exec joins it while the background process runs, else gets its own. Inbound: only the launch's <code>port</code>, mapped to the pod's <code>127.0.0.1:&lt;port&gt;</code>. Outbound: only loopback leaves the namespace. The internet is reached through the network controller, an HTTP proxy at <code>127.0.0.1:3128</code> inside every namespace, mapped by pasta to the controller's own port on the pod. It applies the launch's <code>allow</code> and <code>deny</code> lists to each host name and refuses private addresses; an exec's own namespace reaches every public host. Tools that ignore the proxy settings can't reach the internet. Nothing on the pod or cluster: not other sandboxes, not Chromium, not the internal API on 4002.</td></tr>
+              <tr><td>Network</td><td>One namespace per workspace through pasta, made by launch; an exec joins it while the background process runs, else gets its own. Inbound: only the launch's <code>port</code>, mapped to the pod's <code>127.0.0.1:&lt;port&gt;</code>. Outbound: loopback, and the addresses the namespace's network controller answered for a name, which applies the workspace's <code>allow</code> and <code>deny</code> lists; everything else is dropped. A typed address, the pod's or the cluster's, isn't reached: not other sandboxes, not Chromium, not the internal API on 4002. See <a href="#sandbox-networks">Sandbox networks</a>.</td></tr>
               <tr><td>Limits</td><td>One cgroup per workspace, <code>sandboxes/workspace-&lt;workspaceId&gt;</code>, shared by its launch and every exec, caps memory at <code>SANDBOX_MEMORY_MAX_MB</code>, 1024 MB by default, and CPU and process count, so one workspace can't starve the pod. Every workspace's cgroup, and every browser run's, sits under <code>sandboxes</code>, whose <code>memory.max</code> is the pod's limit less 450 MB kept for the worker and Chromium: when the sandboxes run out together, the kernel kills a process inside them, never the worker.</td></tr>
-              <tr><td>Environment</td><td><code>PORT</code> = the launch's <code>port</code>, the workspace's env over it, the command's <code>env</code> on top, plus <code>PATH</code>, <code>LANG</code>, <code>LC_ALL</code>, <code>TZ</code>. Under them, the proxy settings that point at the network controller: <code>HTTP_PROXY</code>, <code>HTTPS_PROXY</code> and their lowercase forms, <code>NO_PROXY</code> for <code>localhost</code>, and <code>NODE_USE_ENV_PROXY</code>. Nothing else from the runner.</td></tr>
+              <tr><td>Environment</td><td><code>PORT</code> = the launch's <code>port</code>, the workspace's env over it, the command's <code>env</code> on top, plus <code>PATH</code>, <code>LANG</code>, <code>LC_ALL</code>, <code>TZ</code>. Nothing else from the runner.</td></tr>
               <tr><td>Local dev</td><td><code>SANDBOX_MODE=none</code> runs unconfined, allowed only with <code>NODE_ENV=development</code>.</td></tr>
             </tbody>
           </table>
+        </section>
+
+        <section class="doc-section" id="sandbox-networks">
+          <h2>Sandbox networks</h2>
+          <p>Each sandbox, Chromium's included, has its own network controller: a nameserver in the worker, on random <code>127.0.0.1</code> ports of the pod, that pasta maps to <code>127.0.0.1:53</code>, UDP and TCP, inside the sandbox's namespace. The sandbox's <code>/etc/resolv.conf</code> names only it. The namespace's nft gate drops everything but loopback and the set <code>@allowed</code>, and the controller adds each address it answers to that set before it answers. So every tool, whatever it is written in, reaches a host the same way: it looks the name up, then connects to the address it got.</p>
+          <p>The rules are the workspace's <code>network</code>, two lists of names set when it is created or updated: <code>deny</code> blocks names, and <code>allow</code> opens names again that <code>deny</code> blocked, and opens private addresses. A name is exact, like <code>registry.npmjs.org</code>, or a pattern: <code>*.npmjs.org</code> matches any name ending in <code>.npmjs.org</code>, and <code>*</code> matches every name. With no lists, every public name resolves and no private one does. Launch, wake and exec read the lists when they start a sandbox. A running sandbox keeps the lists it started with, and an exec joined to it shares its controller.</p>
+
+          <figure>
+            <div class="diagram">
+              <svg class="c4" viewBox="0 0 1060 550" role="img" aria-label="How a sandbox reaches a name, on a worker pod. Inside the sandbox's own network namespace, any tool, such as prisma, npm, curl, psql, ssh or fetch, reads /etc/resolv.conf, which names 127.0.0.1 and keeps the pod's search and options lines. 1: the tool looks the name up at 127.0.0.1:53, over UDP or TCP. 2: pasta forwards the lookup to the sandbox's network controller, one per sandbox, on the pod. The controller answers NXDOMAIN to a name its deny list matches and its allow list doesn't. 3: otherwise it asks the pod's nameserver, kube-dns. A name that resolves to a private address gets NXDOMAIN unless the allow list matches it, AAAA gets no addresses, and other types are passed on as answered. 4: it adds each address of the answer to the nft gate's @allowed set, where entries last until the sandbox ends. 5: then it answers. 6: the tool connects. The gate, on the namespace's output, drops by default and accepts loopback and the addresses in @allowed, so the connection reaches the pod, service or public host the lookup returned.">
+                <defs>
+                  <marker id="sn-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                    <path d="M0 0L10 5L0 10z" class="arrowhead"/>
+                  </marker>
+                </defs>
+
+                <rect class="boundary" x="20" y="20" width="730" height="510" rx="10"/>
+                <text class="label name" x="734" y="518" text-anchor="end">worker pod</text>
+
+                <rect class="group" x="40" y="44" width="400" height="470" rx="8"/>
+                <text class="label name" x="52" y="504">sandbox · its own network namespace</text>
+
+                <rect class="component" x="60" y="70" width="150" height="320" rx="6"/>
+                <text class="on-light name" x="135" y="94" text-anchor="middle">any tool</text>
+                <text class="on-light type" x="135" y="111" text-anchor="middle">[prisma · npm · curl]</text>
+                <text class="on-light type" x="135" y="127" text-anchor="middle">psql · ssh · fetch</text>
+
+                <rect class="component" x="60" y="420" width="360" height="46" rx="6"/>
+                <text class="on-light name" x="240" y="439" text-anchor="middle">/etc/resolv.conf</text>
+                <text class="on-light type" x="240" y="455" text-anchor="middle">[nameserver 127.0.0.1 · the pod's search and options lines]</text>
+
+                <rect class="component" x="280" y="78" width="140" height="46" rx="6"/>
+                <text class="on-light name" x="350" y="97" text-anchor="middle">127.0.0.1:53</text>
+                <text class="on-light type" x="350" y="113" text-anchor="middle">[pasta · UDP + TCP]</text>
+
+                <rect class="component" x="280" y="270" width="140" height="120" rx="6"/>
+                <text class="on-light name" x="350" y="292" text-anchor="middle">nft gate</text>
+                <text class="on-light type" x="350" y="309" text-anchor="middle">[output chain]</text>
+                <text class="on-light type" x="350" y="334" text-anchor="middle">policy drop</text>
+                <text class="on-light type" x="350" y="350" text-anchor="middle">accept lo</text>
+                <text class="on-light type" x="350" y="366" text-anchor="middle">accept @allowed</text>
+
+                <rect class="component" x="480" y="64" width="240" height="236" rx="6"/>
+                <text class="on-light name" x="600" y="88" text-anchor="middle">network controller</text>
+                <text class="on-light type" x="600" y="105" text-anchor="middle">[one per sandbox · on the pod]</text>
+                <text class="on-light type" x="496" y="132">deny, not allow → NXDOMAIN</text>
+                <text class="on-light type" x="496" y="150"><tspan font-weight="600">3.</tspan> ask the pod's nameserver</text>
+                <text class="on-light type" x="496" y="168">private, not allow → NXDOMAIN</text>
+                <text class="on-light type" x="496" y="186">AAAA → no addresses</text>
+                <text class="on-light type" x="496" y="204">other types → as answered</text>
+                <text class="on-light type" x="496" y="222"><tspan font-weight="600">4.</tspan> add each address to @allowed</text>
+                <text class="on-light type" x="496" y="240"><tspan font-weight="600">5.</tspan> answer</text>
+                <text class="on-light type" x="496" y="268">entries last until the sandbox ends</text>
+
+                <rect class="external" x="800" y="68" width="240" height="56" rx="8"/>
+                <text class="on-dark name" x="920" y="91" text-anchor="middle">kube-dns</text>
+                <text class="on-dark type" x="920" y="108" text-anchor="middle">[the pod's nameserver]</text>
+
+                <rect class="external" x="800" y="312" width="240" height="56" rx="8"/>
+                <text class="on-dark name" x="920" y="335" text-anchor="middle">pods and services</text>
+                <text class="on-dark type" x="920" y="352" text-anchor="middle">[private addresses]</text>
+
+                <rect class="external" x="800" y="396" width="240" height="56" rx="8"/>
+                <text class="on-dark name" x="920" y="419" text-anchor="middle">Internet</text>
+                <text class="on-dark type" x="920" y="436" text-anchor="middle">[public addresses]</text>
+
+                <line class="edge" x1="135" y1="390" x2="135" y2="418" marker-end="url(#sn-arrow)"/>
+                <text class="edge-label" x="143" y="408">reads</text>
+
+                <line class="edge" x1="210" y1="92" x2="278" y2="92" marker-end="url(#sn-arrow)"/>
+                <text class="edge-label" x="244" y="84" text-anchor="middle"><tspan font-weight="600">1.</tspan> lookup</text>
+                <line class="edge" x1="280" y1="112" x2="212" y2="112" marker-end="url(#sn-arrow)"/>
+                <text class="edge-label" x="244" y="128" text-anchor="middle"><tspan font-weight="600">5.</tspan> answer</text>
+
+                <line class="edge" x1="422" y1="101" x2="478" y2="101" marker-start="url(#sn-arrow)" marker-end="url(#sn-arrow)"/>
+                <text class="edge-label halo" x="450" y="93" text-anchor="middle"><tspan font-weight="600">2.</tspan> pasta</text>
+
+                <line class="edge" x1="722" y1="96" x2="798" y2="96" marker-start="url(#sn-arrow)" marker-end="url(#sn-arrow)"/>
+                <text class="edge-label halo" x="760" y="88" text-anchor="middle"><tspan font-weight="600">3.</tspan> resolve</text>
+
+                <line class="edge" x1="480" y1="284" x2="422" y2="284" marker-end="url(#sn-arrow)"/>
+                <text class="edge-label halo" x="451" y="276" text-anchor="middle"><tspan font-weight="600">4.</tspan> add</text>
+
+                <line class="edge" x1="210" y1="330" x2="278" y2="330" marker-end="url(#sn-arrow)"/>
+                <text class="edge-label" x="244" y="322" text-anchor="middle"><tspan font-weight="600">6.</tspan> connect</text>
+
+                <line class="edge" x1="420" y1="340" x2="798" y2="340" marker-end="url(#sn-arrow)"/>
+                <text class="edge-label halo" x="610" y="332" text-anchor="middle">only addresses in @allowed</text>
+                <polyline class="edge" points="420,376 770,376 770,424 798,424" marker-end="url(#sn-arrow)"/>
+              </svg>
+            </div>
+            <figcaption>C4 component diagram: how a sandbox reaches a name. Solid arrows are calls, numbered in order. Grey boxes are outside the worker pod.</figcaption>
+          </figure>
+
+          <h3>How the controller decides a name</h3>
+          <table>
+            <thead>
+              <tr><th>Lookup</th><th>Answer</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>A name the <code>deny</code> list matches and the <code>allow</code> list doesn't</td><td><code>NXDOMAIN</code>. The pod's nameserver isn't asked.</td></tr>
+              <tr><td><code>A</code>, every address public</td><td>The pod's nameserver's answer, once its addresses are in <code>@allowed</code>.</td></tr>
+              <tr><td><code>A</code>, an address in <code>0/8</code>, <code>10/8</code>, <code>100.64/10</code>, <code>127/8</code>, <code>169.254/16</code>, <code>172.16/12</code> or <code>192.168/16</code></td><td><code>NXDOMAIN</code>, unless the <code>allow</code> list matches the name; then as above.</td></tr>
+              <tr><td><code>AAAA</code></td><td>No addresses, with the nameserver's response code. The sandbox has no IPv6.</td></tr>
+              <tr><td>Any other common type, like <code>MX</code>, <code>TXT</code> or <code>SRV</code></td><td>The pod's nameserver's answer, asked over UDP and again over TCP when it is truncated.</td></tr>
+              <tr><td>A type the controller doesn't know, like <code>HTTPS</code> or <code>SVCB</code></td><td>No records. The pod's nameserver isn't asked.</td></tr>
+              <tr><td>The pod's nameserver doesn't answer within 5 s, or <code>@allowed</code> can't be updated</td><td><code>SERVFAIL</code>.</td></tr>
+              <tr><td>Not exactly one question</td><td><code>FORMERR</code>.</td></tr>
+            </tbody>
+          </table>
+          <p>A connection to an address no lookup returned is dropped: a typed IP address, or a tool that asks another nameserver, like <code>8.8.8.8</code>. Inside the namespace <code>127.0.0.1</code> is the sandbox's own loopback; the pod's loopback is reached only through the launch's port mapping and, for Chromium, the pool ports. An address stays in <code>@allowed</code> until the sandbox ends, whatever its record's TTL, and opens it to everything in the namespace.</p>
+
+          <h3>Risk</h3>
+          <p>An <code>allow</code> pattern opens every address its names resolve to, private ones included, and <code>*</code> matches every name. So a workspace with <code>{&quot;allow&quot;: [&quot;*&quot;]}</code> reaches, by name, every pod and service in the cluster, the worker pods and the harness's own Postgres and Redis among them, and cloud metadata at <code>169.254.169.254</code> through any name that resolves there. A typed address still needs a lookup that returned it. Any caller that can create or update a workspace sets its <code>network</code>.</p>
         </section>
 
         <section class="doc-section" id="browser-sessions">
@@ -1800,7 +1897,7 @@
             <tbody>
               <tr><td>Namespaces</td><td>Its own user, pid, ipc, uts, cgroup and network namespaces.</td><td>The same, its own per run.</td></tr>
               <tr><td>Files</td><td>System paths and the browser build read-only. <code>/tmp</code> empty, holding the profile. No workspace, no service account token.</td><td>System paths, Node and the runner's <code>playwright</code> read-only. <code>/tmp</code> empty.</td></tr>
-              <tr><td>Network</td><td>Its own namespace through pasta. Inbound: only CDP, from the pod's <code>127.0.0.1:&lt;BROWSER_CDP_PORT&gt;</code>. Outbound: DNS, public addresses, and the pool ports 4100–4149 on the pod's loopback. Private ranges are dropped: not the internal API on 4002, not the cluster, not cloud metadata.</td><td>Its own namespace through pasta. Outbound: only Chromium's CDP port on the pod's loopback.</td></tr>
+              <tr><td>Network</td><td>Its own namespace through pasta. Inbound: only CDP, from the pod's <code>127.0.0.1:&lt;BROWSER_CDP_PORT&gt;</code>. Outbound: the public addresses its network controller answered for a name, with no lists, and the pool ports 4100–4149 on the pod's loopback. A name that resolves to a private address doesn't resolve, and a typed address isn't reached: not the internal API on 4002, not the cluster, not cloud metadata. See <a href="#sandbox-networks">Sandbox networks</a>.</td><td>Its own namespace through pasta, with <code>deny: ["*"]</code>, so no name resolves. Outbound: only Chromium's CDP port on the pod's loopback.</td></tr>
               <tr><td>Per-context rule</td><td>Each session's context allows public addresses and its own app's preview port. It keeps one app's session off another app's preview; <code>run</code> can get past it, not past the namespace.</td><td>—</td></tr>
               <tr><td>Limits</td><td>One cgroup, <code>chromium</code>, caps memory, CPU and process count for the whole browser. It sits next to the worker's, outside <code>sandboxes</code>, so workspace code running out of memory can't kill it.</td><td>One cgroup per run, under <code>sandboxes</code>.</td></tr>
               <tr><td>Environment</td><td><code>PATH</code>, <code>LANG</code>, <code>TZ</code>, <code>HOME=/tmp</code>. Nothing else from the runner.</td><td>The same, plus the CDP address.</td></tr>

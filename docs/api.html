@@ -73,6 +73,7 @@
     &quot;name&quot;,
     &quot;status&quot;,
     &quot;defaultEnvKeys&quot;,
+    &quot;network&quot;,
     &quot;createdBy&quot;,
     &quot;createdAt&quot;,
     &quot;updatedAt&quot;
@@ -96,6 +97,23 @@
       &quot;type&quot;: &quot;array&quot;,
       &quot;items&quot;: {
         &quot;type&quot;: &quot;string&quot;
+      }
+    },
+    &quot;network&quot;: {
+      &quot;type&quot;: &quot;object&quot;,
+      &quot;properties&quot;: {
+        &quot;allow&quot;: {
+          &quot;type&quot;: &quot;array&quot;,
+          &quot;items&quot;: {
+            &quot;type&quot;: &quot;string&quot;
+          }
+        },
+        &quot;deny&quot;: {
+          &quot;type&quot;: &quot;array&quot;,
+          &quot;items&quot;: {
+            &quot;type&quot;: &quot;string&quot;
+          }
+        }
       }
     },
     &quot;createdBy&quot;: {
@@ -124,7 +142,7 @@
     }
   }
 }</code></pre>
-          <p><code>defaultEnvKeys</code> is the names in the workspace's default env, sorted. Their values are never returned.</p>
+          <p><code>defaultEnvKeys</code> is the names in the workspace's default env, sorted. Their values are never returned. <code>network</code> is the hosts its commands can reach, <code>{}</code> when none were set; see <a href="#sandbox">Network</a>.</p>
 
           <h3>Endpoints</h3>
 <div class="routes">
@@ -149,14 +167,31 @@
           &quot;type&quot;: &quot;string&quot;
         }
       }
+    },
+    &quot;network&quot;: {
+      &quot;type&quot;: &quot;object&quot;,
+      &quot;properties&quot;: {
+        &quot;allow&quot;: {
+          &quot;type&quot;: &quot;array&quot;,
+          &quot;items&quot;: {
+            &quot;type&quot;: &quot;string&quot;
+          }
+        },
+        &quot;deny&quot;: {
+          &quot;type&quot;: &quot;array&quot;,
+          &quot;items&quot;: {
+            &quot;type&quot;: &quot;string&quot;
+          }
+        }
+      }
     }
   }
 }</code></pre>
-<p><code>defaultEnv</code> is the environment every command in the workspace runs with, as names and values. The values are encrypted at rest.</p>
+<p><code>defaultEnv</code> is the environment every command in the workspace runs with, as names and values. The values are encrypted at rest. <code>network</code> is the hosts every command in the workspace can reach, described in <a href="#sandbox">Network</a>; without it, every public host.</p>
 <h4>Response 201</h4>
 <p>The workspace object, with <code>status</code> <code>stopped</code>.</p>
 <h4>Errors · 400</h4>
-<p>The name doesn't match the pattern, or a value in <code>defaultEnv</code> isn't a string. Fastify's validation body: <code>statusCode</code>, <code>code</code>, <code>error</code>, <code>message</code>.</p>
+<p>The name doesn't match the pattern, a value in <code>defaultEnv</code> isn't a string, or <code>network</code> isn't lists of strings. Fastify's validation body: <code>statusCode</code>, <code>code</code>, <code>error</code>, <code>message</code>.</p>
 <h4>Errors · 409</h4>
 <p>A workspace already has this name.</p>
   </div>
@@ -184,7 +219,7 @@
   </div>
 </details>
 <details class="route">
-  <summary><span class="method patch">PATCH</span><code class="route-path">/api/v1/workspaces/:id</code><span class="route-summary">Set or remove default env values</span></summary>
+  <summary><span class="method patch">PATCH</span><code class="route-path">/api/v1/workspaces/:id</code><span class="route-summary">Set or remove default env values, or replace the network lists</span></summary>
   <div class="route-body">
 <h4>Params</h4>
 <pre class="schema"><code>{
@@ -213,14 +248,31 @@
           ]
         }
       }
+    },
+    &quot;network&quot;: {
+      &quot;type&quot;: &quot;object&quot;,
+      &quot;properties&quot;: {
+        &quot;allow&quot;: {
+          &quot;type&quot;: &quot;array&quot;,
+          &quot;items&quot;: {
+            &quot;type&quot;: &quot;string&quot;
+          }
+        },
+        &quot;deny&quot;: {
+          &quot;type&quot;: &quot;array&quot;,
+          &quot;items&quot;: {
+            &quot;type&quot;: &quot;string&quot;
+          }
+        }
+      }
     }
   }
 }</code></pre>
-<p>Each name in <code>defaultEnv</code> is set to its value, and a name set to <code>null</code> is removed. Names not in <code>defaultEnv</code> stay as they were.</p>
+<p>Each name in <code>defaultEnv</code> is set to its value, and a name set to <code>null</code> is removed. Names not in <code>defaultEnv</code> stay as they were. <code>network</code>, when given, replaces the workspace's lists whole; <code>{}</code> clears them.</p>
 <h4>Response 204</h4>
-<p>No body. The next exec or launch runs with the new env; a background process already running keeps the env it started with.</p>
+<p>No body. The next exec or launch runs with the new env and network; a background process already running keeps the ones it started with, and so does an exec that runs alongside it.</p>
 <h4>Errors · 400</h4>
-<p>A value in <code>defaultEnv</code> isn't a string or <code>null</code>. Fastify's validation body: <code>statusCode</code>, <code>code</code>, <code>error</code>, <code>message</code>.</p>
+<p>A value in <code>defaultEnv</code> isn't a string or <code>null</code>, or <code>network</code> isn't lists of strings. Fastify's validation body: <code>statusCode</code>, <code>code</code>, <code>error</code>, <code>message</code>.</p>
 <h4>Errors · 404</h4>
 <p>No workspace has this id.</p>
   </div>
@@ -569,8 +621,8 @@
           <p>A command is run with <code>sh -c</code> from the workspace root. Every route here also answers <code>401</code> as described in <a href="#authentication">Authentication</a>.</p>
 
           <h3>Network</h3>
-          <p>By default a command can reach every public host. Launch's <code>network</code> changes that for the background process and every exec that runs alongside it, with two lists: <code>deny</code> blocks hosts, and <code>allow</code> opens hosts again that <code>deny</code> blocked. A host is a name, like <code>registry.npmjs.org</code>, or a pattern: <code>*.npmjs.org</code> matches any name ending in <code>.npmjs.org</code>, and <code>*</code> matches every host. So <code>{&quot;deny&quot;: [&quot;*&quot;], &quot;allow&quot;: [&quot;registry.npmjs.org&quot;]}</code> reaches only the npm registry.</p>
-          <p>Commands reach the internet through a proxy at <code>127.0.0.1:3128</code>, set in <code>HTTP_PROXY</code>, <code>HTTPS_PROXY</code> and their lowercase forms. npm, curl, git, pip, Bun and Node with <code>NODE_USE_ENV_PROXY</code> (also set) all use it. A tool that ignores these settings can't reach the internet. Private addresses are never reachable, whatever the lists say.</p>
+          <p>By default a command can reach every public host. The workspace's <code>network</code>, set when it is <a href="#workspaces">created or updated</a>, changes that for its background process and every exec, with two lists: <code>deny</code> blocks hosts, and <code>allow</code> opens hosts again that <code>deny</code> blocked. A host is a name, like <code>registry.npmjs.org</code>, or a pattern: <code>*.npmjs.org</code> matches any name ending in <code>.npmjs.org</code>, and <code>*</code> matches every host. So <code>{&quot;deny&quot;: [&quot;*&quot;], &quot;allow&quot;: [&quot;registry.npmjs.org&quot;]}</code> reaches only the npm registry.</p>
+          <p>The lists apply to every tool. A command looks names up through the sandbox's own nameserver, the one <code>/etc/resolv.conf</code> names, and reaches only the addresses those lookups returned. A denied name doesn't resolve. A typed IP address that no lookup returned, or a tool that asks another nameserver, can't connect. A name that resolves to a private address, like a service in the cluster, resolves only when <code>allow</code> matches it, so <code>{&quot;allow&quot;: [&quot;*&quot;]}</code> reaches every private address by name, cloud metadata included.</p>
 
           <h3>Endpoints</h3>
 <div class="routes">
@@ -614,27 +666,10 @@
           &quot;type&quot;: &quot;string&quot;
         }
       }
-    },
-    &quot;network&quot;: {
-      &quot;type&quot;: &quot;object&quot;,
-      &quot;properties&quot;: {
-        &quot;allow&quot;: {
-          &quot;type&quot;: &quot;array&quot;,
-          &quot;items&quot;: {
-            &quot;type&quot;: &quot;string&quot;
-          }
-        },
-        &quot;deny&quot;: {
-          &quot;type&quot;: &quot;array&quot;,
-          &quot;items&quot;: {
-            &quot;type&quot;: &quot;string&quot;
-          }
-        }
-      }
     }
   }
 }</code></pre>
-<p><code>port</code> is the port the process listens on, and <code>PORT</code> is set to it unless the workspace's env or <code>env</code> sets it. It can't be <code>3128</code>, which the proxy holds; a launch with it answers <code>400</code>. <code>env</code> is added to the workspace's env, and wins where a name is in both. <code>network</code> is described in <a href="#sandbox">Network</a>.</p>
+<p><code>port</code> is the port the process listens on, and <code>PORT</code> is set to it unless the workspace's env or <code>env</code> sets it. It can't be <code>53</code>, which the sandbox's nameserver holds; a launch with it answers <code>400</code>. <code>env</code> is added to the workspace's env, and wins where a name is in both. The process reaches the hosts the workspace's <a href="#sandbox">network</a> allows.</p>
 <h4>Response 201</h4>
 <p>The public URL that reaches <code>port</code>. The call answers once the process listens on <code>port</code>, up to 90 seconds.</p>
 <pre class="schema"><code>{
@@ -702,7 +737,7 @@
   }
 }</code></pre>
 <p><code>timeoutMs</code> is how long the command may run: 2 minutes by default, 4 at most. <code>env</code> is added to the workspace's env, and wins where a name is in both.</p>
-<p>While the background process runs, the command shares its network: it reaches the process on <code>localhost:&lt;port&gt;</code>, <code>PORT</code> is set to that port the same way, and the launch's <code>network</code> applies. With nothing running, it can reach every public host.</p>
+<p>While the background process runs, the command shares its network: it reaches the process on <code>localhost:&lt;port&gt;</code>, <code>PORT</code> is set to that port the same way, and the network lists the process started with apply. With nothing running, the workspace's <a href="#sandbox">network</a> applies.</p>
 <p>With nothing running, the command can also run on another worker than the last one, where deps folders like <code>node_modules</code> are empty. Put the install step in the same command, like <code>npm ci &amp;&amp; npm test</code>.</p>
 <h4>Response 200</h4>
 <p>A command that fails still answers <code>200</code>; check <code>exitCode</code>. A command still running at <code>timeoutMs</code> is killed, <code>timedOut</code> is <code>true</code> and <code>exitCode</code> is <code>null</code>. <code>output</code> is stdout and stderr together, in the order they were written, cut to the last 16 KB.</p>

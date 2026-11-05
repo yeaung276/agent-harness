@@ -35,7 +35,6 @@ export interface LaunchOptions {
   command: string
   port: number
   env?: Record<string, string>
-  network?: { allow?: string[]; deny?: string[] }
 }
 
 export interface Workspace {

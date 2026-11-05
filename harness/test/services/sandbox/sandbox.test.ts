@@ -13,6 +13,7 @@ import { createRedisLog, readRedisLog } from '../../../src/services/sandbox/log.
 import {
   assertSandboxUsable,
   createSandbox,
+  type Sandbox,
   type SandboxOptions,
   setupCgroups,
 } from '../../../src/services/sandbox/sandbox.ts'
@@ -32,7 +33,7 @@ const config = (env: Record<string, string>) =>
 
 let root: string
 let nextPort = 4300
-const sandboxes: ReturnType<typeof createSandbox>[] = []
+const sandboxes: Sandbox[] = []
 
 type Workspace = { id: string; dir: string }
 
@@ -44,8 +45,8 @@ const workspace = async (files: Record<string, string> = {}): Promise<Workspace>
   return { id, dir }
 }
 
-const start = ({ id, dir }: Workspace, options: Partial<SandboxOptions> & { command: string }) => {
-  const sandbox = createSandbox(`sandboxes/workspace-${id}`, {
+const start = async ({ id, dir }: Workspace, options: Partial<SandboxOptions> & { command: string }) => {
+  const sandbox = await createSandbox(`sandboxes/workspace-${id}`, {
     dir,
     mounts: [],
     mode,
@@ -69,7 +70,7 @@ const launch = (ws: Workspace, options: Partial<SandboxOptions> = {}) =>
   })
 
 const run = async (ws: Workspace, command: string, options: Partial<SandboxOptions> = {}) => {
-  const sandbox = start(ws, { command, ...options })
+  const sandbox = await start(ws, { command, ...options })
   const exitCode = await sandbox.exited()
   return { exitCode, output: (await sandbox.logs(5000)).join('\n') }
 }
@@ -144,7 +145,7 @@ describe('assertSandboxUsable', () => {
 
 describe('a launched process', () => {
   test('is starting until it answers on its pod port, then running', async () => {
-    const sandbox = launch(await workspace())
+    const sandbox = await launch(await workspace())
 
     expect(sandbox.status()).toBe('starting')
     await sandbox.ready()
@@ -154,7 +155,7 @@ describe('a launched process', () => {
   }, 30_000)
 
   test('fails with its last lines when it exits before answering, without waiting out its timeout', async () => {
-    const sandbox = launch(await workspace(), { command: 'echo "boom: DATABASE_URL is not set"; exit 1' })
+    const sandbox = await launch(await workspace(), { command: 'echo "boom: DATABASE_URL is not set"; exit 1' })
     const startedAt = Date.now()
 
     await expect(sandbox.ready()).rejects.toThrow('boom: DATABASE_URL is not set')
@@ -163,7 +164,7 @@ describe('a launched process', () => {
   }, 30_000)
 
   test('fails and is killed when nothing answers within its ready timeout', async () => {
-    const sandbox = launch(await workspace(), { command: 'sleep 60', readyTimeoutMs: 1500 })
+    const sandbox = await launch(await workspace(), { command: 'sleep 60', readyTimeoutMs: 1500 })
 
     await expect(sandbox.ready()).rejects.toThrow()
     await sandbox.exited()
@@ -173,7 +174,7 @@ describe('a launched process', () => {
   }, 30_000)
 
   test('stops on kill, frees its pod port and keeps its logs', async () => {
-    const sandbox = launch(await workspace())
+    const sandbox = await launch(await workspace())
     await sandbox.ready()
 
     await sandbox.kill()
@@ -185,7 +186,7 @@ describe('a launched process', () => {
   }, 30_000)
 
   test('stays failed when killed after it ended', async () => {
-    const sandbox = launch(await workspace(), { command: 'exit 1' })
+    const sandbox = await launch(await workspace(), { command: 'exit 1' })
     await sandbox.exited()
 
     await sandbox.kill()
@@ -194,14 +195,14 @@ describe('a launched process', () => {
   }, 30_000)
 
   test('ends its log with its exit code when it exits on its own', async () => {
-    const sandbox = launch(await workspace(), { command: 'echo boom; exit 3' })
+    const sandbox = await launch(await workspace(), { command: 'echo boom; exit 3' })
     await sandbox.exited()
 
     expect(await sandbox.logs(10, true)).toEqual(['boom', 'exited with code 3'])
   }, 30_000)
 
   test('ends its log with stopped when killed', async () => {
-    const sandbox = launch(await workspace())
+    const sandbox = await launch(await workspace())
     await sandbox.ready()
 
     await sandbox.kill()
@@ -210,7 +211,7 @@ describe('a launched process', () => {
   }, 30_000)
 
   test('says in its log that nothing answered when its ready timeout runs out', async () => {
-    const sandbox = launch(await workspace(), { command: 'sleep 60', readyTimeoutMs: 1500 })
+    const sandbox = await launch(await workspace(), { command: 'sleep 60', readyTimeoutMs: 1500 })
     await sandbox.exited()
 
     expect(await sandbox.logs(10, true)).toContain('nothing answered on port 3000 within 1.5 s')
@@ -218,7 +219,7 @@ describe('a launched process', () => {
 
   test('writes to the log it is given, which a Redis log copies for other machines to read', async () => {
     const redis = new RedisMock()
-    const sandbox = launch(await workspace(), {
+    const sandbox = await launch(await workspace(), {
       command: 'echo boom; exit 3',
       log: createRedisLog(redis, 'launch-logs:ws-1'),
     })
@@ -231,7 +232,7 @@ describe('a launched process', () => {
   }, 30_000)
 
   test('is idle only when nothing holds it and its last use ended more than idleMs ago', async () => {
-    const sandbox = start(await workspace(), { command: 'sleep 30' })
+    const sandbox = await start(await workspace(), { command: 'sleep 30' })
 
     const first = sandbox.use()
     const second = sandbox.use()
@@ -249,14 +250,14 @@ describe('a launched process', () => {
 
 describe('a command without a port', () => {
   test('adds no ending line to its log', async () => {
-    const sandbox = start(await workspace(), { command: 'echo hi; exit 3' })
+    const sandbox = await start(await workspace(), { command: 'echo hi; exit 3' })
     await sandbox.exited()
 
     expect(await sandbox.logs(10, true)).toEqual(['hi'])
   })
 
   test('is running from the start and stopped when it ends, with its exit code', async () => {
-    const sandbox = start(await workspace(), { command: 'exit 7' })
+    const sandbox = await start(await workspace(), { command: 'exit 7' })
 
     expect(sandbox.status()).toBe('running')
     expect(await sandbox.exited()).toBe(7)
@@ -265,7 +266,7 @@ describe('a command without a port', () => {
   }, 30_000)
 
   test('stops on kill', async () => {
-    const sandbox = start(await workspace(), { command: 'sleep 300' })
+    const sandbox = await start(await workspace(), { command: 'sleep 300' })
 
     await sandbox.kill()
 
@@ -274,7 +275,7 @@ describe('a command without a port', () => {
 
   test('runs in its workspace folder with the env it was given and nothing else of the server', async () => {
     process.env.RUNNER_SECRET = 'do-not-leak'
-    const { exitCode, output } = await run(await workspace({ 'package.json': '{}' }), 'ls; env', {
+    const { exitCode, output } = await run(await workspace({ 'package.json': '{}' }), 'ls; env; cat /etc/resolv.conf', {
       env: { API_URL: 'https://api.example' },
     })
     delete process.env.RUNNER_SECRET
@@ -284,11 +285,10 @@ describe('a command without a port', () => {
     expect(output).toContain('API_URL=https://api.example')
     expect(output).toContain('PATH=')
     expect(output).not.toContain('RUNNER_SECRET')
+    expect(output).not.toContain('HTTPS_PROXY')
     if (linux) {
       expect(output).toContain('HOME=/tmp')
-      expect(output).toContain('HTTPS_PROXY=http://127.0.0.1:3128')
-    } else {
-      expect(output).not.toContain('HTTPS_PROXY')
+      expect(output).toContain('nameserver 127.0.0.1')
     }
   }, 30_000)
 })
@@ -296,7 +296,7 @@ describe('a command without a port', () => {
 describe('a piped command', () => {
   test('hands back its stdout as a stream, drops stderr, and keeps no logs', async () => {
     const before = await readdir(join(tmpdir(), 'sandbox-logs')).catch(() => [])
-    const sandbox = start(await workspace(), { command: 'echo out; echo err >&2; echo more', stdout: 'pipe' })
+    const sandbox = await start(await workspace(), { command: 'echo out; echo err >&2; echo more', stdout: 'pipe' })
 
     let output = ''
     sandbox.stdout?.on('data', chunk => (output += chunk))
@@ -308,7 +308,7 @@ describe('a piped command', () => {
   }, 30_000)
 
   test('hands back stderr too when the command sends it to stdout', async () => {
-    const sandbox = start(await workspace(), {
+    const sandbox = await start(await workspace(), {
       command: "exec sh -c 'echo out; echo err >&2; echo more' 2>&1",
       stdout: 'pipe',
     })
@@ -329,7 +329,7 @@ describe('logs', () => {
   }, 30_000)
 
   test('come back as written, or cleaned of colour codes and blank lines', async () => {
-    const sandbox = start(await workspace(), { command: "printf '\\033[31mred\\033[0m\\n\\nplain\\n'" })
+    const sandbox = await start(await workspace(), { command: "printf '\\033[31mred\\033[0m\\n\\nplain\\n'" })
     await sandbox.exited()
 
     expect(await sandbox.logs(10)).toEqual(['\u001b[31mred\u001b[0m', '', 'plain', ''])
@@ -337,14 +337,14 @@ describe('logs', () => {
   }, 30_000)
 
   test('are the last tail lines', async () => {
-    const sandbox = start(await workspace(), { command: 'seq 1 5' })
+    const sandbox = await start(await workspace(), { command: 'seq 1 5' })
     await sandbox.exited()
 
     expect(await sandbox.logs(2, true)).toEqual(['4', '5'])
   }, 30_000)
 
   test('look back no further than the last 1 MB', async () => {
-    const sandbox = start(await workspace(), {
+    const sandbox = await start(await workspace(), {
       command: "echo FIRST; head -c 3000000 /dev/zero | tr '\\0' x; echo; echo END",
     })
     await sandbox.exited()
@@ -356,7 +356,7 @@ describe('logs', () => {
   }, 30_000)
 
   test('are gone once deleted', async () => {
-    const sandbox = start(await workspace(), { command: 'echo hello' })
+    const sandbox = await start(await workspace(), { command: 'echo hello' })
     await sandbox.exited()
     const before = await readdir(join(tmpdir(), 'sandbox-logs'))
 
@@ -418,8 +418,8 @@ describe.if(linux)('confinement', () => {
 
   test("keeps every process of a workspace in the workspace's cgroup, under its limits", async () => {
     const ws = await workspace()
-    start(ws, { command: 'sleep 30' })
-    start(ws, { command: 'sleep 30' })
+    await start(ws, { command: 'sleep 30' })
+    await start(ws, { command: 'sleep 30' })
     await until(async () => (await cgroupProcs(ws.id)) >= 2, 'both in the cgroup')
 
     const cgroup = join('/sys/fs/cgroup/sandboxes', `workspace-${ws.id}`)
@@ -458,7 +458,7 @@ describe.if(linux)('confinement', () => {
 
   test('ends everything inside on kill', async () => {
     const ws = await workspace()
-    const sandbox = start(ws, { command: 'sleep 300 & sleep 300 & wait' })
+    const sandbox = await start(ws, { command: 'sleep 300 & sleep 300 & wait' })
     await until(async () => (await cgroupProcs(ws.id)) >= 3, 'all running')
 
     await sandbox.kill()
@@ -490,7 +490,7 @@ describe.if(linux)('network', () => {
   })
 
   test("serves a launch on the pod's 127.0.0.1:<port> and nowhere else", async () => {
-    const sandbox = launch(await workspace())
+    const sandbox = await launch(await workspace())
     await sandbox.ready()
 
     expect(await get('127.0.0.1', sandbox.hostPort!)).toBe('ok')
@@ -499,14 +499,14 @@ describe.if(linux)('network', () => {
   }, 30_000)
 
   test('opens nothing on the pod for a command without a port', async () => {
-    const sandbox = start(await workspace(), { command: SERVER, env: { PORT: '3000' } })
+    const sandbox = await start(await workspace(), { command: SERVER, env: { PORT: '3000' } })
     await Bun.sleep(1500)
 
     expect(sandbox.status()).toBe('running')
     expect(await get('127.0.0.1', 3000)).toBeNull()
   }, 30_000)
 
-  test('reaches the internet through the proxy: a web page, an npm lookup and an API call from code', async () => {
+  test('reaches the internet by name with any tool: a web page, an npm lookup and an API call from code', async () => {
     const { output } = await run(
       await workspace({ 'package.json': '{ "name": "probe" }' }),
       [
@@ -519,21 +519,59 @@ describe.if(linux)('network', () => {
     expect(output.split('\n').filter(Boolean)).toEqual(['200', '1.3.0', '200'])
   }, 60_000)
 
-  test('applies its network rules to each host: allowed hosts get through, denied ones get 403', async () => {
+  test('resolves names over UDP and over TCP', async () => {
     const { output } = await run(
       await workspace(),
       [
-        "curl -s -o /dev/null -w '%{http_connect} %{http_code}\\n' https://registry.npmjs.org/left-pad",
-        "curl -s -o /dev/null -w '%{http_connect} %{http_code}\\n' https://www.google.com/",
+        'getent ahostsv4 registry.npmjs.org > /dev/null && echo udp',
+        'RES_OPTIONS=use-vc getent ahostsv4 registry.npmjs.org > /dev/null && echo tcp',
+      ].join('; ')
+    )
+
+    expect(output.split('\n').filter(Boolean)).toEqual(['udp', 'tcp'])
+  }, 30_000)
+
+  test("applies its network rules to each name: allowed names resolve and connect, denied ones don't resolve", async () => {
+    const { output } = await run(
+      await workspace(),
+      [
+        "curl -s -o /dev/null -w '%{http_code}\\n' https://registry.npmjs.org/left-pad",
+        "curl -s -o /dev/null -w '%{http_code}\\n' https://www.google.com/; echo $?",
       ].join('; '),
       { network: { deny: ['*'], allow: ['registry.npmjs.org'] } }
     )
 
-    expect(output.split('\n').filter(Boolean)).toEqual(['200 200', '403 000'])
+    expect(output.split('\n').filter(Boolean)).toEqual(['200', '000', '6'])
   }, 60_000)
 
-  test('never reaches the pod, the cluster or other sandboxes', async () => {
-    const sibling = launch(await workspace())
+  test('drops an address that no lookup returned, and lets it through once a lookup returned it', async () => {
+    const { output } = await run(
+      await workspace(),
+      [
+        'curl -s -m 5 -o /dev/null https://1.1.1.1/ && echo reached || echo dropped',
+        'curl -s -m 5 -o /dev/null https://one.one.one.one/ && echo reached || echo dropped',
+        'curl -s -m 5 -o /dev/null https://1.1.1.1/ && echo reached || echo dropped',
+      ].join('; ')
+    )
+
+    expect(output.split('\n').filter(Boolean)).toEqual(['dropped', 'reached', 'reached'])
+  }, 60_000)
+
+  test("reaches a private address only for a name its allow list names, and 127.0.0.1 is the sandbox's own", async () => {
+    const lookups = [
+      `curl -s -m 3 http://${clusterIp}.nip.io:5432/; echo " $?"`,
+      `curl -s -m 3 http://127.0.0.1.nip.io:4002/; echo " $?"`,
+    ].join('; ')
+
+    const closed = await run(await workspace(), lookups)
+    const listed = await run(await workspace(), lookups, { network: { allow: ['*.nip.io'] } })
+
+    expect(closed.output.split('\n').filter(Boolean)).toEqual([' 6', ' 6'])
+    expect(listed.output.split('\n').filter(Boolean)).toEqual(['cluster service 0', ' 7'])
+  }, 60_000)
+
+  test('never reaches the pod, the cluster or other sandboxes by address', async () => {
+    const sibling = await launch(await workspace())
     await sibling.ready()
 
     const { output } = await run(
@@ -541,19 +579,17 @@ describe.if(linux)('network', () => {
       [
         'curl -s -m 3 http://127.0.0.1:4002/',
         `curl -s -m 3 http://127.0.0.1:${sibling.hostPort}/`,
-        `curl -s -m 3 -o /dev/null -w '%{http_code}\\n' http://${podIp}:4003/`,
-        `curl -s -m 3 -o /dev/null -w '%{http_code}\\n' http://${clusterIp}:5432/`,
-        `curl -s -m 3 --noproxy '*' http://${podIp}:4003/`,
-        `curl -s -m 3 --noproxy '*' http://${clusterIp}:5432/`,
+        `curl -s -m 3 http://${podIp}:4003/`,
+        `curl -s -m 3 http://${clusterIp}:5432/`,
         'echo done',
       ].join('; ')
     )
 
-    expect(output.split('\n').filter(Boolean)).toEqual(['403', '403', 'done'])
+    expect(output.split('\n').filter(Boolean)).toEqual(['done'])
   }, 60_000)
 
   test("reaches the pod's 127.0.0.1 on its outbound ports, and on nothing else there", async () => {
-    const sibling = launch(await workspace())
+    const sibling = await launch(await workspace())
     await sibling.ready()
 
     const { output } = await run(
@@ -568,31 +604,22 @@ describe.if(linux)('network', () => {
     expect(output.split('\n').filter(Boolean)).toEqual(['ok', 'blocked'])
   }, 60_000)
 
-  test("blocks tools that don't use the proxy", async () => {
-    const { output } = await run(
-      await workspace(),
-      "curl -s -m 5 --noproxy '*' https://www.google.com/ || echo blocked"
-    )
-
-    expect(output.trim()).toBe('blocked')
-  }, 30_000)
-
   test("an exec joined to a launch reaches it on localhost and follows the launch's rules", async () => {
     const ws = await workspace()
-    const launched = launch(ws, { network: { deny: ['*'], allow: ['registry.npmjs.org'] } })
+    const launched = await launch(ws, { network: { deny: ['*'], allow: ['registry.npmjs.org'] } })
     await launched.ready()
 
     const { output } = await run(
       ws,
       [
         'curl -s http://localhost:3000/; echo',
-        "curl -s -o /dev/null -w '%{http_connect} %{http_code}\\n' https://registry.npmjs.org/left-pad",
-        "curl -s -o /dev/null -w '%{http_connect} %{http_code}\\n' https://www.google.com/",
+        "curl -s -o /dev/null -w '%{http_code}\\n' https://registry.npmjs.org/left-pad",
+        "curl -s -o /dev/null -w '%{http_code}\\n' https://www.google.com/; echo $?",
       ].join('; '),
       { joinPid: launched.pid, env: { PORT: '3000' } }
     )
 
-    expect(output.split('\n').filter(Boolean)).toEqual(['ok', '200 200', '403 000'])
+    expect(output.split('\n').filter(Boolean)).toEqual(['ok', '200', '000', '6'])
   }, 60_000)
 
   test("an exec started together with a launch joins the launch's network once it is locked down, never the pod's", async () => {
@@ -600,11 +627,11 @@ describe.if(linux)('network', () => {
 
     for (let round = 0; round < 10; round++) {
       const ws = await workspace()
-      const launched = launch(ws)
+      const launched = await launch(ws)
 
       const { exitCode, output } = await run(
         ws,
-        `readlink /proc/self/ns/net; curl -s -m 1 --noproxy '*' http://${clusterIp}:5432/ || echo blocked`,
+        `readlink /proc/self/ns/net; curl -s -m 1 http://${clusterIp}:5432/ || echo blocked`,
         { joinPid: launched.pid }
       )
       const [network, reach] = output.split('\n')
@@ -626,7 +653,7 @@ describe.if(linux)('deps', () => {
     const install = await run(ws, 'bun add left-pad@1.3.0', { mounts })
     expect(install.exitCode).toBe(0)
 
-    const launched = launch(ws, {
+    const launched = await launch(ws, {
       mounts,
       command: `bun -e "const pad = require('left-pad'); Bun.serve({ port: Number(process.env.PORT), fetch: () => new Response(pad('ok', 4)) })"`,
     })

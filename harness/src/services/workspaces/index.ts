@@ -41,6 +41,7 @@ export const createWorkspaceService = ({
         name: workspaces.name,
         status: workspaces.status,
         defaultEnvKeys: sql<string[]>`array(select jsonb_object_keys(${workspaces.defaultEnv}) order by 1)`,
+        network: workspaces.network,
         createdBy: { id: users.id, email: users.email },
         createdAt: workspaces.createdAt,
         updatedAt: workspaces.updatedAt,
@@ -77,14 +78,19 @@ export const createWorkspaceService = ({
     uploadsDir,
 
     // Workspaces
-    create: async (userId: string, name: string, defaultEnv: Record<string, string> = {}) => {
+    create: async (
+      userId: string,
+      name: string,
+      defaultEnv: Record<string, string> = {},
+      network: typeof workspaces.$inferSelect.network = {}
+    ) => {
       if (!new RegExp(NAME_PATTERN).test(name))
         throw new HttpError(400, 'Use 1–63 lowercase letters, digits and -, not starting or ending with -')
 
       const created = await db.transaction(async tx => {
         const [row] = await tx
           .insert(workspaces)
-          .values({ userId, name, defaultEnv: encryptEnv(defaultEnv) })
+          .values({ userId, name, defaultEnv: encryptEnv(defaultEnv), network })
           .onConflictDoNothing({ target: workspaces.name })
           .returning({ id: workspaces.id })
         if (row) await mkdir(path(row.id), { recursive: true })
@@ -106,7 +112,13 @@ export const createWorkspaceService = ({
       return { items, total }
     },
 
-    update: async (id: string, { defaultEnv = {} }: { defaultEnv?: Record<string, string | null> }) => {
+    update: async (
+      id: string,
+      {
+        defaultEnv = {},
+        network,
+      }: { defaultEnv?: Record<string, string | null>; network?: typeof workspaces.$inferSelect.network }
+    ) => {
       await db.transaction(async tx => {
         const [row] = await tx
           .select({ defaultEnv: workspaces.defaultEnv })
@@ -117,10 +129,14 @@ export const createWorkspaceService = ({
 
         await tx
           .update(workspaces)
-          .set({ defaultEnv: encryptEnv(defaultEnv, row.defaultEnv), updatedAt: sql`now()` })
+          .set({
+            defaultEnv: encryptEnv(defaultEnv, row.defaultEnv),
+            ...(network && { network }),
+            updatedAt: sql`now()`,
+          })
           .where(eq(workspaces.id, id))
       })
-      log.info({ workspaceId: id, keys: Object.keys(defaultEnv) }, 'workspace env changed')
+      log.info({ workspaceId: id, keys: Object.keys(defaultEnv), network }, 'workspace changed')
     },
 
     delete: async (id: string) => {
@@ -264,6 +280,12 @@ export const createWorkspaceService = ({
       const [row] = await db.select({ defaultEnv: workspaces.defaultEnv }).from(workspaces).where(eq(workspaces.id, id))
       if (!row) throw new HttpError(404, 'Workspace not found')
       return decryptEnv(row.defaultEnv)
+    },
+
+    getNetwork: async (id: string) => {
+      const [row] = await db.select({ network: workspaces.network }).from(workspaces).where(eq(workspaces.id, id))
+      if (!row) throw new HttpError(404, 'Workspace not found')
+      return row.network
     },
 
     setStatus: async (id: string, status: 'starting' | 'running' | 'stopped') => {

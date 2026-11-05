@@ -9,7 +9,7 @@ import type { createPlacementService } from '../placement/index.ts'
 import type { createWorkspaceService } from '../workspaces/index.ts'
 import { depsCache } from './deps-cache.ts'
 import { createRedisLog } from './log.ts'
-import { type NetworkRules, PROXY_PORT } from './network-controller.ts'
+import { DNS_PORT } from './network-controller.ts'
 import { portPool } from './port-pool.ts'
 import { SANDBOXES_CGROUP, type Sandbox, createSandbox } from './sandbox.ts'
 
@@ -22,7 +22,7 @@ const isLive = (sandbox: Sandbox | undefined) => sandbox?.status() === 'starting
 
 export const launchLogKey = (workspaceId: string) => `launch-log:${workspaceId}`
 
-export type LaunchOptions = { command: string; port: number; env: Record<string, string>; network: NetworkRules }
+export type LaunchOptions = { command: string; port: number; env: Record<string, string> }
 
 export type ExecOptions = { command: string; timeoutMs: number; env: Record<string, string> }
 
@@ -92,9 +92,10 @@ export const createSandboxManager = ({
     return output
   }
 
-  const start = async (workspaceId: string, { command, port, env, network }: LaunchOptions) => {
+  const start = async (workspaceId: string, { command, port, env }: LaunchOptions) => {
     const dir = workspaces.getWorkspaceRoot(workspaceId)
     const { mounts, env: depsEnv } = await deps.mounts(workspaceId, dir)
+    const network = await workspaces.getNetwork(workspaceId)
     await placement.claimWorkspace(workspaceId)
 
     const hostPort = ports.take()
@@ -110,7 +111,7 @@ export const createSandboxManager = ({
     }
 
     const launchLog = createRedisLog(redis, launchLogKey(workspaceId))
-    const launched = createSandbox(join(SANDBOXES_CGROUP, `workspace-${workspaceId}`), {
+    const launched = await createSandbox(join(SANDBOXES_CGROUP, `workspace-${workspaceId}`), {
       dir,
       mounts,
       mode,
@@ -123,6 +124,10 @@ export const createSandboxManager = ({
       ports: { inside: port, host: hostPort },
       readyTimeoutMs: READY_TIMEOUT_MS,
       log: launchLog,
+    }).catch(async error => {
+      ports.release(hostPort)
+      await placement.releaseWorkspace(workspaceId)
+      throw error
     })
     sandboxes.set(workspaceId, launched)
     changed('launch')
@@ -162,10 +167,10 @@ export const createSandboxManager = ({
   }
 
   return {
-    launch: async (workspaceId: string, { command, port, env, network }: LaunchOptions) => {
-      if (port === PROXY_PORT) throw new HttpError(400, `Port ${PROXY_PORT} is held by the sandbox's proxy`)
+    launch: async (workspaceId: string, { command, port, env }: LaunchOptions) => {
+      if (port === DNS_PORT) throw new HttpError(400, `Port ${DNS_PORT} is held by the sandbox's DNS`)
 
-      const options = { command, port, network, env: { ...(await getDefaultEnv(workspaceId, port)), ...env } }
+      const options = { command, port, env: { ...(await getDefaultEnv(workspaceId, port)), ...env } }
 
       const launched = await locked(workspaceId, async () => {
         if (isLive(sandboxes.get(workspaceId))) throw new HttpError(409, 'A background process is already running')
@@ -188,7 +193,7 @@ export const createSandboxManager = ({
       const dir = workspaces.getWorkspaceRoot(workspaceId)
       const { mounts, env: depsEnv } = await deps.mounts(workspaceId, dir)
 
-      const child = createSandbox(join(SANDBOXES_CGROUP, `workspace-${workspaceId}`), {
+      const child = await createSandbox(join(SANDBOXES_CGROUP, `workspace-${workspaceId}`), {
         dir,
         mounts,
         mode,
@@ -197,6 +202,7 @@ export const createSandboxManager = ({
         pidsMax,
         command,
         env: { ...depsEnv, ...(await getDefaultEnv(workspaceId, server?.port ?? null)), ...env },
+        network: await workspaces.getNetwork(workspaceId),
         joinPid: server?.pid,
       })
 

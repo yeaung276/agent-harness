@@ -75,6 +75,7 @@ await sandbox.close()</code></pre>
             <tbody>
               <tr><td><code>name</code></td><td><code>string</code></td><td>Lowercase letters, digits and <code>-</code>, up to 63 characters, unique. Defaults to <code>sandbox-&lt;timestamp&gt;</code>.</td></tr>
               <tr><td><code>env</code></td><td><code>Record&lt;string, string&gt;</code></td><td>Env set on every command and launch in the sandbox. Values are stored encrypted and never returned.</td></tr>
+              <tr><td><code>network</code></td><td><code>{ allow?: string[]; deny?: string[] }</code></td><td>Hosts every command and launch in the sandbox can reach. Default: every public host. See <a href="api.html#sandbox">Network</a>.</td></tr>
               <tr><td><code>timeoutMs</code></td><td><code>number</code></td><td>How long each <code>execute</code> may run. Default <code>120000</code>, max <code>240000</code>.</td></tr>
               <tr><td><code>record</code></td><td><code>boolean</code></td><td>Whether <a href="#sandbox-browser"><code>sandbox.browser</code></a> records a video. Default <code>false</code>.</td></tr>
             </tbody>
@@ -163,7 +164,6 @@ await sandbox.uploadAsZip(await readFile(&quot;site.zip&quot;), { path: &quot;si
               <tr><td><code>command</code></td><td><code>string</code></td><td>Starts the app, like <code>npm ci &amp;&amp; npm start</code>.</td></tr>
               <tr><td><code>port</code></td><td><code>number</code></td><td>The port the app listens on. <code>PORT</code> is set to it.</td></tr>
               <tr><td><code>env</code></td><td><code>Record&lt;string, string&gt;</code></td><td>Added to the sandbox's env for this app.</td></tr>
-              <tr><td><code>network</code></td><td><code>{ allow?: string[]; deny?: string[] }</code></td><td>Hosts the app and commands can reach. See <a href="api.html#sandbox">Network</a>.</td></tr>
             </tbody>
           </table>
           <p>Starts the app in the background and resolves once it listens on <code>port</code>, up to 90 seconds, with its public URL. One app runs per sandbox. An app with no traffic for 15 minutes is stopped, and the next request to its URL starts it again.</p>

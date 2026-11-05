@@ -64,6 +64,13 @@
       "when": 1793260800000,
       "tag": "0008_browsers",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1793878146967,
+      "tag": "0009_workspace_network",
+      "breakpoints": true
     }
   ]
 }

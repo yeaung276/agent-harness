@@ -81,7 +81,7 @@ export const createRunner = ({ mode, chromium }: { mode: 'bwrap' | 'none'; chrom
     const script = `const input = ${JSON.stringify(input)}\n${RUN_SCRIPT}`
 
     const startedAt = Date.now()
-    const sandbox = createSandbox(join(SANDBOXES_CGROUP, `workspace-run-${crypto.randomUUID()}`), {
+    const sandbox = await createSandbox(join(SANDBOXES_CGROUP, `workspace-run-${crypto.randomUUID()}`), {
       dir,
       mounts: [{ source: PLAYWRIGHT_CORE, target: 'node_modules/playwright-core', readOnly: true }],
       mode,

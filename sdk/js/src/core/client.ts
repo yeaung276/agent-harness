@@ -13,6 +13,7 @@ export interface ClientOptions {
 export interface CreateSandboxOptions extends SandboxOptions {
   name?: string
   env?: Record<string, string>
+  network?: { allow?: string[]; deny?: string[] }
 }
 
 // everything but sandboxes, which each entry's Client adds with its own Sandbox
@@ -74,10 +75,11 @@ export class BaseClient {
 }
 
 export class Client extends BaseClient {
-  async createSandbox({ name, env, ...options }: CreateSandboxOptions = {}): Promise<Sandbox> {
+  async createSandbox({ name, env, network, ...options }: CreateSandboxOptions = {}): Promise<Sandbox> {
     const response = await this.request('POST', '/workspaces', {
       name: name ?? `sandbox-${Date.now()}`,
       defaultEnv: env,
+      network,
     })
 
     return new Sandbox(this, (await response.json()) as Workspace, options)

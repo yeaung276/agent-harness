@@ -81,8 +81,10 @@ const createWorkspace = (name: string, defaultEnv?: Record<string, string>) =>
 
 const getWorkspace = (id: string) => app.inject({ url: `/api/v1/workspaces/${id}`, headers })
 
-const updateWorkspace = (id: string, payload: { defaultEnv: Record<string, string | null> }) =>
-  app.inject({ method: 'PATCH', url: `/api/v1/workspaces/${id}`, headers, payload })
+const updateWorkspace = (
+  id: string,
+  payload: { defaultEnv?: Record<string, string | null>; network?: { allow?: string[]; deny?: string[] } }
+) => app.inject({ method: 'PATCH', url: `/api/v1/workspaces/${id}`, headers, payload })
 
 const storedEnv = async (id: string) => {
   const [row] = await app.db.select({ defaultEnv: workspaces.defaultEnv }).from(workspaces).where(eq(workspaces.id, id))
@@ -219,6 +221,35 @@ describe('workspaces on the API', () => {
     expect((await getWorkspace(id)).json().defaultEnvKeys).toEqual(['ADD', 'KEEP'])
     expect(decrypt(app.config.DATA_ENCRYPTION_KEY, stored.KEEP!)).toBe('a')
     expect(decrypt(app.config.DATA_ENCRYPTION_KEY, stored.ADD!)).toBe('c')
+  })
+
+  test('I can set the network rules when creating, and replace them without touching the default env', async () => {
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/v1/workspaces',
+      headers,
+      payload: {
+        name: uniqueName(),
+        defaultEnv: { KEEP: 'a' },
+        network: { deny: ['*'], allow: ['registry.npmjs.org'] },
+      },
+    })
+    expect(created.statusCode).toBe(201)
+    expect(created.json().network).toEqual({ deny: ['*'], allow: ['registry.npmjs.org'] })
+
+    const res = await updateWorkspace(created.json().id, {
+      network: { allow: ['appx-apps-db.promptxv3.svc.cluster.local'] },
+    })
+
+    expect(res.statusCode).toBe(204)
+    expect((await getWorkspace(created.json().id)).json()).toMatchObject({
+      network: { allow: ['appx-apps-db.promptxv3.svc.cluster.local'] },
+      defaultEnvKeys: ['KEEP'],
+    })
+  })
+
+  test('a workspace created without network rules has none', async () => {
+    expect((await createWorkspace(uniqueName())).json().network).toEqual({})
   })
 
   test('updating an unknown workspace is not found', async () => {

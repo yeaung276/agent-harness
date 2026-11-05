@@ -9,9 +9,6 @@ export const LaunchBody = Type.Object({
   command: Command,
   port: Type.Integer({ minimum: 1, maximum: 65535 }),
   env: Type.Optional(Env),
-  network: Type.Optional(
-    Type.Object({ allow: Type.Optional(Type.Array(Type.String())), deny: Type.Optional(Type.Array(Type.String())) })
-  ),
 })
 
 export const ExecBody = Type.Object({

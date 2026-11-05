@@ -104,7 +104,7 @@ const fakes: ReturnType<typeof fakeSandbox>[] = []
 
 mock.module('../../../src/services/sandbox/sandbox.ts', () => ({
   SANDBOXES_CGROUP: 'sandboxes',
-  createSandbox: (cgroupPath: string, options: SandboxOptions) => {
+  createSandbox: async (cgroupPath: string, options: SandboxOptions) => {
     expect(cgroupPath).toStartWith('sandboxes/workspace-')
     const fake = fakeSandbox(cgroupPath.slice('sandboxes/workspace-'.length), options)
     fakes.push(fake)
@@ -145,11 +145,13 @@ const addFiles = async (id: string, files: Record<string, string>) => {
 const fakeWorkspaces = () => {
   const known = new Set(['ws-1', 'ws-2', 'ws-3'])
   const defaultEnvs = new Map<string, Record<string, string>>()
+  const networks = new Map<string, { allow?: string[]; deny?: string[] }>()
   const statuses = new Map<string, 'starting' | 'running' | 'stopped'>()
   const saved = new Map<string, LaunchOptions | null>()
 
   return {
     defaultEnvs,
+    networks,
     statuses,
     saved,
     getWorkspaceRoot: workspaceDir,
@@ -157,6 +159,11 @@ const fakeWorkspaces = () => {
       await lag()
       if (!known.has(id)) throw new HttpError(404, 'Workspace not found')
       return { ...defaultEnvs.get(id) }
+    },
+    getNetwork: async (id: string) => {
+      await lag()
+      if (!known.has(id)) throw new HttpError(404, 'Workspace not found')
+      return networks.get(id) ?? {}
     },
     setStatus: async (id: string, status: 'starting' | 'running' | 'stopped') => {
       await lag()
@@ -221,7 +228,7 @@ const fakePlacement = () => {
   }
 }
 
-const devServer: LaunchOptions = { command: 'npm run dev', port: 3000, env: {}, network: {} }
+const devServer: LaunchOptions = { command: 'npm run dev', port: 3000, env: {} }
 
 let workspaces: ReturnType<typeof fakeWorkspaces>
 let activities: ReturnType<typeof fakeActivities>
@@ -346,10 +353,11 @@ describe('launch', () => {
     expect(workspaces.saved.has('ws-1')).toBe(false)
   })
 
-  test("confines it with the sandbox mode, limits and the launch's network rules", async () => {
+  test("confines it with the sandbox mode, limits and the workspace's network rules", async () => {
     const network = { deny: ['*'], allow: ['registry.npmjs.org'] }
+    workspaces.networks.set('ws-1', network)
 
-    const { launched } = await startLaunch('ws-1', { ...devServer, network })
+    const { launched } = await startLaunch('ws-1')
 
     expect(launched.options).toMatchObject({
       mode: 'none',
@@ -387,11 +395,7 @@ describe('launch', () => {
   test('saves the launch with its merged env once it listens, so the workspace can wake exactly as launched', async () => {
     workspaces.defaultEnvs.set('ws-1', { NODE_ENV: 'production' })
 
-    const { pending, launched } = await startLaunch('ws-1', {
-      ...devServer,
-      env: { DEBUG: '1' },
-      network: { deny: ['*'] },
-    })
+    const { pending, launched } = await startLaunch('ws-1', { ...devServer, env: { DEBUG: '1' } })
     expect(workspaces.saved.has('ws-1')).toBe(false)
     launched.listen()
     await pending
@@ -399,7 +403,6 @@ describe('launch', () => {
     expect(workspaces.saved.get('ws-1')).toEqual({
       command: 'npm run dev',
       port: 3000,
-      network: { deny: ['*'] },
       env: { PORT: '3000', NODE_ENV: 'production', DEBUG: '1' },
     })
   })
@@ -463,8 +466,8 @@ describe('launch', () => {
     expect(workspaces.saved.has('ws-3')).toBe(false)
   })
 
-  test("is a 400 for the proxy's port 3128, and starts and saves nothing", async () => {
-    await expect(manager.launch('ws-1', { ...devServer, port: 3128 })).rejects.toMatchObject({ status: 400 })
+  test("is a 400 for the DNS's port 53, and starts and saves nothing", async () => {
+    await expect(manager.launch('ws-1', { ...devServer, port: 53 })).rejects.toMatchObject({ status: 400 })
 
     expect(launchesOf('ws-1')).toHaveLength(0)
     expect(workspaces.saved.has('ws-1')).toBe(false)
@@ -664,14 +667,16 @@ describe('exec', () => {
     expect(child.logsDeleted).toBe(true)
   })
 
-  test('gets its own network, no port and no PORT when nothing is launched', async () => {
+  test("gets its own network with the workspace's rules, no port and no PORT when nothing is launched", async () => {
+    workspaces.networks.set('ws-1', { deny: ['*'], allow: ['registry.npmjs.org'] })
+
     const { pending, child } = await startExec('ws-1')
     child.finish(0)
     await pending
 
     expect(child.options.joinPid).toBeUndefined()
     expect(child.options.ports).toBeUndefined()
-    expect(child.options.network).toBeUndefined()
+    expect(child.options.network).toEqual({ deny: ['*'], allow: ['registry.npmjs.org'] })
     expect(child.options.env.PORT).toBeUndefined()
   })
 
@@ -907,7 +912,8 @@ describe('wake', () => {
 
   test('starts a swept launch again exactly as launched, holds until it listens, and drops the old logs', async () => {
     workspaces.defaultEnvs.set('ws-1', { NODE_ENV: 'production' })
-    const first = await bringUp('ws-1', { command: 'npm start', port: 8080, env: { A: '1' }, network: { deny: ['*'] } })
+    workspaces.networks.set('ws-1', { deny: ['*'] })
+    const first = await bringUp('ws-1', { command: 'npm start', port: 8080, env: { A: '1' } })
     first.idle = true
     await manager.stopIdle()
 
@@ -942,7 +948,7 @@ describe('wake', () => {
   })
 
   test('starts a workspace this pod never ran from its saved launch', async () => {
-    workspaces.saved.set('ws-1', { command: 'npm start', port: 8080, env: { PORT: '8080' }, network: {} })
+    workspaces.saved.set('ws-1', { command: 'npm start', port: 8080, env: { PORT: '8080' } })
 
     const woken = manager.wake('ws-1')
     await until(() => launchesOf('ws-1').length === 1, 'launch')
@@ -1103,6 +1109,7 @@ describe('stopAll', () => {
   test('stops every starting and running launch, deletes their logs, records them stopped and keeps their saved launch', async () => {
     const running = await bringUp('ws-1')
     const { launched: starting } = await startLaunch('ws-2')
+    await until(() => workspaces.statuses.get('ws-2') === 'starting', 'ws-2 starting')
 
     await manager.stopAll()
 

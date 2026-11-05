@@ -5,10 +5,11 @@ import { Sandbox } from './sandbox.js'
 export type { ClientOptions, CreateSandboxOptions } from './core/client.js'
 
 export class Client extends BaseClient {
-  async createSandbox({ name, env, ...options }: CreateSandboxOptions = {}): Promise<Sandbox> {
+  async createSandbox({ name, env, network, ...options }: CreateSandboxOptions = {}): Promise<Sandbox> {
     const response = await this.request('POST', '/workspaces', {
       name: name ?? `sandbox-${Date.now()}`,
       defaultEnv: env,
+      network,
     })
 
     return new Sandbox(this, (await response.json()) as Workspace, options)

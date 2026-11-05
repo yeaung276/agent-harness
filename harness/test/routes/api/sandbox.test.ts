@@ -240,7 +240,7 @@ describe('stop', () => {
   })
 
   test('with nothing running records stopped itself and keeps the saved launch, so a request can wake it', async () => {
-    const options = { command: 'npm run dev', port: 3000, env: {}, network: {} }
+    const options = { command: 'npm run dev', port: 3000, env: {} }
     await app.services.workspaces.setLaunchOptions(id, options)
     await app.services.workspaces.setStatus(id, 'running')
 

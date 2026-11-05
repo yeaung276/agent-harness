@@ -1,19 +1,23 @@
-import { spawn } from 'node:child_process'
+import { execFile, spawn } from 'node:child_process'
 import { accessSync, constants, readFileSync } from 'node:fs'
-import { mkdir, readFile, rmdir, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rename, rmdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { promisify } from 'node:util'
 
 import type { Config } from '../../config.ts'
 import type { Mount } from './deps-cache.ts'
 import { type Log, createLog } from './log.ts'
-import { createNetworkController, type NetworkRules, PROXY_ENV, PROXY_PORT } from './network-controller.ts'
+import { createNetworkController, DNS_PORT, type NetworkRules, SANDBOX_RESOLV_CONF } from './network-controller.ts'
 
 const CGROUP_ROOT = '/sys/fs/cgroup'
 const CGROUP_CONTROLLERS = ['memory', 'cpu', 'pids']
 const WORKER_RESERVE_MB = 450
+const RESOLV_CONF = join(tmpdir(), 'sandbox-resolv.conf')
 
 export const SANDBOXES_CGROUP = 'sandboxes'
+
+let resolvConfWritten: Promise<void> | undefined
 
 export type SandboxOptions = {
   dir: string
@@ -36,9 +40,9 @@ export type SandboxOptions = {
 
 export type SandboxStatus = 'starting' | 'running' | 'failed' | 'stopped'
 
-export type Sandbox = ReturnType<typeof createSandbox>
+export type Sandbox = Awaited<ReturnType<typeof createSandbox>>
 
-export const createSandbox = (
+export const createSandbox = async (
   cgroupPath: string,
   {
     dir,
@@ -62,7 +66,34 @@ export const createSandbox = (
   let lastUsedAt = Date.now()
   let status: SandboxStatus = ports ? 'starting' : 'running'
   const cgroup = join(CGROUP_ROOT, cgroupPath)
-  const controller = mode === 'bwrap' && joinPid === undefined ? createNetworkController(network ?? {}) : null
+  if (mode === 'bwrap') {
+    // written aside and renamed in, so a sandbox of another worker process that has it mounted never sees it half written
+    resolvConfWritten ??= writeFile(`${RESOLV_CONF}.${process.pid}`, SANDBOX_RESOLV_CONF).then(() =>
+      rename(`${RESOLV_CONF}.${process.pid}`, RESOLV_CONF)
+    )
+    await resolvConfWritten
+  }
+  const controller =
+    mode === 'bwrap' && joinPid === undefined
+      ? await createNetworkController(network ?? {}, async addresses => {
+          const namespacePid = readFileSync(`/proc/${child.pid}/task/${child.pid}/children`, 'utf8').split(' ')[0]
+          await promisify(execFile)('nsenter', [
+            '--target',
+            namespacePid ?? '',
+            '--user',
+            '--net',
+            '--preserve-credentials',
+            '--',
+            'nft',
+            'add',
+            'element',
+            'inet',
+            'sandbox',
+            'allowed',
+            `{ ${addresses.join(', ')} }`,
+          ])
+        })
+      : null
 
   const namespace =
     joinPid === undefined
@@ -78,10 +109,10 @@ export const createSandbox = (
           '-u',
           'none',
           '-T',
-          `${PROXY_PORT}:${controller?.port}`,
+          `${DNS_PORT}:${controller?.tcpPort}`,
           ...(outboundPorts ? ['-T', outboundPorts] : []),
           '-U',
-          'none',
+          `${DNS_PORT}:${controller?.udpPort}`,
           '--no-map-gw',
           '--host-lo-to-ns-lo',
           '--',
@@ -94,7 +125,8 @@ export const createSandbox = (
           'set -e; mount -t proc proc /proc; printf "%s" "$1" | nft -f -; shift; ' +
             'for fd in /proc/$$/fd/*; do fd=${fd##*/}; if [ "$fd" -gt 2 ]; then exec {fd}>&-; fi; done; exec "$@"',
           'bash',
-          'table inet sandbox { chain output { type filter hook output priority 0; policy drop; oifname "lo" accept; }; }',
+          'table inet sandbox { set allowed { type ipv4_addr; }; ' +
+            'chain output { type filter hook output priority 0; policy drop; oifname "lo" accept; ip daddr @allowed accept; }; }',
         ]
       : [
           'sh',
@@ -144,12 +176,14 @@ export const createSandbox = (
       '/lib64',
       '/opt',
       '/etc/alternatives',
-      '/etc/resolv.conf',
       '/etc/ssl',
       '/etc/ca-certificates',
       '/etc/hosts',
       '/etc/fonts',
     ].flatMap(path => ['--ro-bind-try', path, path]),
+    '--ro-bind',
+    RESOLV_CONF,
+    '/etc/resolv.conf',
     '--ro-bind',
     cgroup,
     CGROUP_ROOT,
@@ -188,7 +222,6 @@ export const createSandbox = (
         Object.entries(process.env).filter(([key]) => ['PATH', 'LANG', 'LC_ALL', 'TZ'].includes(key))
       ),
       HOME: tmpdir(),
-      ...(mode === 'bwrap' ? PROXY_ENV : {}),
       ...env,
       ...(mode === 'none' && ports ? { PORT: String(ports.host) } : {}),
       ...(mode === 'none' ? { HOME: tmpdir() } : {}),
