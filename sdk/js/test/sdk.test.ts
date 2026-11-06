@@ -37,6 +37,7 @@ describe.skipIf(!LIVE)('sdk', () => {
   test('getSandbox connects to the same workspace', async () => {
     const again = await client.getSandbox(sandbox.id)
     expect(again.name).toBe(sandbox.name)
+    expect(again.status).toBe('stopped')
   })
 
   test('getSandbox connects by name too, and throws NOT_FOUND for an unknown one', async () => {
@@ -99,10 +100,15 @@ describe.skipIf(!LIVE)('sdk', () => {
     expect((await sandbox.execute('cat site/hello.txt')).output).toBe('zipped\n')
   })
 
-  test('launch, browser and logs', async () => {
+  test('launch, url, status, browser and logs', async () => {
+    const notLaunched = await sandbox.url().catch(e => e)
+    expect(notLaunched.code).toBe('CONFLICT')
+
     await sandbox.write('/workspace/server.js', SERVER)
     const { url } = await sandbox.launch({ command: 'node server.js', port: 3000 })
     expect(url).toStartWith('http')
+    expect(await sandbox.url()).toStartWith('http')
+    expect((await client.getSandbox(sandbox.id)).status).toBe('running')
 
     const conflict = await sandbox.launch({ command: 'node server.js', port: 3000 }).catch(e => e)
     expect(conflict.code).toBe('CONFLICT')
@@ -119,6 +125,8 @@ describe.skipIf(!LIVE)('sdk', () => {
 
     await sandbox.stop()
     expect((await sandbox.logs()).at(-1)).toBe('stopped')
+    expect((await client.getSandbox(sandbox.id)).status).toBe('stopped')
+    expect(await sandbox.url()).toStartWith('http')
   }, 120_000)
 
   test('middleware tools call the sandbox and hand errors back as text', async () => {

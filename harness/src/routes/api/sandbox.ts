@@ -68,4 +68,17 @@ export const sandbox: FastifyPluginAsyncTypebox = async app => {
       return { lines: await readRedisLog(app.redis, launchLogKey(id), request.query.tail) }
     }
   )
+
+  app.get(
+    '/workspaces/:id/sandbox/url',
+    { schema: { params: WorkspaceParams, response: { 200: Launched } } },
+    async request => {
+      const { id } = request.params
+      await app.services.workspaces.get(id)
+      if (!(await app.services.workspaces.getLaunchOptions(id)))
+        throw new HttpError(409, 'No launch has started in this workspace yet')
+
+      return { url: app.proxy.urlOf(id) }
+    }
+  )
 }

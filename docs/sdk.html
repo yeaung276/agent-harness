@@ -113,6 +113,7 @@ await browser.close()</code></pre>
             <tbody>
               <tr><td><code>id</code></td><td><code>string</code></td><td>The sandbox's id.</td></tr>
               <tr><td><code>name</code></td><td><code>string</code></td><td>The sandbox's name.</td></tr>
+              <tr><td><code>status</code></td><td><code>'starting' | 'running' | 'stopped'</code></td><td>The app's status when the sandbox was created or got: <code>starting</code> until the app answers on its port, <code>running</code> while it runs, <code>stopped</code> otherwise. It doesn't change after; call <code>getSandbox()</code> again for the current one.</td></tr>
               <tr><td><code>envKeys</code></td><td><code>string[]</code></td><td>The names in its env, sorted.</td></tr>
               <tr><td><code>createdAt</code></td><td><code>Date</code></td><td>When it was created.</td></tr>
             </tbody>
@@ -173,6 +174,11 @@ await sandbox.uploadAsZip(await readFile(&quot;site.zip&quot;), { path: &quot;si
           <h3>sandbox.logs()</h3>
           <pre class="schema"><code>logs(options?: { tail?: number }): Promise&lt;string[]&gt;</code></pre>
           <p>The last <code>tail</code> lines the app wrote, 200 by default, 1,000 at most. After the app ends, the last line says how.</p>
+
+          <h3>sandbox.url()</h3>
+          <pre class="schema"><code>url(): Promise&lt;string&gt;</code></pre>
+          <p>A new public URL to the app, the same as <code>launch()</code> returns, for when the one from <code>launch()</code> has expired. It doesn't start the app; a request to the URL starts it again when it is stopped. The server may hand out a link that must be opened within 60 seconds, so get a new one each time you share it.</p>
+          <p>Throws <code>CONFLICT</code> when no launch has started the app yet; call <code>launch()</code> first.</p>
 
           <h3>sandbox.stop()</h3>
           <pre class="schema"><code>stop(): Promise&lt;void&gt;</code></pre>

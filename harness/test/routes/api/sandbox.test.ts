@@ -258,3 +258,28 @@ describe('stop', () => {
     expect(res.statusCode).toBe(404)
   })
 })
+
+describe('url', () => {
+  test('is the URL launch answers, made without calling a worker, also while stopped', async () => {
+    await app.services.workspaces.setLaunchOptions(id, { command: 'npm run dev', port: 3000, env: {} })
+
+    const res = await app.inject({ url: `/api/v1/workspaces/${id}/sandbox/url`, headers })
+
+    expect(res.statusCode).toBe(200)
+    expect(res.json()).toEqual({ url: `http://${id}.localhost:3001/` })
+    expect(sent).toEqual([])
+  })
+
+  test('is a 409 when no launch has started', async () => {
+    const res = await app.inject({ url: `/api/v1/workspaces/${id}/sandbox/url`, headers })
+
+    expect(res.statusCode).toBe(409)
+    expect(res.json().message).toBe('No launch has started in this workspace yet')
+  })
+
+  test('is a 404 for an unknown workspace', async () => {
+    const res = await app.inject({ url: `/api/v1/workspaces/${crypto.randomUUID()}/sandbox/url`, headers })
+
+    expect(res.statusCode).toBe(404)
+  })
+})

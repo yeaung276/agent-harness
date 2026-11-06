@@ -1,9 +1,4 @@
-import {
-  BaseSandbox,
-  type ExecuteResponse,
-  type FileDownloadResponse,
-  type FileUploadResponse,
-} from 'deepagents'
+import { BaseSandbox, type ExecuteResponse, type FileDownloadResponse, type FileUploadResponse } from 'deepagents'
 
 import type { Browser } from './browser.js'
 import type { BaseClient } from './core/client.js'
@@ -15,6 +10,7 @@ export { ROOT, type LaunchOptions, type SandboxOptions, type Workspace } from '.
 export class Sandbox extends BaseSandbox {
   readonly id: string
   readonly name: string
+  readonly status: Workspace['status']
   readonly envKeys: string[]
   readonly createdAt: Date
   readonly browser: Browser
@@ -25,6 +21,7 @@ export class Sandbox extends BaseSandbox {
     this.#sandbox = new CoreSandbox(client, workspace, options)
     this.id = this.#sandbox.id
     this.name = this.#sandbox.name
+    this.status = this.#sandbox.status
     this.envKeys = this.#sandbox.envKeys
     this.createdAt = this.#sandbox.createdAt
     this.browser = this.#sandbox.browser
@@ -55,6 +52,10 @@ export class Sandbox extends BaseSandbox {
 
   logs(options: { tail?: number } = {}): Promise<string[]> {
     return this.#sandbox.logs(options)
+  }
+
+  url(): Promise<string> {
+    return this.#sandbox.url()
   }
 
   stop(): Promise<void> {

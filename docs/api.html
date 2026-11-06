@@ -855,6 +855,41 @@
 <p>No workspace has this id.</p>
   </div>
 </details>
+<details class="route">
+  <summary><span class="method get">GET</span><code class="route-path">/api/v1/workspaces/:id/sandbox/url</code><span class="route-summary">A new public URL to the background process</span></summary>
+  <div class="route-body">
+<h4>Params</h4>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;id&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;id&quot;: {
+      &quot;format&quot;: &quot;uuid&quot;,
+      &quot;type&quot;: &quot;string&quot;
+    }
+  }
+}</code></pre>
+<h4>Response 200</h4>
+<p>The public URL that reaches the background process, the same as launch returns. The call doesn't start the process; a request to the URL starts it again when it is stopped. With the proxy in <a href="index.html#proxy">cookie mode</a>, each call returns a new link that opens within 60 seconds, and opening it keeps that browser on the workspace for 12 hours. In subdomain mode the URL is the same on every call.</p>
+<pre class="schema"><code>{
+  &quot;type&quot;: &quot;object&quot;,
+  &quot;required&quot;: [
+    &quot;url&quot;
+  ],
+  &quot;properties&quot;: {
+    &quot;url&quot;: {
+      &quot;type&quot;: &quot;string&quot;
+    }
+  }
+}</code></pre>
+<h4>Errors · 404</h4>
+<p>No workspace has this id.</p>
+<h4>Errors · 409</h4>
+<p>No launch in this workspace has started its process yet. Launch first.</p>
+  </div>
+</details>
 </div>
         </section>
 

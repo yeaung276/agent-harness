@@ -40,6 +40,7 @@ export interface LaunchOptions {
 export interface Workspace {
   id: string
   name: string
+  status: 'starting' | 'running' | 'stopped'
   defaultEnvKeys: string[]
   createdAt: string
 }
@@ -69,6 +70,7 @@ const fileError = (err: unknown): FileOperationError => {
 export class Sandbox {
   readonly id: string
   readonly name: string
+  readonly status: Workspace['status']
   readonly envKeys: string[]
   readonly createdAt: Date
   readonly browser: Browser
@@ -84,6 +86,7 @@ export class Sandbox {
     this.#timeoutMs = timeoutMs
     this.id = workspace.id
     this.name = workspace.name
+    this.status = workspace.status
     this.envKeys = workspace.defaultEnvKeys
     this.createdAt = new Date(workspace.createdAt)
     this.browser = new Browser(client, { id: null, sandboxId: workspace.id, record })
@@ -205,6 +208,12 @@ export class Sandbox {
     const response = await this.#client.request('GET', `/workspaces/${this.id}/sandbox/logs${query}`)
 
     return ((await response.json()) as { lines: string[] }).lines
+  }
+
+  async url(): Promise<string> {
+    const response = await this.#client.request('GET', `/workspaces/${this.id}/sandbox/url`)
+
+    return ((await response.json()) as { url: string }).url
   }
 
   async stop(): Promise<void> {
