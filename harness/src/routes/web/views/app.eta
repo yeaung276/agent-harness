@@ -4,6 +4,7 @@
   { id: 'browsers', title: 'Browsers', href: '/browsers' },
   { id: 'machines', title: 'Machines', href: '/machines' },
   { id: 'tokens', title: 'API tokens', href: '/tokens' },
+  { id: 'docs', title: 'Docs', href: '/docs/' },
 ] %>
 <div class="flex min-h-screen">
   <aside class="flex w-56 shrink-0 flex-col border-r border-gray-200 bg-gray-50">

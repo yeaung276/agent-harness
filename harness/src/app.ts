@@ -67,7 +67,7 @@ export const buildApp = async (config: Config) => {
   await app.register(api, { prefix: '/api/v1' })
   await app.register(mcp, { prefix: '/mcp' })
   await app.register(workerRoutes, { prefix: '/workers' })
-  await app.register(web)
+  await app.register(web, { docsFolder: join(import.meta.dirname, '..', '..', 'docs') })
 
   return app
 }

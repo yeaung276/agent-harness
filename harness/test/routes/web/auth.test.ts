@@ -56,6 +56,29 @@ describe('pages', () => {
   })
 })
 
+describe('docs', () => {
+  test('open with the session cookie', async () => {
+    const res = await app.inject({ url: '/docs/', cookies: { sid: await loggedInSid() } })
+
+    expect(res.statusCode).toBe(200)
+    expect(res.headers['content-type']).toContain('text/html')
+  })
+
+  test('/docs redirects to /docs/ so relative links resolve', async () => {
+    const res = await app.inject({ url: '/docs', cookies: { sid: await loggedInSid() } })
+
+    expect(res.statusCode).toBe(301)
+    expect(res.headers.location).toBe('/docs/')
+  })
+
+  test('send you to /login without a cookie', async () => {
+    const res = await app.inject('/docs/assets/site.css')
+
+    expect(res.statusCode).toBe(302)
+    expect(res.headers.location).toBe('/login')
+  })
+})
+
 describe('logout', () => {
   test('the cookie no longer opens pages', async () => {
     const sid = await loggedInSid()

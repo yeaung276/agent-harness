@@ -14,7 +14,7 @@ import { machines } from './machines.ts'
 import { tokens } from './tokens.ts'
 import { workspaces } from './workspaces.ts'
 
-export const web: FastifyPluginAsyncTypebox = async app => {
+export const web: FastifyPluginAsyncTypebox<{ docsFolder: string }> = async (app, { docsFolder }) => {
   await app.register(fastifyView, {
     engine: { eta: new Eta() },
     root: join(import.meta.dirname, 'views'),
@@ -35,5 +35,6 @@ export const web: FastifyPluginAsyncTypebox = async app => {
     await pages.register(browsers)
     await pages.register(machines)
     await pages.register(tokens)
+    await pages.register(fastifyStatic, { root: docsFolder, prefix: '/docs', redirect: true, decorateReply: false })
   })
 }
