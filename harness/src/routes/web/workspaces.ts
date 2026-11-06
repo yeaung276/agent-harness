@@ -9,7 +9,7 @@ import {
   ActivitiesQuery,
   DefaultEnv,
   DefaultEnvChanges,
-  EnvForm,
+  EditForm,
   FileParams,
   LogsQuery,
   TreeQuery,
@@ -21,8 +21,14 @@ const PAGE_SIZE = 20
 
 const date = new Intl.DateTimeFormat('en', { dateStyle: 'medium' })
 
+// the network boxes take one host pattern per line; commas and spaces separate them too
+const hosts = (text = '') => text.split(/[\s,]+/).filter(Boolean)
+
 export const workspaces: FastifyPluginAsyncTypebox = async app => {
-  const view = async (page: number, form: { name: string; error: string } | null = null) => {
+  const view = async (
+    page: number,
+    form: { name: string; allow: string; deny: string; error: string } | null = null
+  ) => {
     const offset = (page - 1) * PAGE_SIZE
     const { items, total } = await app.services.workspaces.list({ limit: PAGE_SIZE, offset })
 
@@ -35,6 +41,7 @@ export const workspaces: FastifyPluginAsyncTypebox = async app => {
         name: item.name,
         status: item.status,
         defaultEnvKeys: item.defaultEnvKeys,
+        network: item.network,
         created: date.format(item.createdAt),
         createdBy: item.createdBy.email,
       })),
@@ -60,16 +67,19 @@ export const workspaces: FastifyPluginAsyncTypebox = async app => {
 
   app.post('/workspaces', async (request, reply) => {
     const { fields, file } = await readForm(request, app.services.workspaces.uploadsDir)
-    const name = fields.name ?? ''
+    const { name = '', allow = '', deny = '' } = fields
     const defaultEnv = JSON.parse(fields.defaultEnv || '{}')
 
     try {
       if (!Value.Check(DefaultEnv, defaultEnv)) throw new HttpError(400, 'Environment variable values must be text')
-      const workspace = await app.services.workspaces.create(request.userId, name, defaultEnv)
+      const workspace = await app.services.workspaces.create(request.userId, name, defaultEnv, {
+        allow: hosts(allow),
+        deny: hosts(deny),
+      })
       if (file) await app.services.workspaces.extract(workspace.id, { zip: file, path: '' })
     } catch (err) {
       if (!(err instanceof HttpError)) throw err
-      return reply.status(err.status).viewAsync('workspaces', await view(1, { name, error: err.message }))
+      return reply.status(err.status).viewAsync('workspaces', await view(1, { name, allow, deny, error: err.message }))
     }
 
     return reply.redirect('/workspaces')
@@ -83,11 +93,15 @@ export const workspaces: FastifyPluginAsyncTypebox = async app => {
     return reply.redirect('/workspaces')
   })
 
-  app.post('/workspaces/:id/env', { schema: { params: WorkspaceParams, body: EnvForm } }, async (request, reply) => {
+  app.post('/workspaces/:id/edit', { schema: { params: WorkspaceParams, body: EditForm } }, async (request, reply) => {
+    const { allow, deny } = request.body
     const defaultEnv = JSON.parse(request.body.defaultEnv)
     if (!Value.Check(DefaultEnvChanges, defaultEnv))
       throw new HttpError(400, 'Environment variable values must be text or null')
-    await app.services.workspaces.update(request.params.id, { defaultEnv })
+    await app.services.workspaces.update(request.params.id, {
+      defaultEnv,
+      network: { allow: hosts(allow), deny: hosts(deny) },
+    })
 
     return reply.redirect('/workspaces')
   })

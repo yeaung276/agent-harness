@@ -4,7 +4,11 @@ export const WorkspacesQuery = Type.Object({ page: Type.Integer({ minimum: 1, de
 
 export const WorkspaceParams = Type.Object({ id: Type.String({ format: 'uuid' }) })
 
-export const EnvForm = Type.Object({ defaultEnv: Type.String() })
+export const EditForm = Type.Object({
+  defaultEnv: Type.String(),
+  allow: Type.String({ default: '' }),
+  deny: Type.String({ default: '' }),
+})
 
 export const DefaultEnv = Type.Record(Type.String(), Type.String())
 

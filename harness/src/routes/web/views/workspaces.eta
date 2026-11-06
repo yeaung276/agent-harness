@@ -25,6 +25,7 @@
         <input type="file" name="file" accept=".zip" class="mt-1 block w-full text-sm">
       </label>
       <%~ include('./env-picker') %>
+      <%~ include('./network-picker', { allow: it.form?.allow, deny: it.form?.deny }) %>
       <div class="mt-6 flex justify-end gap-2">
         <button type="submit" formmethod="dialog" formnovalidate class="rounded-md border border-gray-300 px-3 py-2 text-sm font-medium hover:bg-gray-50">Cancel</button>
         <button type="submit" class="rounded-md bg-gray-900 px-3 py-2 text-sm font-medium text-white hover:bg-gray-700">Create</button>
@@ -40,6 +41,7 @@
     <p class="mt-1 text-sm text-gray-500">Values are encrypted and not shown. To change one, remove it and add it again.</p>
     <form method="post">
       <%~ include('./env-picker') %>
+      <%~ include('./network-picker', {}) %>
       <div class="mt-6 flex justify-end gap-2">
         <button type="submit" formmethod="dialog" formnovalidate class="rounded-md border border-gray-300 px-3 py-2 text-sm font-medium hover:bg-gray-50">Cancel</button>
         <button type="submit" class="rounded-md bg-gray-900 px-3 py-2 text-sm font-medium text-white hover:bg-gray-700">Save</button>
@@ -51,8 +53,11 @@
       const button = event.target.closest('[data-edit]')
       if (!button) return
       const dialog = document.getElementById('edit-workspace')
-      dialog.querySelector('form').action = `/workspaces/${button.dataset.edit}/env`
+      dialog.querySelector('form').action = `/workspaces/${button.dataset.edit}/edit`
       dialog.querySelector('[data-workspace]').textContent = button.dataset.name
+      const network = JSON.parse(button.dataset.network)
+      dialog.querySelector('[name="allow"]').value = (network.allow ?? []).join('\n')
+      dialog.querySelector('[name="deny"]').value = (network.deny ?? []).join('\n')
       const template = dialog.querySelector('template[data-existing]')
       dialog.querySelector('[data-rows]').replaceChildren(
         ...JSON.parse(button.dataset.keys).map(key => {
@@ -92,7 +97,7 @@
           <td class="px-4 py-2.5 text-gray-600"><%= workspace.created %></td>
           <td class="px-4 py-2.5 text-gray-600"><%= workspace.createdBy %></td>
           <td class="px-4 py-2.5 text-right">
-            <button type="button" data-edit="<%= workspace.id %>" data-name="<%= workspace.name %>" data-keys="<%= JSON.stringify(workspace.defaultEnvKeys) %>" class="mr-3 text-sm text-gray-600 hover:text-gray-900">Edit</button>
+            <button type="button" data-edit="<%= workspace.id %>" data-name="<%= workspace.name %>" data-keys="<%= JSON.stringify(workspace.defaultEnvKeys) %>" data-network="<%= JSON.stringify(workspace.network) %>" class="mr-3 text-sm text-gray-600 hover:text-gray-900">Edit</button>
             <form method="post" action="/workspaces/<%= workspace.id %>/delete" onsubmit="return confirm('Delete this workspace and all its files?')" class="inline">
               <button type="submit" class="text-sm text-red-600 hover:text-red-800">Delete</button>
             </form>

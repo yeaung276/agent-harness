@@ -63,13 +63,20 @@ const createWorkspace = (
   cookies: { sid: string },
   name: string,
   zip?: Uint8Array,
-  defaultEnv?: Record<string, string>
+  defaultEnv?: Record<string, string>,
+  network?: { allow: string; deny: string }
 ) => {
   const payload = new FormData()
   payload.append('name', name)
   if (zip) payload.append('file', new File([zip as Uint8Array<ArrayBuffer>], 'site.zip'))
   if (defaultEnv) payload.append('defaultEnv', JSON.stringify(defaultEnv))
+  if (network) for (const [key, value] of Object.entries(network)) payload.append(key, value)
   return app.inject({ method: 'POST', url: '/workspaces', cookies, payload })
+}
+
+const storedNetwork = async (name: string) => {
+  const [row] = await app.db.select({ network: workspaces.network }).from(workspaces).where(eq(workspaces.name, name))
+  return row!.network
 }
 
 const storedEnv = async (name: string) => {
@@ -188,7 +195,7 @@ describe('workspaces page', () => {
 
     const res = await app.inject({
       method: 'POST',
-      url: `/workspaces/${row!.id}/env`,
+      url: `/workspaces/${row!.id}/edit`,
       cookies,
       headers: form,
       payload: new URLSearchParams({ defaultEnv: JSON.stringify({ REPLACE: 'c', ADD: 'd', REMOVE: null }) }).toString(),
@@ -196,6 +203,61 @@ describe('workspaces page', () => {
 
     expect(res.statusCode).toBe(302)
     expect(await storedEnv(name)).toEqual({ KEEP: 'a', REPLACE: 'c', ADD: 'd' })
+  })
+
+  test('a workspace created with allow and deny hosts stores them, one per line', async () => {
+    const { cookies } = await signIn()
+    const name = uniqueName()
+
+    const res = await createWorkspace(cookies, name, undefined, undefined, {
+      allow: 'api.example.com\r\n *.npmjs.org \r\n\r\n',
+      deny: '*',
+    })
+
+    expect(res.statusCode).toBe(302)
+    expect(await storedNetwork(name)).toEqual({ allow: ['api.example.com', '*.npmjs.org'], deny: ['*'] })
+  })
+
+  test('a refused name keeps the allow and deny hosts typed', async () => {
+    const { cookies } = await signIn()
+
+    const res = await createWorkspace(cookies, 'My App', undefined, undefined, { allow: 'api.example.com', deny: '*' })
+
+    expect(res.statusCode).toBe(400)
+    expect(res.body).toContain('>api.example.com</textarea>')
+  })
+
+  test('editing replaces the allow and deny hosts and keeps the environment variables, and empty boxes clear them', async () => {
+    const { cookies } = await signIn()
+    const name = uniqueName()
+    await createWorkspace(cookies, name, undefined, { KEEP: 'a' }, { allow: 'old.example.com', deny: '*' })
+    const [row] = await app.db.select({ id: workspaces.id }).from(workspaces).where(eq(workspaces.name, name))
+    const edit = (fields: Record<string, string>) =>
+      app.inject({
+        method: 'POST',
+        url: `/workspaces/${row!.id}/edit`,
+        cookies,
+        headers: form,
+        payload: new URLSearchParams({ defaultEnv: '{}', ...fields }).toString(),
+      })
+
+    expect((await edit({ allow: 'new.example.com\n*.npmjs.org', deny: '*' })).statusCode).toBe(302)
+    expect(await storedNetwork(name)).toEqual({ allow: ['new.example.com', '*.npmjs.org'], deny: ['*'] })
+    expect(await storedEnv(name)).toEqual({ KEEP: 'a' })
+
+    expect((await edit({ allow: '', deny: '' })).statusCode).toBe(302)
+    expect(await storedNetwork(name)).toEqual({ allow: [], deny: [] })
+  })
+
+  test("the edit button carries the workspace's network for the dialog", async () => {
+    const { cookies } = await signIn()
+    const name = uniqueName()
+    await createWorkspace(cookies, name, undefined, undefined, { allow: 'api.example.com', deny: '*' })
+
+    const res = await app.inject({ url: '/workspaces', cookies })
+
+    const attribute = res.body.match(new RegExp(`data-name="${name}" data-keys="[^"]*" data-network="([^"]*)"`))![1]!
+    expect(JSON.parse(attribute.replaceAll('&quot;', '"'))).toEqual({ allow: ['api.example.com'], deny: ['*'] })
   })
 })
 
