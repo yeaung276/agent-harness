@@ -267,21 +267,40 @@ export const createSandboxManager = ({
       return launched
     },
 
+    // every live launch that isn't idle holds its workspace's claim: a free one is taken back, and a launch whose
+    // claim another worker holds is stopped without a status write, as that worker records the status
     stopIdle: async () => {
       await Promise.all(
-        [...sandboxes]
-          .filter(
-            ([, launched]) =>
-              (launched.status() === 'running' || launched.status() === 'failed') && launched.isIdle(idleMs)
-          )
-          .map(async ([workspaceId, launched]) => {
+        [...sandboxes].map(async ([workspaceId, launched]) => {
+          if ((launched.status() === 'running' || launched.status() === 'failed') && launched.isIdle(idleMs)) {
             if (launched.status() === 'running') log.info({ workspaceId }, 'stopping idle workspace app')
             await launched.kill()
             if (sandboxes.get(workspaceId) !== launched) return
             sandboxes.delete(workspaceId)
             changed('idle-stop')
             await workspaces.setStatus(workspaceId, 'stopped')
+            return
+          }
+          if (!isLive(launched)) return
+
+          await locked(workspaceId, async () => {
+            if (sandboxes.get(workspaceId) !== launched || !isLive(launched)) return
+
+            const taken = await placement.claimWorkspace(workspaceId).catch(err => {
+              if (err instanceof HttpError && err.status === 409) return null
+              throw err
+            })
+            if (taken === null) {
+              log.warn({ workspaceId }, 'workspace app stopped: another worker holds its claim')
+              await launched.kill()
+              sandboxes.delete(workspaceId)
+              changed('stop')
+            } else if (taken && launched.status() === 'running') {
+              log.warn({ workspaceId }, 'workspace claim taken back')
+              await workspaces.setStatus(workspaceId, 'running')
+            }
           })
+        })
       )
     },
 

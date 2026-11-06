@@ -251,20 +251,20 @@ describe('a workspace running on a worker', () => {
 })
 
 describe('claiming a workspace', () => {
-  test('the claim holds the worker and its boot, for the sandbox idle time', async () => {
+  test('the claim holds the worker and its boot, for the sandbox idle time, and says it was taken', async () => {
     const worker0 = startWorker('worker-0', '10.0.0.5:3000')
-    await worker0.claimWorkspace('ws-1')
+    expect(await worker0.claimWorkspace('ws-1')).toBe(true)
 
     expect(await redis.get('placement:workspace:ws-1')).toBe(`worker-0:${worker0.bootId}`)
     expect(await redis.pttl('placement:workspace:ws-1')).toBeGreaterThan(SANDBOX_IDLE_MS - 1000)
   })
 
-  test('the same worker claiming again succeeds and renews the key', async () => {
+  test('the same worker claiming again succeeds, renews the key and says it was already held', async () => {
     const worker0 = startWorker('worker-0', '10.0.0.5:3000')
     await worker0.claimWorkspace('ws-1')
     await redis.pexpire('placement:workspace:ws-1', 1000)
 
-    await worker0.claimWorkspace('ws-1')
+    expect(await worker0.claimWorkspace('ws-1')).toBe(false)
 
     expect(await redis.pttl('placement:workspace:ws-1')).toBeGreaterThan(SANDBOX_IDLE_MS - 1000)
   })

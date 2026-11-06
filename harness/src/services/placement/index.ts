@@ -7,6 +7,9 @@ const log = logger('placement')
 
 // deletes the key only while it still holds the given value
 const DELETE_IF_HOLDS = "if redis.call('get', KEYS[1]) == ARGV[1] then return redis.call('del', KEYS[1]) end return 0"
+// a workspace's process stops sandboxIdleMs after its last call ends, at the next sweep, so its claim, renewed
+// when a call starts, holds that much longer: a 4 min exec, a 1 min sweep, and stalls seen at 9 min
+const CLAIM_MARGIN_MS = 15 * 60 * 1000
 
 export type Need = 'new' | 'running' | 'any'
 
@@ -32,6 +35,7 @@ export const createPlacementService = ({
   minFreeMemoryMb: number
 }) => {
   const minFreeMemory = minFreeMemoryMb * 1024 * 1024
+  const claimMs = sandboxIdleMs + CLAIM_MARGIN_MS
   const bootId = crypto.randomUUID()
   const owner = `${workerName}:${bootId}`
 
@@ -77,7 +81,7 @@ export const createPlacementService = ({
   }
 
   const workspace = async (workspaceId: string, need: Need) => {
-    const name = await liveOwner(workspaceKey(workspaceId), sandboxIdleMs)
+    const name = await liveOwner(workspaceKey(workspaceId), claimMs)
     if (name && need === 'new') throw new HttpError(409, 'A background process is already running')
     if (name) return name
     if (need === 'running') throw new HttpError(409, 'Nothing is running in this workspace')
@@ -98,12 +102,13 @@ export const createPlacementService = ({
       return workspaceId ? workspace(workspaceId, 'any') : mostFree()
     },
 
-    // the worker: what it holds
+    // the worker: what it holds; true when it took a free claim, false when it renewed its own
     claimWorkspace: async (workspaceId: string) => {
       const key = workspaceKey(workspaceId)
-      if (await redis.set(key, owner, 'PX', sandboxIdleMs, 'NX')) return
-      if ((await redis.getex(key, 'PX', sandboxIdleMs)) !== owner)
+      if (await redis.set(key, owner, 'PX', claimMs, 'NX')) return true
+      if ((await redis.getex(key, 'PX', claimMs)) !== owner)
         throw new HttpError(409, 'This workspace is running on another worker')
+      return false
     },
 
     releaseWorkspace: async (workspaceId: string) => {
