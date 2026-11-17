@@ -163,6 +163,20 @@ describe('port forwarder', () => {
     expect(res.body).toBe('app got GET / ')
   })
 
+  test('leaves the workspace free when the client hangs up while it wakes', async () => {
+    wake.mockImplementation(() => new Promise(r => setTimeout(() => r(launch('running')), 100)))
+
+    const req = http.request({ host: '127.0.0.1', port: frontPort, headers: { [WORKSPACE_APP_HEADER]: WORKSPACE_ID } })
+    req.on('error', () => {})
+    req.end()
+    await new Promise(r => setTimeout(r, 30))
+    req.destroy()
+    await new Promise(r => setTimeout(r, 150))
+
+    expect([uses, releases]).toEqual([0, 0])
+    expect(seen).toHaveLength(0)
+  })
+
   test("answers with the workspace's state when it can't be served", async () => {
     wake.mockResolvedValueOnce(launch('failed', null))
     const failed = await send()
@@ -215,6 +229,24 @@ describe('port forwarder', () => {
     socket.destroy()
     await new Promise(r => setTimeout(r, 50))
     expect(releases).toBe(1)
+  })
+
+  test('leaves the workspace free when a WebSocket client hangs up while it wakes', async () => {
+    wake.mockImplementation(() => new Promise(r => setTimeout(() => r(launch('running')), 100)))
+    let upgraded = false
+    devServer.on('upgrade', () => (upgraded = true))
+
+    const socket = net.connect(frontPort, '127.0.0.1', () =>
+      socket.write(
+        `GET /live HTTP/1.1\r\nHost: proxy.example.com\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n${WORKSPACE_APP_HEADER}: ${WORKSPACE_ID}\r\n\r\n`
+      )
+    )
+    await new Promise(r => setTimeout(r, 30))
+    socket.destroy()
+    await new Promise(r => setTimeout(r, 150))
+
+    expect([uses, releases]).toEqual([0, 0])
+    expect(upgraded).toBe(false)
   })
 
   test("refuses a WebSocket for a workspace that isn't running", async () => {

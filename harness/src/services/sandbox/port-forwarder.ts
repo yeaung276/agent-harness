@@ -47,6 +47,8 @@ export const portForwarder = (manager: ReturnType<typeof createSandboxManager>) 
         )
       )
       const found = await target(workspaceId)
+      // a client that hung up while the workspace woke has already fired 'close', so use() would never be released
+      if (res.destroyed) return
 
       if (!('port' in found)) {
         const retry = found.statusCode === 503 ? { 'retry-after': '5' } : {}
@@ -74,6 +76,8 @@ export const portForwarder = (manager: ReturnType<typeof createSandboxManager>) 
 
     upgrade: async (req: IncomingMessage, socket: Duplex, head: Buffer, workspaceId: string) => {
       const found = await target(workspaceId)
+      // upgrade sockets are half-open, so a client that hung up while the workspace woke has only ended
+      if (socket.destroyed || socket.readableEnded) return void socket.destroy()
 
       if (!('port' in found)) {
         log.info({ workspaceId, url: req.url, statusCode: found.statusCode }, 'workspace app websocket refused')
