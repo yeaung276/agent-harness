@@ -409,6 +409,17 @@ describe.if(linux)('confinement', () => {
     expect(await readFile(join(shared.dir, 'lib.js'), 'utf8')).toBe('original')
   }, 30_000)
 
+  test('puts /tmp on the folder mounted there instead of memory', async () => {
+    const tmp = await workspace()
+
+    const { output } = await run(await workspace(), 'echo hello > /tmp/note; stat -f -c %T /tmp', {
+      mounts: [{ source: tmp.dir, target: '/tmp' }],
+    })
+
+    expect(await readFile(join(tmp.dir, 'note'), 'utf8')).toBe('hello\n')
+    expect(output.trim()).not.toBe('tmpfs')
+  }, 30_000)
+
   test("can't loosen its own firewall", async () => {
     const { exitCode, output } = await run(await workspace(), 'nft flush ruleset')
 
@@ -454,6 +465,27 @@ describe.if(linux)('confinement', () => {
 
     expect(exitCode).not.toBe(0)
     expect(output).not.toContain('survived')
+  }, 30_000)
+
+  test('says in its log when a process was killed at the memory limit, and only in the command it happened in', async () => {
+    const ws = await workspace()
+    await start(ws, { command: 'sleep 30' })
+    await until(async () => (await cgroupProcs(ws.id)) >= 1, 'the cgroup kept alive')
+
+    const hog = await run(
+      ws,
+      `bun -e "const b = []; for (let i = 0; i < 40; i++) b.push(Buffer.alloc(16 * 1024 * 1024, 1))"`
+    )
+    const after = await run(ws, 'echo fine')
+
+    expect(hog.output).toContain('out of memory: a process in this workspace was killed at its 256 MB limit')
+    expect(after.output.trim()).toBe('fine')
+  }, 30_000)
+
+  test('looks itself up as root, with its home at /workspace/.home', async () => {
+    const { output } = await run(await workspace(), 'whoami; id -gn; echo ~root')
+
+    expect(output.trim()).toBe('root\nroot\n/workspace/.home')
   }, 30_000)
 
   test('ends everything inside on kill', async () => {

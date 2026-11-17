@@ -25,16 +25,18 @@ ENV NODE_ENV=production \
     PLAYWRIGHT_BROWSERS_PATH=/opt/ms-playwright
 
 # the sandbox: bwrap, pasta, nft, and util-linux for unshare, nsenter and setpriv;
-# the rest is the workload's toolset, mounted read-only into every sandbox from /usr
+# the rest is the workload's toolset, mounted read-only into every sandbox from /usr;
+# without the PEP 668 marker, pip installs to the user site under HOME, as the sandbox can't write /usr
 RUN apt-get update \
   && apt-get install -y --no-install-recommends \
      bubblewrap passt nftables util-linux bash dumb-init \
      openssl ca-certificates git openssh-client \
      curl wget netcat-openbsd iproute2 \
-     build-essential python3 python3-pip pkg-config nodejs npm \
+     build-essential python3 python3-pip python3-venv python3-dev python-is-python3 pkg-config nodejs npm \
      unzip zip xz-utils bzip2 procps psmisc lsof \
      jq ripgrep less file tree postgresql-client sqlite3 tzdata \
-  && rm -rf /var/lib/apt/lists/*
+  && rm -rf /var/lib/apt/lists/* \
+  && rm -f /usr/lib/python3*/EXTERNALLY-MANAGED
 
 COPY --from=build /usr/src/app/harness/dist harness/dist
 

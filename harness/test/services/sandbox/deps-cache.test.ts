@@ -6,6 +6,12 @@ import { dirname, join } from 'node:path'
 
 import { depsCache } from '../../../src/services/sandbox/deps-cache.ts'
 
+const HOME_ENV = {
+  HOME: '/workspace/.home',
+  PATH: `/workspace/.home/.local/bin:${process.env.PATH}`,
+  PIP_ROOT_USER_ACTION: 'ignore',
+}
+
 const root = await mkdtemp(join(tmpdir(), 'deps-cache-'))
 const cache = depsCache(join(root, 'deps'))
 
@@ -34,8 +40,9 @@ describe('mounts', () => {
     expect(mounts).toEqual([
       { source: join(root, 'deps', id, 'node_modules'), target: 'node_modules' },
       { source: join(root, 'deps', id, '.home'), target: '.home' },
+      { source: join(root, 'deps', id, '.tmp'), target: '/tmp' },
     ])
-    expect(env).toEqual({ HOME: '/workspace/.home' })
+    expect(env).toEqual(HOME_ENV)
     expect(existsSync(mounts[0]!.source)).toBe(true)
     expect(existsSync(join(dir, 'node_modules'))).toBe(false)
   })
@@ -53,8 +60,8 @@ describe('mounts', () => {
 
       const found = await cache.mounts(id, dir)
 
-      expect(found.mounts.map(mount => mount.target)).toEqual([target, '.home'])
-      expect(found.env).toEqual({ ...env, HOME: '/workspace/.home' })
+      expect(found.mounts.map(mount => mount.target)).toEqual([target, '.home', '/tmp'])
+      expect(found.env).toEqual({ ...env, ...HOME_ENV })
     }
   })
 
@@ -65,6 +72,7 @@ describe('mounts', () => {
       'vendor',
       'vendor/bundle',
       '.home',
+      '/tmp',
     ])
   })
 
@@ -79,6 +87,7 @@ describe('mounts', () => {
 
     expect(await targets(ws)).toEqual([
       '.home',
+      '/tmp',
       'a/b/c/node_modules',
       'apps/web/node_modules',
       'node_modules',
@@ -96,21 +105,37 @@ describe('mounts', () => {
     await symlink(outside.dir, join(ws.dir, 'linked'))
     await symlink(join(outside.dir, 'package.json'), join(ws.dir, 'package.json'))
 
-    expect(await targets(ws)).toEqual(['.home'])
+    expect(await targets(ws)).toEqual(['.home', '/tmp'])
   })
 
-  test('gives only its home folder to a workspace without a manifest, or without a folder', async () => {
+  test('gives only its home and /tmp folders to a workspace without a manifest, or without a folder', async () => {
     const empty = await workspace({ 'index.html': '' })
 
     expect(await cache.mounts(empty.id, empty.dir)).toEqual({
-      mounts: [{ source: join(root, 'deps', empty.id, '.home'), target: '.home' }],
-      env: { HOME: '/workspace/.home' },
+      mounts: [
+        { source: join(root, 'deps', empty.id, '.home'), target: '.home' },
+        { source: join(root, 'deps', empty.id, '.tmp'), target: '/tmp' },
+      ],
+      env: HOME_ENV,
     })
     expect(await cache.mounts('gone', join(root, 'workspaces', 'gone'))).toEqual({
-      mounts: [{ source: join(root, 'deps', 'gone', '.home'), target: '.home' }],
-      env: { HOME: '/workspace/.home' },
+      mounts: [
+        { source: join(root, 'deps', 'gone', '.home'), target: '.home' },
+        { source: join(root, 'deps', 'gone', '.tmp'), target: '/tmp' },
+      ],
+      env: HOME_ENV,
     })
     expect(existsSync(join(root, 'deps', empty.id, '.home'))).toBe(true)
+    expect(existsSync(join(root, 'deps', empty.id, '.tmp'))).toBe(true)
+  })
+
+  test('keeps a venv already in a Python folder instead of hiding it, as one is often made before its manifest', async () => {
+    const made = await workspace({ 'requirements.txt': '', '.venv/pyvenv.cfg': '', 'api/pyproject.toml': '' })
+    await mkdir(join(made.dir, 'api', '.venv'))
+    const node = await workspace({ 'package.json': '{}', 'node_modules/react/index.js': '' })
+
+    expect(await targets(made)).toEqual(['.home', '/tmp', 'api/.venv'])
+    expect(await targets(node)).toEqual(['.home', '/tmp', 'node_modules'])
   })
 
   test("keeps each workspace's deps apart", async () => {

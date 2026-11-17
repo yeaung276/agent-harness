@@ -2,7 +2,7 @@ import { execFile, spawn } from 'node:child_process'
 import { accessSync, constants, readFileSync } from 'node:fs'
 import { mkdir, readFile, rename, rmdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { promisify } from 'node:util'
 
 import type { Config } from '../../config.ts'
@@ -13,11 +13,20 @@ import { createNetworkController, DNS_PORT, type NetworkRules, SANDBOX_RESOLV_CO
 const CGROUP_ROOT = '/sys/fs/cgroup'
 const CGROUP_CONTROLLERS = ['memory', 'cpu', 'pids']
 const WORKER_RESERVE_MB = 450
-const RESOLV_CONF = join(tmpdir(), 'sandbox-resolv.conf')
+// the sandbox runs as root with its HOME at /workspace/.home; whoami, getpass, git and ssh look the user up in passwd
+const ETC_FILES = [
+  { source: join(tmpdir(), 'sandbox-resolv.conf'), target: '/etc/resolv.conf', content: SANDBOX_RESOLV_CONF },
+  {
+    source: join(tmpdir(), 'sandbox-passwd'),
+    target: '/etc/passwd',
+    content: 'root:x:0:0:root:/workspace/.home:/bin/bash\n',
+  },
+  { source: join(tmpdir(), 'sandbox-group'), target: '/etc/group', content: 'root:x:0:\n' },
+]
 
 export const SANDBOXES_CGROUP = 'sandboxes'
 
-let resolvConfWritten: Promise<void> | undefined
+let etcFilesWritten: Promise<void[]> | undefined
 
 export type SandboxOptions = {
   dir: string
@@ -66,12 +75,23 @@ export const createSandbox = async (
   let lastUsedAt = Date.now()
   let status: SandboxStatus = ports ? 'starting' : 'running'
   const cgroup = join(CGROUP_ROOT, cgroupPath)
+  // the workspace's cgroup outlives one sandbox, so a kill counts only when the count grew while this one ran
+  const oomKills = () => {
+    try {
+      return Number(readFileSync(join(cgroup, 'memory.events'), 'utf8').match(/^oom_kill (\d+)$/m)?.[1] ?? 0)
+    } catch {
+      return 0
+    }
+  }
+  const oomKillsAtStart = oomKills()
   if (mode === 'bwrap') {
-    // written aside and renamed in, so a sandbox of another worker process that has it mounted never sees it half written
-    resolvConfWritten ??= writeFile(`${RESOLV_CONF}.${process.pid}`, SANDBOX_RESOLV_CONF).then(() =>
-      rename(`${RESOLV_CONF}.${process.pid}`, RESOLV_CONF)
+    // written aside and renamed in, so a sandbox of another worker process that has one mounted never sees it half written
+    etcFilesWritten ??= Promise.all(
+      ETC_FILES.map(({ source, content }) =>
+        writeFile(`${source}.${process.pid}`, content).then(() => rename(`${source}.${process.pid}`, source))
+      )
     )
-    await resolvConfWritten
+    await etcFilesWritten
   }
   const controller =
     mode === 'bwrap' && joinPid === undefined
@@ -148,6 +168,7 @@ export const createSandbox = async (
     '--cap-drop',
     'ALL',
     '--unshare-user',
+    '--disable-userns',
     '--unshare-pid',
     '--unshare-ipc',
     '--unshare-uts',
@@ -164,7 +185,7 @@ export const createSandbox = async (
     ...mounts.flatMap(({ source, target, readOnly }) => [
       readOnly ? '--ro-bind' : '--bind',
       source,
-      join('/workspace', target),
+      resolve('/workspace', target),
     ]),
     '--chdir',
     '/workspace',
@@ -181,9 +202,7 @@ export const createSandbox = async (
       '/etc/hosts',
       '/etc/fonts',
     ].flatMap(path => ['--ro-bind-try', path, path]),
-    '--ro-bind',
-    RESOLV_CONF,
-    '/etc/resolv.conf',
+    ...ETC_FILES.flatMap(({ source, target }) => ['--ro-bind', source, target]),
     '--ro-bind',
     cgroup,
     CGROUP_ROOT,
@@ -291,6 +310,8 @@ export const createSandbox = async (
   const finished = new Promise<number | null>(resolve =>
     child.once('close', (exitCode, signal) => {
       controller?.close()
+      if (mode === 'bwrap' && oomKills() > oomKillsAtStart)
+        log?.write(`out of memory: a process in this workspace was killed at its ${memoryMaxMb} MB limit\n`)
       if (status !== 'stopped') status = ports ? 'failed' : 'stopped'
       if (ports)
         log?.write(

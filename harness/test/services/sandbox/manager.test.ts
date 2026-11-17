@@ -381,6 +381,8 @@ describe('launch', () => {
 
     expect(launched.options.env).toEqual({
       HOME: '/workspace/.home',
+      PATH: `/workspace/.home/.local/bin:${process.env.PATH}`,
+      PIP_ROOT_USER_ACTION: 'ignore',
       PORT: '3000',
       NODE_ENV: 'production',
       API_URL: 'https://b.example',
@@ -422,6 +424,7 @@ describe('launch', () => {
       { source: join(dirs, 'deps', 'ws-1', 'node_modules'), target: 'node_modules' },
       { source: join(dirs, 'deps', 'ws-1', 'api', 'vendor/bundle'), target: 'api/vendor/bundle' },
       { source: join(dirs, 'deps', 'ws-1', '.home'), target: '.home' },
+      { source: join(dirs, 'deps', 'ws-1', '.tmp'), target: '/tmp' },
     ])
     expect(latestLaunch('ws-1').options.env.BUNDLE_PATH).toBe('vendor/bundle')
     expect(workspaces.saved.get('ws-1')?.env.BUNDLE_PATH).toBeUndefined()
@@ -949,8 +952,8 @@ describe('wake', () => {
     latestLaunch('ws-1').listen()
     await woken
 
-    expect(first.options.mounts!.map(mount => mount.target)).toEqual(['.home'])
-    expect(latestLaunch('ws-1').options.mounts!.map(mount => mount.target)).toEqual(['node_modules', '.home'])
+    expect(first.options.mounts!.map(mount => mount.target)).toEqual(['.home', '/tmp'])
+    expect(latestLaunch('ws-1').options.mounts!.map(mount => mount.target)).toEqual(['node_modules', '.home', '/tmp'])
   })
 
   test('starts a workspace this pod never ran from its saved launch', async () => {
