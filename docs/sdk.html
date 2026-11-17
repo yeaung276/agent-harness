@@ -121,7 +121,7 @@ await browser.close()</code></pre>
 
           <h3>sandbox.execute()</h3>
           <pre class="schema"><code>execute(command: string): Promise&lt;ExecuteResponse&gt;</code></pre>
-          <p>Runs <code>command</code> with <code>sh -c</code> from <code>/workspace</code> and waits for it to end. Returns <code>{ output, exitCode, truncated }</code>: <code>output</code> is stdout and stderr together, the last 16 KB of it. A command that fails still resolves; check <code>exitCode</code>. A command still running after the sandbox's <code>timeoutMs</code> is killed, and resolves with <code>exitCode: null</code> and output ending in <code>timed out after &lt;ms&gt; ms</code>.</p>
+          <p>Runs <code>command</code> with <code>bash -c</code> from <code>/workspace</code> and waits for it to end. Returns <code>{ output, exitCode, truncated }</code>: <code>output</code> is stdout and stderr together, the last 16 KB of it. A command that fails still resolves; check <code>exitCode</code>. A command still running after the sandbox's <code>timeoutMs</code> is killed, and resolves with <code>exitCode: null</code> and output ending in <code>timed out after &lt;ms&gt; ms</code>.</p>
           <pre class="schema"><code>const { output, exitCode } = await sandbox.execute(&quot;npm ci &amp;&amp; npm test&quot;)</code></pre>
           <p>Dependency folders like <code>node_modules</code> may be empty on the next command. Install in the same command that needs them.</p>
 
