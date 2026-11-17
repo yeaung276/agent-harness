@@ -51,16 +51,27 @@ export const createStatsReporter = ({
       let execs = 0
 
       const collect = async () => {
-        const [cpuStat, memory, memoryMax, sandboxesMemory, sandboxesMemoryMax, sandboxesEvents, sandboxesLocalEvents] =
-          await Promise.all([
-            readCgroup('cpu.stat'),
-            workingSet(''),
-            readCgroup('memory.max'),
-            workingSet(SANDBOXES_CGROUP),
-            readCgroup(join(SANDBOXES_CGROUP, 'memory.max')),
-            readCgroup(join(SANDBOXES_CGROUP, 'memory.events')),
-            readCgroup(join(SANDBOXES_CGROUP, 'memory.events.local')),
-          ])
+        const [
+          cpuStat,
+          memory,
+          memoryMax,
+          sandboxesMemory,
+          sandboxesMemoryMax,
+          sandboxesStat,
+          sandboxesEvents,
+          sandboxesLocalEvents,
+        ] = await Promise.all([
+          readCgroup('cpu.stat'),
+          workingSet(''),
+          readCgroup('memory.max'),
+          workingSet(SANDBOXES_CGROUP),
+          readCgroup(join(SANDBOXES_CGROUP, 'memory.max')),
+          readCgroup(join(SANDBOXES_CGROUP, 'memory.stat')),
+          readCgroup(join(SANDBOXES_CGROUP, 'memory.events')),
+          readCgroup(join(SANDBOXES_CGROUP, 'memory.events.local')),
+        ])
+        // the file name and metadata cache that finished commands leave behind, which the kernel frees when the sandboxes need the memory
+        const sandboxesReclaimable = Number(sandboxesStat?.match(/^slab_reclaimable (\d+)$/m)?.[1] ?? 0)
         const usageUsec = Number(cpuStat?.match(/^usage_usec (\d+)$/m)?.[1] ?? Number.NaN)
         const now = Date.now()
         const cpuPercent = lastCpu
@@ -79,7 +90,7 @@ export const createStatsReporter = ({
           sandboxMemoryFreeBytes:
             sandboxesMemoryMax === null || sandboxesMemoryMax === 'max' || sandboxesMemory === null
               ? null
-              : Math.max(0, Number(sandboxesMemoryMax) - sandboxesMemory),
+              : Math.max(0, Number(sandboxesMemoryMax) - Math.max(0, sandboxesMemory - sandboxesReclaimable)),
           sandboxMemoryLimitHits: eventCount(sandboxesLocalEvents, 'max'),
           sandboxOomKills: eventCount(sandboxesEvents, 'oom_kill'),
           sandboxes: app.sandbox.count(),

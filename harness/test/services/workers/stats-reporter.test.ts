@@ -1,4 +1,5 @@
-import { describe, expect, test } from 'bun:test'
+import { describe, expect, mock, test } from 'bun:test'
+import * as fs from 'node:fs/promises'
 
 import Fastify from 'fastify'
 import fp from 'fastify-plugin'
@@ -7,7 +8,19 @@ import RedisMock from 'ioredis-mock'
 import { loadConfig } from '../../../src/config.ts'
 import { createStatsReporter } from '../../../src/services/workers/stats-reporter.ts'
 
+const MB = 1024 * 1024
 const redis = new RedisMock()
+
+// cgroup files a test sets, by path under /sys/fs/cgroup; every other file is read from disk
+let cgroupFiles: Record<string, string> = {}
+const { readFile } = fs
+mock.module('node:fs/promises', () => ({
+  ...fs,
+  readFile: (path: string, ...rest: never[]) => {
+    const file = cgroupFiles[path.replace('/sys/fs/cgroup/', '')]
+    return file === undefined ? readFile(path, ...rest) : Promise.resolve(file)
+  },
+}))
 
 const counts = { sandboxes: 2, sessions: 3 }
 const listeners: ((event?: string) => void)[] = []
@@ -92,5 +105,20 @@ describe('the stats reporter', () => {
     expect(await redis.hget('pods:worker-0', 'execs')).toBe('1')
 
     await app.close()
+  })
+
+  test("counts the kernel's reclaimable cache in the sandboxes as free memory", async () => {
+    cgroupFiles = {
+      'sandboxes/memory.max': String(1000 * MB),
+      'sandboxes/memory.current': String(800 * MB),
+      'sandboxes/memory.stat': `inactive_file ${50 * MB}\nslab_reclaimable ${600 * MB}\n`,
+    }
+    const app = await startWorker()
+    await Bun.sleep(50)
+
+    expect(await redis.hget('pods:worker-0', 'sandboxMemoryFreeBytes')).toBe(String(850 * MB))
+
+    await app.close()
+    cgroupFiles = {}
   })
 })
