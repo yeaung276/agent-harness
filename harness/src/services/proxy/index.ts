@@ -28,6 +28,64 @@ const HOP_BY_HOP = new Set([
   'transfer-encoding',
   'upgrade',
 ])
+const HEARTBEAT_MS = 15_000
+// sent first to a page load that wakes the workspace; WAKE_RELOAD or wakeFailed() ends it once the worker answers
+const WAKING_PAGE = `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Waking up</title>
+<style>
+:root{--bg:#f5f7fa;--ink:#1f2933;--muted:#616e7c;--bot:#4f7cff;--face:#e6edff;--glow:#f5a524}
+@media (prefers-color-scheme:dark){:root{--bg:#101318;--ink:#e4e8ee;--muted:#9aa5b1;--bot:#6b8fff;--face:#1c2433}}
+body{margin:0;min-height:100vh;display:grid;place-items:center;background:var(--bg);color:var(--ink);font:16px/1.5 system-ui,sans-serif}
+main{text-align:center;padding:16px}
+h1{font-size:1.25rem;font-weight:600;margin:24px 0 4px}
+p{margin:0;color:var(--muted)}
+.robot{width:120px;height:160px;overflow:visible}
+.part{fill:var(--bot)}
+.face{fill:var(--face)}
+.eye{fill:var(--ink);transform-box:fill-box;transform-origin:center;animation:blink 3s infinite}
+.light{fill:var(--glow);animation:pulse .8s ease-in-out infinite alternate}
+.antenna{stroke:var(--bot);stroke-width:4;stroke-linecap:round}
+.bot{transform-origin:60px 150px;animation:groove .8s ease-in-out infinite alternate}
+.arm-left{transform-origin:24px 80px;animation:wave .4s ease-in-out infinite alternate}
+.arm-right{transform-origin:96px 80px;animation:wave .4s ease-in-out infinite alternate-reverse}
+.leg-left{animation:step .4s ease-in-out infinite alternate}
+.leg-right{animation:step .4s ease-in-out infinite alternate-reverse}
+.failed{margin-top:12px;color:var(--ink)}
+@keyframes groove{from{transform:translateY(0) rotate(-6deg)}to{transform:translateY(-8px) rotate(6deg)}}
+@keyframes wave{from{transform:rotate(-50deg)}to{transform:rotate(30deg)}}
+@keyframes step{from{transform:translateY(0)}to{transform:translateY(-6px)}}
+@keyframes blink{0%,92%,100%{transform:scaleY(1)}96%{transform:scaleY(.1)}}
+@keyframes pulse{from{opacity:.4}to{opacity:1}}
+@media (prefers-reduced-motion:reduce){.robot *{animation:none!important}}
+</style>
+</head>
+<body>
+<main>
+<svg class="robot" viewBox="0 0 120 160" aria-hidden="true">
+<g class="bot">
+<line class="antenna" x1="60" y1="10" x2="60" y2="24"/>
+<circle class="light" cx="60" cy="8" r="6"/>
+<rect class="part" x="28" y="24" width="64" height="46" rx="14"/>
+<rect class="face" x="36" y="32" width="48" height="30" rx="10"/>
+<circle class="eye" cx="50" cy="47" r="5"/>
+<circle class="eye" cx="70" cy="47" r="5"/>
+<g class="arm-left"><rect class="part" x="16" y="76" width="16" height="38" rx="8"/></g>
+<g class="arm-right"><rect class="part" x="88" y="76" width="16" height="38" rx="8"/></g>
+<rect class="part" x="34" y="74" width="52" height="48" rx="12"/>
+<g class="leg-left"><rect class="part" x="40" y="118" width="14" height="32" rx="7"/></g>
+<g class="leg-right"><rect class="part" x="66" y="118" width="14" height="32" rx="7"/></g>
+</g>
+</svg>
+<h1>Waking up the workspace</h1>
+<p>This page turns into the app as soon as it is up.</p>
+`
+const WAKE_RELOAD = '<script>location.reload()</script></main></body></html>'
+const wakeFailed = (message: string) =>
+  `<p class="failed">It didn't start: ${Bun.escapeHTML(message)}</p></main><style>.robot *{animation:none}</style></body></html>`
 
 export const createProxy = ({
   workspaces,
@@ -91,12 +149,14 @@ export const createProxy = ({
   const target = async (req: IncomingMessage) => {
     const workspaceId = workspaceIdFromReq(req)
 
+    let waking = false
     const worker = await placement.workspace(workspaceId, 'running').catch(async err => {
       if (!(err instanceof HttpError) || err.status !== 409) throw err
       await workspaces.get(workspaceId)
+      waking = true
       return placement.workspace(workspaceId, 'any')
     })
-    return { workspaceId, worker, connection: await workers.getConnectionInfo(worker) }
+    return { workspaceId, worker, waking, connection: await workers.getConnectionInfo(worker) }
   }
 
   const answer = (res: ServerResponse, err: HttpError) => {
@@ -131,7 +191,13 @@ export const createProxy = ({
         return null
       })
       if (!found) return
-      const { workspaceId, worker, connection } = found
+      const { workspaceId, worker, waking, connection } = found
+      // a page load gets a page that reloads once the workspace is up, as a page already sent can't become the app's response
+      const page =
+        waking &&
+        req.method === 'GET' &&
+        (req.headers['sec-fetch-mode'] === 'navigate' ||
+          (req.headers['sec-fetch-mode'] === undefined && (req.headers.accept ?? '').includes('text/html')))
 
       const headers = new Headers()
       for (const [name, value] of Object.entries(req.headers)) {
@@ -142,6 +208,13 @@ export const createProxy = ({
 
       const left = new AbortController()
       res.once('close', () => left.abort())
+
+      if (page) {
+        res.writeHead(503, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' })
+        res.write(WAKING_PAGE)
+      }
+      // keeps proxies in between from timing out a page that waits on the wake
+      const heartbeat = page ? setInterval(() => res.write('<!-- waking -->\n'), HEARTBEAT_MS) : undefined
 
       const upstream = await sessionOf(worker, connection.tls)
         .fetch(`https://${connection.address}${req.url}`, {
@@ -156,10 +229,20 @@ export const createProxy = ({
         .catch(err => {
           if (left.signal.aborted) return null
           log.warn({ workspaceId, worker, err }, 'worker unreachable')
-          answer(res, new HttpError(503, `worker ${worker} can't be reached`))
+          if (page) res.end(wakeFailed(`worker ${worker} can't be reached`))
+          else answer(res, new HttpError(503, `worker ${worker} can't be reached`))
           return null
         })
+      clearInterval(heartbeat)
       if (!upstream) return
+
+      // the worker answers 502 or 503 itself when the launch failed or there is none to wake
+      if (page && (upstream.status === 502 || upstream.status === 503))
+        return void res.end(wakeFailed(await upstream.text()))
+      if (page) {
+        await upstream.body?.cancel()
+        return void res.end(WAKE_RELOAD)
+      }
 
       const out: Record<string, string | string[]> = {}
       upstream.headers.forEach((value, name) => {
