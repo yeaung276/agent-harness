@@ -175,6 +175,9 @@ export const createWorkerService = async ({
         memoryLimitBytes: number('memoryLimitBytes'),
         sandboxes: number('sandboxes'),
         sandboxSlots: number('sandboxSlots'),
+        execs: number('execs'),
+        sandboxMemoryLimitHits: number('sandboxMemoryLimitHits'),
+        sandboxOomKills: number('sandboxOomKills'),
         sessions: number('sessions'),
       }
     },

@@ -93,7 +93,7 @@ describe('the most free worker', () => {
     expect(await server.workspace('ws-1', 'new')).toBe('worker-1')
   })
 
-  test('the most free sandbox slots win', async () => {
+  test('equal free memory: the most free sandbox slots win', async () => {
     await startWorker('worker-0', '10.0.0.5:3000').report({ sandboxes: 10, memoryGb: 1, sessions: 0 })
     await startWorker('worker-1', '10.0.0.6:3000').report({ sandboxes: 3, memoryGb: 7, sessions: 20 })
     await startWorker('worker-2', '10.0.0.7:3000').report({ sandboxes: 7 })
@@ -101,9 +101,9 @@ describe('the most free worker', () => {
     expect(await server.workspace('ws-1', 'new')).toBe('worker-1')
   })
 
-  test('equal slots: the more free sandbox memory wins', async () => {
-    await startWorker('worker-0', '10.0.0.5:3000').report({ sandboxes: 4, sandboxMemoryFreeMb: 500 })
-    await startWorker('worker-1', '10.0.0.6:3000').report({ sandboxes: 4, sandboxMemoryFreeMb: 900 })
+  test('the more free sandbox memory wins over more free slots', async () => {
+    await startWorker('worker-0', '10.0.0.5:3000').report({ sandboxes: 0, sandboxMemoryFreeMb: 500 })
+    await startWorker('worker-1', '10.0.0.6:3000').report({ sandboxes: 10, sandboxMemoryFreeMb: 900 })
 
     expect(await server.workspace('ws-1', 'new')).toBe('worker-1')
   })

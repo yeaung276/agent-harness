@@ -1,4 +1,4 @@
-import { mkdir, readdir, rm } from 'node:fs/promises'
+import { mkdir, readdir, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
 // keepExisting: a venv is often made before its manifest, so one already in the workspace is used instead of hidden
@@ -10,6 +10,7 @@ const RULES: { manifests: string[]; deps: string; env: Record<string, string>; k
 ]
 const MAX_DEPTH = 3
 const HOME = '/workspace/.home'
+const GITCONFIG = '[user]\n\tname = Sandbox\n\temail = sandbox@localhost\n'
 
 export type Mount = { source: string; target: string; readOnly?: true }
 
@@ -45,15 +46,24 @@ export const depsCache = (root: string) => ({
 
     // /home bind mount
     const home = join(root, workspaceId, '.home')
-    await mkdir(home, { recursive: true })
+    // npx reads the npm prefix's lib folder and fails when it's missing
+    await mkdir(join(home, '.local', 'lib'), { recursive: true })
+    await writeFile(join(home, '.gitconfig'), GITCONFIG, { flag: 'wx' }).catch(err => {
+      if (err.code !== 'EEXIST') throw err
+    })
     mounts.push({ source: home, target: '.home' })
+
     // /tmp bind mount
     const tmp = join(root, workspaceId, '.tmp')
     await mkdir(tmp, { recursive: true })
     mounts.push({ source: tmp, target: '/tmp' })
+
+    // env
     env.HOME = HOME
     env.PATH = `${HOME}/.local/bin:${process.env.PATH}`
     env.PIP_ROOT_USER_ACTION = 'ignore'
+    env.NPM_CONFIG_PREFIX = `${HOME}/.local`
+    env.LANG = 'C.UTF-8'
 
     return { mounts, env }
   },

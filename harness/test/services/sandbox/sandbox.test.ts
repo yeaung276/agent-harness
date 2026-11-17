@@ -488,6 +488,12 @@ describe.if(linux)('confinement', () => {
     expect(output.trim()).toBe('root\nroot\n/workspace/.home')
   }, 30_000)
 
+  test('runs the command in bash', async () => {
+    const { output } = await run(await workspace(), 'set -o pipefail; [[ a == a ]] && echo {1..3}')
+
+    expect(output.trim()).toBe('1 2 3')
+  }, 30_000)
+
   test('ends everything inside on kill', async () => {
     const ws = await workspace()
     const sandbox = await start(ws, { command: 'sleep 300 & sleep 300 & wait' })

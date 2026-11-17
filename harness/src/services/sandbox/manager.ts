@@ -207,6 +207,7 @@ export const createSandboxManager = ({
       })
 
       changed('exec-start')
+      const startedAt = Date.now()
       const release = server?.use()
       let timedOut = false
       const timer = setTimeout(() => {
@@ -226,7 +227,7 @@ export const createSandboxManager = ({
           exitCode === 0 ? 'succeeded' : 'failed',
           exitCode
         )
-        log.info({ workspaceId, exitCode, timedOut }, 'workspace command finished')
+        log.info({ workspaceId, exitCode, timedOut, durationMs: Date.now() - startedAt }, 'workspace command finished')
 
         return { exitCode, output, timedOut }
       } finally {
@@ -245,7 +246,8 @@ export const createSandboxManager = ({
         log.info({ workspaceId }, 'workspace app stopped')
       }),
 
-    count: () => sandboxes.size,
+    // a crashed launch stays in the map until the idle sweep, but holds no port
+    count: () => [...sandboxes.values()].filter(isLive).length,
 
     onChange: (listener: (event: SandboxEvent) => void) => void listeners.push(listener),
 

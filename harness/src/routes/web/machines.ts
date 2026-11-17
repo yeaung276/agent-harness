@@ -50,6 +50,9 @@ export const machines: FastifyPluginAsyncTypebox = async app => {
         },
         sandboxes: worker.sandboxes,
         sandboxSlots: worker.sandboxSlots,
+        execs: worker.execs,
+        sandboxMemoryLimitHits: worker.sandboxMemoryLimitHits,
+        sandboxOomKills: worker.sandboxOomKills,
         sessions: worker.sessions,
       },
     })

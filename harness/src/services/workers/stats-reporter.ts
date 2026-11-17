@@ -29,6 +29,12 @@ const workingSet = async (cgroup: string) => {
   return Math.max(0, Number(current) - Number(stat?.match(/^inactive_file (\d+)$/m)?.[1] ?? 0))
 }
 
+// a counter from memory.events or memory.events.local, which count since the cgroup was made
+const eventCount = (events: string | null, name: string) => {
+  const count = events?.match(new RegExp(`^${name} (\\d+)$`, 'm'))?.[1]
+  return count === undefined ? null : Number(count)
+}
+
 export const createStatsReporter = ({
   statsKey,
   hostname,
@@ -42,15 +48,19 @@ export const createStatsReporter = ({
     async app => {
       let lastCpu: { usageUsec: number; at: number } | null = null
       let timer: ReturnType<typeof setInterval> | undefined
+      let execs = 0
 
       const collect = async () => {
-        const [cpuStat, memory, memoryMax, sandboxesMemory, sandboxesMemoryMax] = await Promise.all([
-          readCgroup('cpu.stat'),
-          workingSet(''),
-          readCgroup('memory.max'),
-          workingSet(SANDBOXES_CGROUP),
-          readCgroup(join(SANDBOXES_CGROUP, 'memory.max')),
-        ])
+        const [cpuStat, memory, memoryMax, sandboxesMemory, sandboxesMemoryMax, sandboxesEvents, sandboxesLocalEvents] =
+          await Promise.all([
+            readCgroup('cpu.stat'),
+            workingSet(''),
+            readCgroup('memory.max'),
+            workingSet(SANDBOXES_CGROUP),
+            readCgroup(join(SANDBOXES_CGROUP, 'memory.max')),
+            readCgroup(join(SANDBOXES_CGROUP, 'memory.events')),
+            readCgroup(join(SANDBOXES_CGROUP, 'memory.events.local')),
+          ])
         const usageUsec = Number(cpuStat?.match(/^usage_usec (\d+)$/m)?.[1] ?? Number.NaN)
         const now = Date.now()
         const cpuPercent = lastCpu
@@ -70,7 +80,10 @@ export const createStatsReporter = ({
             sandboxesMemoryMax === null || sandboxesMemoryMax === 'max' || sandboxesMemory === null
               ? null
               : Math.max(0, Number(sandboxesMemoryMax) - sandboxesMemory),
+          sandboxMemoryLimitHits: eventCount(sandboxesLocalEvents, 'max'),
+          sandboxOomKills: eventCount(sandboxesEvents, 'oom_kill'),
           sandboxes: app.sandbox.count(),
+          execs,
           sandboxSlots: app.config.SANDBOX_PORT_MAX - app.config.SANDBOX_PORT_MIN + 1,
           sessions: app.chromium.count(),
         }
@@ -101,7 +114,11 @@ export const createStatsReporter = ({
           })
       }
 
-      app.sandbox.onChange(tick)
+      app.sandbox.onChange(event => {
+        if (event === 'exec-start') execs++
+        if (event === 'exec-end') execs--
+        tick()
+      })
       app.chromium.onChange(tick)
 
       app.addHook('onListen', async () => {

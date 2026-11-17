@@ -65,8 +65,9 @@ export const createPlacementService = ({
     const eligible = (await Promise.all(keys.map(key => redis.hgetall(key)))).filter(
       pod => pod.reportedAt && pod.bootId && freeSlots(pod) > 0 && freeMemory(pod) >= minFreeMemory
     )
+    // memory first: every exec needs it, while a slot is a port only a launch takes
     eligible.sort(
-      (a, b) => freeSlots(b) - freeSlots(a) || freeMemory(b) - freeMemory(a) || Number(a.sessions) - Number(b.sessions)
+      (a, b) => freeMemory(b) - freeMemory(a) || freeSlots(b) - freeSlots(a) || Number(a.sessions) - Number(b.sessions)
     )
     const pod = eligible[0]
     if (!pod) throw new HttpError(503, 'No worker is available')

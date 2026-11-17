@@ -17,7 +17,7 @@
         <%= m.status %>
       </span>
     </div>
-    <div class="mt-4 grid items-center gap-6 sm:grid-cols-3">
+    <div class="mt-4 grid items-center gap-6 sm:grid-cols-4">
       <dl class="grid grid-cols-[max-content_max-content] place-self-center gap-x-6 gap-y-1.5 text-sm">
         <dt class="text-gray-500">Address</dt>
         <dd class="font-mono"><%= m.address %></dd>
@@ -31,6 +31,7 @@
 
       <% [
         { label: 'Sandboxes', count: m.sandboxes, text: `${m.sandboxes ?? '—'} / ${m.sandboxSlots ?? '—'}` },
+        { label: 'Commands running', count: m.execs, text: `${m.execs ?? '—'}` },
         { label: 'Browser sessions', count: m.sessions, text: `${m.sessions ?? '—'}` },
       ].forEach(gauge => { %>
       <div class="flex flex-col items-center">
@@ -61,6 +62,19 @@
           <div class="mt-1 text-2xl font-semibold tabular-nums"><%= dial.text %></div>
           <div class="text-sm text-gray-500"><%= dial.detail %></div>
         </div>
+      </div>
+      <% }) %>
+    </div>
+
+    <div class="mt-4 grid gap-4 sm:grid-cols-2">
+      <% [
+        { label: 'Sandbox memory full', count: m.sandboxMemoryLimitHits, alert: 'text-amber-500', detail: 'times the memory the sandboxes share ran out, since the worker started' },
+        { label: 'Out-of-memory kills', count: m.sandboxOomKills, alert: 'text-red-500', detail: 'processes killed in sandboxes, since the worker started' },
+      ].forEach(counter => { %>
+      <div class="rounded-lg border border-gray-200 p-5">
+        <div class="text-xs uppercase tracking-wide text-gray-500"><%= counter.label %></div>
+        <div class="mt-1 text-2xl font-semibold tabular-nums <%= counter.count ? counter.alert : '' %>"><%= counter.count ?? '—' %></div>
+        <div class="text-sm text-gray-500"><%= counter.detail %></div>
       </div>
       <% }) %>
     </div>

@@ -18,6 +18,7 @@ import { api } from './routes/api/index.ts'
 import { mcp } from './routes/mcp/index.ts'
 import { web } from './routes/web/index.ts'
 import { workerRoutes } from './routes/workers/index.ts'
+import { HttpError } from './services/http-error.ts'
 import { registerWithServer } from './services/workers/registration.ts'
 
 declare module 'fastify' {
@@ -47,6 +48,12 @@ export const buildApp = async (config: Config) => {
   bindLogger(app.log)
 
   app.decorate('config', config)
+  // an unexpected error's message can hold internals, such as a failed query with its values, so only its log keeps it
+  app.setErrorHandler((err: Error & { statusCode?: number }, request, reply) => {
+    if (err instanceof HttpError || (err.statusCode !== undefined && err.statusCode < 500)) throw err
+    request.log.error({ err }, 'request failed')
+    return reply.status(500).send({ statusCode: 500, error: 'Internal Server Error', message: 'Internal Server Error' })
+  })
   // src/ in dev, dist/ in the bundle: drizzle/ sits next to both
   await app.register(db, { migrationsFolder: join(import.meta.dirname, '..', 'drizzle') })
   await app.register(redis)

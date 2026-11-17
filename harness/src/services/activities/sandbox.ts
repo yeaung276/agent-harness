@@ -10,7 +10,15 @@ export const createSandboxActivityService = ({ db }: { db: Db }) => ({
     command: string,
     { status, exitCode, output }: { status: 'succeeded' | 'failed'; exitCode: number | null; output: string }
   ) => {
-    await db.insert(sandboxActivities).values({ workspaceId, kind, command, status, exitCode, output })
+    // Postgres text can't hold \0, which binary output carries
+    await db.insert(sandboxActivities).values({
+      workspaceId,
+      kind,
+      command: command.replaceAll('\0', ''),
+      status,
+      exitCode,
+      output: output.replaceAll('\0', ''),
+    })
   },
 
   // a workspace's launches and execs, newest first, one page at a time

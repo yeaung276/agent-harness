@@ -390,6 +390,20 @@ describe('workspace page', () => {
     expect((await app.inject({ url: `/workspaces/${id}/activities`, cookies })).statusCode).toBe(404)
   })
 
+  test('an activity whose command or output holds a NUL byte is recorded without it', async () => {
+    const { cookies } = await signIn()
+    const { id } = await workspaceWithFiles(cookies, {})
+
+    await app.services.sandboxActivities.record(id, 'exec', 'printf "a\0b"', {
+      status: 'succeeded',
+      exitCode: 0,
+      output: '\0\x89PNG\0done',
+    })
+
+    const { items } = (await app.inject({ url: `/workspaces/${id}/activities`, cookies })).json()
+    expect(items[0]).toMatchObject({ command: 'printf "ab"', output: '\x89PNGdone' })
+  })
+
   test('logs are empty with nothing running, and an unknown workspace or a bad tail is refused', async () => {
     const { cookies } = await signIn()
     const { id } = await workspaceWithFiles(cookies, {})

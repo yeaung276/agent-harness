@@ -79,6 +79,9 @@ describe('machine detail page', () => {
       memoryLimitBytes: 2048 * 1024 * 1024,
       sandboxes: 5,
       sandboxSlots: 50,
+      execs: 4,
+      sandboxMemoryLimitHits: 17,
+      sandboxOomKills: 2,
       sessions: 3,
     })
 
@@ -91,6 +94,24 @@ describe('machine detail page', () => {
     expect(page.body).toContain('of 2048 MB')
     expect(page.body).toContain('5 / 50')
     expect(page.body).toContain('stroke-dasharray="10 100"')
+    expect(page.body).toContain('stroke-dasharray="8 100"')
+    expect(page.body).toMatch(/Sandbox memory full<\/div>\s*<div[^>]*text-amber-500">17</)
+    expect(page.body).toMatch(/Out-of-memory kills<\/div>\s*<div[^>]*text-red-500">2</)
+  })
+
+  test('shows a dash for stats a worker has not reported, and no alert for zero counts', async () => {
+    await app.db.insert(workersTable).values({ hostname: 'worker-old', address: '10.0.0.8:3000' })
+    await app.redis.hset('pods:worker-old', {
+      reportedAt: Date.now(),
+      sandboxes: 0,
+      sandboxSlots: 50,
+      sandboxOomKills: 0,
+    })
+
+    const page = await app.inject({ url: '/machines/worker-old', cookies: await signIn() })
+
+    expect(page.body).toMatch(/Sandbox memory full<\/div>\s*<div[^>]*">—</)
+    expect(page.body).toMatch(/Out-of-memory kills<\/div>\s*<div class="[^"]*tabular-nums ">0</)
   })
 
   test('answers 404 for an unknown worker', async () => {

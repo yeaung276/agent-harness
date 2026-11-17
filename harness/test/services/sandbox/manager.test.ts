@@ -383,6 +383,8 @@ describe('launch', () => {
       HOME: '/workspace/.home',
       PATH: `/workspace/.home/.local/bin:${process.env.PATH}`,
       PIP_ROOT_USER_ACTION: 'ignore',
+      NPM_CONFIG_PREFIX: '/workspace/.home/.local',
+      LANG: 'C.UTF-8',
       PORT: '3000',
       NODE_ENV: 'production',
       API_URL: 'https://b.example',
@@ -808,6 +810,16 @@ describe('stop', () => {
     await bringUp('ws-2')
 
     await manager.stop('ws-1')
+
+    expect(manager.count()).toBe(1)
+  })
+
+  test('leaves a crashed launch out of the count before the idle sweep drops it', async () => {
+    const crashed = await bringUp('ws-1')
+    await bringUp('ws-2')
+
+    crashed.crash()
+    await until(() => workspaces.statuses.get('ws-1') === 'stopped', 'stopped')
 
     expect(manager.count()).toBe(1)
   })

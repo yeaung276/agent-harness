@@ -13,7 +13,6 @@ import { createNetworkController, DNS_PORT, type NetworkRules, SANDBOX_RESOLV_CO
 const CGROUP_ROOT = '/sys/fs/cgroup'
 const CGROUP_CONTROLLERS = ['memory', 'cpu', 'pids']
 const WORKER_RESERVE_MB = 450
-// the sandbox runs as root with its HOME at /workspace/.home; whoami, getpass, git and ssh look the user up in passwd
 const ETC_FILES = [
   { source: join(tmpdir(), 'sandbox-resolv.conf'), target: '/etc/resolv.conf', content: SANDBOX_RESOLV_CONF },
   {
@@ -209,7 +208,8 @@ export const createSandbox = async (
     '--tmpfs',
     process.cwd(),
     '--',
-    'sh',
+    // agents write bash: [[ ]], brace expansion, source, pipefail
+    'bash',
     '-c',
     command,
   ]
@@ -234,7 +234,7 @@ export const createSandbox = async (
           ...bwrap,
         ]
 
-  const child = spawn('sh', args, {
+  const child = spawn('bash', args, {
     cwd: dir,
     env: {
       ...Object.fromEntries(

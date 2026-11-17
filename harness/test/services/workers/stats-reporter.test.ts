@@ -10,8 +10,11 @@ import { createStatsReporter } from '../../../src/services/workers/stats-reporte
 const redis = new RedisMock()
 
 const counts = { sandboxes: 2, sessions: 3 }
-const listeners: (() => void)[] = []
-const manager = (count: () => number) => ({ count, onChange: (listener: () => void) => void listeners.push(listener) })
+const listeners: ((event?: string) => void)[] = []
+const manager = (count: () => number) => ({
+  count,
+  onChange: (listener: (event?: string) => void) => void listeners.push(listener),
+})
 
 const startWorker = async () => {
   const app = Fastify()
@@ -74,5 +77,20 @@ describe('the stats reporter', () => {
 
     await app.close()
     Object.assign(counts, { sandboxes: 2, sessions: 3 })
+  })
+
+  test('reports how many execs are running', async () => {
+    listeners.length = 0
+    const app = await startWorker()
+    await Bun.sleep(50)
+
+    listeners[0]!('exec-start')
+    listeners[0]!('exec-start')
+    listeners[0]!('exec-end')
+    await Bun.sleep(50)
+
+    expect(await redis.hget('pods:worker-0', 'execs')).toBe('1')
+
+    await app.close()
   })
 })

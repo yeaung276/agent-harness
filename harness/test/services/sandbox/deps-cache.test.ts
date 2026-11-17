@@ -1,6 +1,6 @@
 import { afterAll, describe, expect, test } from 'bun:test'
 import { existsSync } from 'node:fs'
-import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 
@@ -10,6 +10,8 @@ const HOME_ENV = {
   HOME: '/workspace/.home',
   PATH: `/workspace/.home/.local/bin:${process.env.PATH}`,
   PIP_ROOT_USER_ACTION: 'ignore',
+  NPM_CONFIG_PREFIX: '/workspace/.home/.local',
+  LANG: 'C.UTF-8',
 }
 
 const root = await mkdtemp(join(tmpdir(), 'deps-cache-'))
@@ -45,6 +47,26 @@ describe('mounts', () => {
     expect(env).toEqual(HOME_ENV)
     expect(existsSync(mounts[0]!.source)).toBe(true)
     expect(existsSync(join(dir, 'node_modules'))).toBe(false)
+  })
+
+  test("gives the home a git identity once, keeping the agent's own after that", async () => {
+    const ws = await workspace({})
+    const gitconfig = join(root, 'deps', ws.id, '.home', '.gitconfig')
+
+    await cache.mounts(ws.id, ws.dir)
+    expect(await readFile(gitconfig, 'utf8')).toBe('[user]\n\tname = Sandbox\n\temail = sandbox@localhost\n')
+
+    await writeFile(gitconfig, '[user]\n\tname = Agent\n')
+    await cache.mounts(ws.id, ws.dir)
+    expect(await readFile(gitconfig, 'utf8')).toBe('[user]\n\tname = Agent\n')
+  })
+
+  test("makes the npm prefix's lib folder, which npx reads", async () => {
+    const ws = await workspace({})
+
+    await cache.mounts(ws.id, ws.dir)
+
+    expect(existsSync(join(root, 'deps', ws.id, '.home', '.local', 'lib'))).toBe(true)
   })
 
   test('picks the deps folder, and any env it needs, from the manifest it finds', async () => {
