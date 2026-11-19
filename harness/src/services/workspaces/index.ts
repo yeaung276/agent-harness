@@ -9,6 +9,7 @@ import type { Db } from '../../db/type.ts'
 import { logger } from '../../logger.ts'
 import { HttpError } from '../http-error.ts'
 import { depsCache } from '../sandbox/deps-cache.ts'
+import { parseRange } from '../sandbox/network-controller.ts'
 import { decrypt, encrypt } from './crypto.ts'
 import { ensureFile, ensureFolder, isBinary, isInside, walk } from './files.ts'
 import { checkZip, extractZip } from './zip.ts'
@@ -18,6 +19,16 @@ const log = logger('workspaces-service')
 // 1–63 lowercase letters, digits and -, not starting or ending with -
 export const NAME_PATTERN = '^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$'
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+const assertNetworkRuleValid = ({ allow = [], deny = [] }: typeof workspaces.$inferSelect.network) => {
+  const ADDRESS_LIKE = /^[\d./]+$|:/
+  const invalid = [...allow, ...deny].find(entry => ADDRESS_LIKE.test(entry) && !parseRange(entry))
+  if (invalid)
+    throw new HttpError(
+      400,
+      `${invalid} isn't an IPv4 address or range: use one like 10.0.0.5 or 10.0.0.0/8, with no port`
+    )
+}
 
 export const createWorkspaceService = ({
   db,
@@ -88,6 +99,7 @@ export const createWorkspaceService = ({
       if (!new RegExp(NAME_PATTERN).test(name))
         throw new HttpError(400, 'Use 1–63 lowercase letters, digits and -, not starting or ending with -')
       if (UUID.test(name)) throw new HttpError(400, "A name can't look like a uuid")
+      assertNetworkRuleValid(network)
 
       const created = await db.transaction(async tx => {
         const [row] = await tx
@@ -129,6 +141,7 @@ export const createWorkspaceService = ({
         network,
       }: { defaultEnv?: Record<string, string | null>; network?: typeof workspaces.$inferSelect.network }
     ) => {
+      if (network) assertNetworkRuleValid(network)
       await db.transaction(async tx => {
         const [row] = await tx
           .select({ defaultEnv: workspaces.defaultEnv })

@@ -10,5 +10,5 @@
       <textarea name="deny" rows="3" placeholder="*" class="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 font-mono text-sm"><%= it.deny ?? '' %></textarea>
     </label>
   </div>
-  <p class="mt-1 text-sm text-gray-500">One host per line: <code>*.example.com</code> for its subdomains, <code>*</code> for all. Deny blocks a name unless allow matches it, and a private address resolves only for a name allow matches.</p>
+  <p class="mt-1 text-sm text-gray-500">One host or IPv4 address per line: <code>*.example.com</code> for its subdomains, <code>*</code> for all, <code>10.0.0.5</code> or <code>10.0.0.0/8</code> for addresses. Deny blocks a name unless allow matches it, the most specific range decides an address, and a private address is reached only when allow matches its name or covers it.</p>
 </div>

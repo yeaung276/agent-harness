@@ -10,6 +10,7 @@ import RedisMock from 'ioredis-mock'
 import { loadConfig } from '../../../src/config.ts'
 import { depsCache } from '../../../src/services/sandbox/deps-cache.ts'
 import { createRedisLog, readRedisLog } from '../../../src/services/sandbox/log.ts'
+import { PRIVATE_RANGES } from '../../../src/services/sandbox/network-controller.ts'
 import {
   assertSandboxUsable,
   createSandbox,
@@ -593,6 +594,54 @@ describe.if(linux)('network', () => {
     )
 
     expect(output.split('\n').filter(Boolean)).toEqual(['dropped', 'reached', 'reached'])
+  }, 60_000)
+
+  test('reaches an address or range its allow list names with no lookup, allow winning over deny on the same address, and no other address', async () => {
+    const { output } = await run(
+      await workspace(),
+      [
+        'curl -s -m 5 -o /dev/null https://1.1.1.1/ && echo reached || echo dropped',
+        'curl -s -m 5 -o /dev/null https://1.0.0.1/ && echo reached || echo dropped',
+        'curl -s -m 5 -o /dev/null https://8.8.8.8/ && echo reached || echo dropped',
+      ].join('; '),
+      { network: { allow: ['1.1.1.1', '1.0.0.0/24'], deny: ['1.1.1.1'] } }
+    )
+
+    expect(output.split('\n').filter(Boolean)).toEqual(['reached', 'reached', 'dropped'])
+  }, 60_000)
+
+  test('lets the most specific range decide: 0.0.0.0/0 allowed and the private ranges denied reaches public addresses, and an address allowed inside a denied range, typed or looked up', async () => {
+    const { output } = await run(
+      await workspace(),
+      [
+        'curl -s -m 5 -o /dev/null https://1.1.1.1/ && echo reached || echo dropped',
+        `curl -s -m 3 http://${clusterIp}:5432/; echo " $?"`,
+        `curl -s -m 3 http://${clusterIp}.nip.io:5432/; echo " $?"`,
+        `curl -s -m 3 http://${podIp}:4003/ || echo blocked`,
+        `curl -s -m 3 http://${podIp}.nip.io:4003/; echo " $?"`,
+      ].join('; '),
+      { network: { allow: ['0.0.0.0/0', clusterIp], deny: PRIVATE_RANGES } }
+    )
+
+    expect(output.split('\n').filter(Boolean)).toEqual([
+      'reached',
+      'cluster service 0',
+      'cluster service 0',
+      'blocked',
+      ' 6',
+    ])
+  }, 60_000)
+
+  test("doesn't resolve a name whose addresses are in a denied range, unless its allow list names it", async () => {
+    const lookup = 'curl -s -m 5 -o /dev/null https://one.one.one.one/; echo $?'
+
+    const denied = await run(await workspace(), lookup, { network: { deny: ['1.0.0.0/8'] } })
+    const named = await run(await workspace(), lookup, {
+      network: { deny: ['1.0.0.0/8'], allow: ['one.one.one.one'] },
+    })
+
+    expect(denied.output.trim()).toBe('6')
+    expect(named.output.trim()).toBe('0')
   }, 60_000)
 
   test("reaches a private address only for a name its allow list names, and 127.0.0.1 is the sandbox's own", async () => {

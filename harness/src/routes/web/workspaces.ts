@@ -21,7 +21,7 @@ const PAGE_SIZE = 20
 
 const date = new Intl.DateTimeFormat('en', { dateStyle: 'medium' })
 
-// the network boxes take one host pattern per line; commas and spaces separate them too
+// the network boxes take one host pattern or IPv4 address or range per line; commas and spaces separate them too
 const hosts = (text = '') => text.split(/[\s,]+/).filter(Boolean)
 
 export const workspaces: FastifyPluginAsyncTypebox = async app => {

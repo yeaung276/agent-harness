@@ -1,6 +1,6 @@
 import { once } from 'node:events'
 import { existsSync, readFileSync } from 'node:fs'
-import { type AddressInfo, BlockList } from 'node:net'
+import { type AddressInfo, BlockList, isIPv4 } from 'node:net'
 
 import { Packet, UDPClient, createTCPServer, createUDPServer } from 'dns2'
 
@@ -8,14 +8,27 @@ import { logger } from '../../logger.ts'
 
 const log = logger('network-controller')
 
-export const DNS_PORT = 53
-
 const UPSTREAM_TIMEOUT_MS = 5000
 
 const resolvConf = existsSync('/etc/resolv.conf') ? readFileSync('/etc/resolv.conf', 'utf8') : ''
+
 const UPSTREAM = resolvConf.match(/^nameserver\s+(\d+\.\d+\.\d+\.\d+)\s*$/m)?.[1]
-// asks again over TCP when the pod's nameserver says the answer was truncated
+
 const lookUp = UDPClient({ dns: UPSTREAM, timeout: UPSTREAM_TIMEOUT_MS })
+
+export type NetworkRules = { allow?: string[]; deny?: string[] }
+
+export const DNS_PORT = 53
+
+export const PRIVATE_RANGES = [
+  '0.0.0.0/8',
+  '10.0.0.0/8',
+  '100.64.0.0/10',
+  '127.0.0.0/8',
+  '169.254.0.0/16',
+  '172.16.0.0/12',
+  '192.168.0.0/16',
+]
 
 // a sandbox asks its controller on 127.0.0.1, where pasta maps port 53, and keeps the pod's search domains
 export const SANDBOX_RESOLV_CONF = `${[
@@ -24,16 +37,9 @@ export const SANDBOX_RESOLV_CONF = `${[
 ].join('\n')}\n`
 
 const privateAddresses = new BlockList()
-for (const [address, prefix] of [
-  ['0.0.0.0', 8],
-  ['10.0.0.0', 8],
-  ['100.64.0.0', 10],
-  ['127.0.0.0', 8],
-  ['169.254.0.0', 16],
-  ['172.16.0.0', 12],
-  ['192.168.0.0', 16],
-] as const) {
-  privateAddresses.addSubnet(address, prefix)
+for (const range of PRIVATE_RANGES) {
+  const [address = '', prefix] = range.split('/')
+  privateAddresses.addSubnet(address, Number(prefix))
 }
 
 const matchesAny = (host: string, patterns: string[]) =>
@@ -42,15 +48,38 @@ const matchesAny = (host: string, patterns: string[]) =>
     return name === '*' || name === host || (name.startsWith('*.') && host.endsWith(name.slice(1)))
   })
 
-export type NetworkRules = { allow?: string[]; deny?: string[] }
+const toNumber = (address: string) => address.split('.').reduce((value, octet) => value * 256 + Number(octet), 0)
+
+// an IPv4 address or CIDR range as its first address and prefix; any other entry is a name and gives null
+export const parseRange = (entry: string) => {
+  const [address = '', bits = '32', ...rest] = entry.split('/')
+  const prefix = Number(bits)
+  if (rest.length || !isIPv4(address) || !/^\d{1,2}$/.test(bits) || prefix > 32) return null
+  const mask = prefix === 0 ? 0 : -1 << (32 - prefix)
+  return { start: (toNumber(address) & mask) >>> 0, mask, prefix }
+}
+
+// most specific first and allow before deny on the same range, so the first rule that contains an address decides it
+export const addressRules = ({ allow = [], deny = [] }: NetworkRules) =>
+  [...allow.map(entry => ({ entry, allow: true })), ...deny.map(entry => ({ entry, allow: false }))]
+    .flatMap(({ entry, allow }) => {
+      const range = parseRange(entry)
+      if (!range) return []
+      const first = [24, 16, 8, 0].map(shift => (range.start >>> shift) & 255).join('.')
+      return [{ ...range, allow, cidr: `${first}/${range.prefix}` }]
+    })
+    .sort((a, b) => b.prefix - a.prefix || Number(b.allow) - Number(a.allow))
 
 export const createNetworkController = async (
   { allow = [], deny = [] }: NetworkRules,
   openAddresses: (addresses: string[]) => Promise<void>
 ) => {
+  const rules = addressRules({ allow, deny })
   const opened = new Map<string, Promise<void>>()
 
-  // one nft run per answer with new addresses; an address already added, or being added, starts nothing
+  const reachable = (address: string) =>
+    rules.find(rule => (toNumber(address) & rule.mask) >>> 0 === rule.start)?.allow ?? !privateAddresses.check(address)
+
   const open = (addresses: string[]) => {
     const fresh = addresses.filter(address => !opened.has(address))
     if (fresh.length) {
@@ -96,7 +125,7 @@ export const createNetworkController = async (
     const addresses = answered.answers.flatMap(record =>
       record.type === Packet.TYPE.A && record.address ? [record.address] : []
     )
-    const refused = addresses.find(address => privateAddresses.check(address) && !matchesAny(name, allow))
+    const refused = addresses.find(address => !reachable(address) && !matchesAny(name, allow))
     if (refused) {
       log.warn(
         { name, address: refused },

@@ -173,13 +173,14 @@ describe.if(linux)('a confined chromium', () => {
     squatter.stop(true)
   }, 60_000)
 
-  test('reaches the internet and the workspace launches, and nothing else on the pod or the cluster, even without the network rule', async () => {
+  test('reaches the internet by typed address and by name, and the workspace launches, and nothing else on the pod or the cluster, even without the network rule', async () => {
     serve('127.0.0.1', 4002, 'internal api')
     serve('127.0.0.1', 4200, 'other service')
     serve(clusterIp, 5644, 'cluster service')
 
     const page = await (await (await started()).connect()).newPage()
 
+    expect(await visit(page, 'https://1.1.1.1/')).toBe(200)
     expect(await visit(page, 'https://registry.npmjs.org/')).toBe(200)
     expect(await visit(page, LAUNCH)).toBe(200)
     expect(await visit(page, 'http://127.0.0.1:4002/')).toBe('blocked')

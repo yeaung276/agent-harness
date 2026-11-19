@@ -6,13 +6,16 @@ import { createInterface } from 'node:readline'
 import { chromium as playwright } from 'playwright-core'
 
 import { logger } from '../../logger.ts'
+import { PRIVATE_RANGES } from '../sandbox/network-controller.ts'
 import { type Sandbox, createSandbox } from '../sandbox/sandbox.ts'
 
 const log = logger('chromium')
 
-export const CDP_PORT = 9222
-
 const READY_TIMEOUT_MS = 30_000
+
+const NETWORK = { allow: ['0.0.0.0/0'], deny: PRIVATE_RANGES }
+
+export const CDP_PORT = 9222
 
 export const createChromium = ({
   mode,
@@ -68,6 +71,7 @@ export const createChromium = ({
         pidsMax: 1024,
         command: `exec ${args.map(arg => `'${arg}'`).join(' ')} 2>&1`,
         env: {},
+        network: NETWORK,
         ports: { inside: CDP_PORT, host: CDP_PORT },
         outboundPorts: `${portMin}-${portMax}`,
         readyTimeoutMs: READY_TIMEOUT_MS,

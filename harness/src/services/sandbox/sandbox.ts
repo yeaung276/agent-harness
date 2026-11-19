@@ -8,7 +8,13 @@ import { promisify } from 'node:util'
 import type { Config } from '../../config.ts'
 import type { Mount } from './deps-cache.ts'
 import { type Log, createLog } from './log.ts'
-import { createNetworkController, DNS_PORT, type NetworkRules, SANDBOX_RESOLV_CONF } from './network-controller.ts'
+import {
+  addressRules,
+  createNetworkController,
+  DNS_PORT,
+  type NetworkRules,
+  SANDBOX_RESOLV_CONF,
+} from './network-controller.ts'
 
 const CGROUP_ROOT = '/sys/fs/cgroup'
 const CGROUP_CONTROLLERS = ['memory', 'cpu', 'pids']
@@ -145,7 +151,11 @@ export const createSandbox = async (
             'for fd in /proc/$$/fd/*; do fd=${fd##*/}; if [ "$fd" -gt 2 ]; then exec {fd}>&-; fi; done; exec "$@"',
           'bash',
           'table inet sandbox { set allowed { type ipv4_addr; }; ' +
-            'chain output { type filter hook output priority 0; policy drop; oifname "lo" accept; ip daddr @allowed accept; }; }',
+            'chain output { type filter hook output priority 0; policy drop; oifname "lo" accept; ip daddr @allowed accept; ' +
+            addressRules(network ?? {})
+              .map(rule => `ip daddr ${rule.cidr} ${rule.allow ? 'accept' : 'drop'}; `)
+              .join('') +
+            '}; }',
         ]
       : [
           'sh',
@@ -208,7 +218,6 @@ export const createSandbox = async (
     '--tmpfs',
     process.cwd(),
     '--',
-    // agents write bash: [[ ]], brace expansion, source, pipefail
     'bash',
     '-c',
     command,
