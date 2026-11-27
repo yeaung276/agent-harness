@@ -4,6 +4,7 @@ import { type Static, Type } from 'typebox'
 import { HttpError } from '../../services/http-error.ts'
 import { forward } from './forward.ts'
 import {
+  ActedContent,
   BrowserSession,
   ClickBody,
   CreateBody,
@@ -77,27 +78,27 @@ export const browser: FastifyPluginAsyncTypebox = async app => {
 
   app.post(
     '/browser/:id/click',
-    { schema: { params: SessionParams, body: ClickBody, response: { 200: PageContent } } },
+    { schema: { params: SessionParams, body: ClickBody, response: { 200: ActedContent } } },
     async request => {
       const { id } = request.params
 
       return (await forward(app, await workerOf(id), '/internal/chromium/click', {
         ...request.body,
         sessionId: id,
-      })) as Static<typeof PageContent>
+      })) as Static<typeof ActedContent>
     }
   )
 
   app.post(
     '/browser/:id/type',
-    { schema: { params: SessionParams, body: TypeBody, response: { 200: PageContent } } },
+    { schema: { params: SessionParams, body: TypeBody, response: { 200: ActedContent } } },
     async request => {
       const { id } = request.params
 
       return (await forward(app, await workerOf(id), '/internal/chromium/type', {
         ...request.body,
         sessionId: id,
-      })) as Static<typeof PageContent>
+      })) as Static<typeof ActedContent>
     }
   )
 

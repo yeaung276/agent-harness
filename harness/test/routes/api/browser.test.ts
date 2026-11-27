@@ -224,6 +224,21 @@ describe('a call on a session', () => {
     expect(res.json().message).toBe('No element on the page has this ref')
   })
 
+  test('a click or type answers the page after it with its error', async () => {
+    const id = await openSession()
+    answer = () => Response.json({ ...page, error: 'waitFor timed out' })
+
+    for (const [path, body] of [
+      ['click', { ref: 7 }],
+      ['type', { ref: 7, text: 'boots' }],
+    ] as const) {
+      const res = await post(`/api/v1/browser/${id}/${path}`, body)
+
+      expect(res.statusCode).toBe(200)
+      expect(res.json()).toEqual({ ...page, error: 'waitFor timed out' })
+    }
+  })
+
   test('a screenshot answers 201 with its PNG and its path', async () => {
     const id = await openSession(workspaceId)
 

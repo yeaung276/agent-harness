@@ -43,12 +43,14 @@ export const browserTools = (browser: Browser): StructuredTool[] => {
     }),
     tool(({ ref, waitFor }) => attempt(() => browser.click(ref, { waitFor })), {
       name: 'browser_click',
-      description: 'Click the element with this ref and return the page after.',
+      description:
+        'Click the element with this ref and return the page after. With waitFor, it waits after the click until the page shows it; error says when it never did.',
       schema: z.object({ ref: z.number().int().describe('A ref from the last page read'), waitFor: WaitFor }),
     }),
     tool(({ ref, text, submit, waitFor }) => attempt(() => browser.type(ref, text, { submit, waitFor })), {
       name: 'browser_type',
-      description: 'Type into the field with this ref and return the page after.',
+      description:
+        'Type into the field with this ref, or pick the option with this text in a select, and return the page after. With waitFor, it waits after typing until the page shows it; error says when it never did.',
       schema: z.object({
         ref: z.number().int().describe('A ref from the last page read'),
         text: z.string(),

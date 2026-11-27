@@ -10,7 +10,13 @@ import {
   TypeBody as WorkerTypeBody,
 } from '../../../services/chromium/routes/schema.ts'
 
-export { NavigatedContent, PageContent, RunResult, Screenshot } from '../../../services/chromium/routes/schema.ts'
+export {
+  ActedContent,
+  NavigatedContent,
+  PageContent,
+  RunResult,
+  Screenshot,
+} from '../../../services/chromium/routes/schema.ts'
 
 const Id = Type.String({ format: 'uuid' })
 // a Date in code, an ISO string on the wire

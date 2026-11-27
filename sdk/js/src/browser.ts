@@ -29,6 +29,10 @@ export interface NavigatedPage extends Page {
   error: string | null
 }
 
+export interface ActedPage extends Page {
+  error: string | null
+}
+
 export interface RunResult {
   result: unknown
   error: string | null
@@ -64,11 +68,11 @@ export class Browser {
     return this.#call('read', options)
   }
 
-  click(ref: number, options: { waitFor?: WaitFor } = {}): Promise<Page> {
+  click(ref: number, options: { waitFor?: WaitFor } = {}): Promise<ActedPage> {
     return this.#call('click', { ref, ...options })
   }
 
-  type(ref: number, text: string, options: { submit?: boolean; waitFor?: WaitFor } = {}): Promise<Page> {
+  type(ref: number, text: string, options: { submit?: boolean; waitFor?: WaitFor } = {}): Promise<ActedPage> {
     return this.#call('type', { ref, text, ...options })
   }
 

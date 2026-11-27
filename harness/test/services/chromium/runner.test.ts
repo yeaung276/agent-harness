@@ -5,7 +5,13 @@ import { join } from 'node:path'
 import type { Browser, BrowserContext } from 'playwright-core'
 
 import { type Chromium, createChromium } from '../../../src/services/chromium/chromium.ts'
-import { type NavigatedContent, ops, type PageContent, type PageRef } from '../../../src/services/chromium/ops.ts'
+import {
+  type ActedContent,
+  type NavigatedContent,
+  ops,
+  type PageContent,
+  type PageRef,
+} from '../../../src/services/chromium/ops.ts'
 import { createRunner, type Runner } from '../../../src/services/chromium/runner.ts'
 import { setupCgroups } from '../../../src/services/sandbox/sandbox.ts'
 
@@ -168,8 +174,25 @@ describe.if(linux)('ops', () => {
       <form action="/search"><input name="q" placeholder="Search"></form>
       <input type="password" name="pw" value="hunter2" aria-label="Password">
       <input type="hidden" name="token" value="t">
-      <a href="/secret" style="display:none">Hidden</a>`,
+      <a href="/secret" style="display:none">Hidden</a>
+      <div aria-hidden="true"><button>Behind</button></div>
+      <div inert><button>Inert</button></div>`,
     '/orders': `<title>Orders</title><p>No orders yet</p><a href="/">Home</a>`,
+    '/framed': `<title>Framed</title>
+      <a href="/orders">Top</a>
+      <iframe src="/inner"></iframe>
+      <iframe src="/inner" style="display:none"></iframe>`,
+    '/inner': `<title>Inner</title><p>Inside</p><button onclick="this.textContent = 'Pressed'">Press</button>`,
+    '/late-frame': `<title>Late frame</title><iframe src="/late"></iframe>`,
+    '/twice': `<title>Twice</title>
+      <p class="ready" style="display:none">Ready</p>
+      <p class="ready">Ready</p>`,
+    '/form': `<title>Form</title>
+      <input aria-label="Name" onchange="document.getElementById('log').textContent += 'name changed '">
+      <input aria-label="City" aria-expanded="true" onchange="document.getElementById('log').textContent += 'city changed '">
+      <select aria-label="Size"><option value="s">Small</option><option value="l">Large</option></select>
+      <button onclick="setTimeout(() => document.body.insertAdjacentHTML('beforeend', '<p id=done>Done</p>'), 1000)">Later</button>
+      <p id="log"></p>`,
     '/long': `<title>Long</title><div style="height:3000px">${'word '.repeat(5000)}</div>`,
     '/late': `<title>Late</title>
       <a href="#">Orders</a>
@@ -253,7 +276,7 @@ describe.if(linux)('ops', () => {
     expect(result).toMatchObject({ title: 'Not found', status: 404, error: null })
   }, 60_000)
 
-  test("read lists what can be acted on, skips what can't be seen, and never returns a password", async () => {
+  test("read lists what can be acted on, skips what can't be seen or sits in aria-hidden or inert, and never returns a password", async () => {
     const { op } = await session()
     await op(ops.navigate('/', APP_PORT))
 
@@ -272,6 +295,28 @@ describe.if(linux)('ops', () => {
     const { result } = await op<PageContent>(ops.read(100))
 
     expect(result.text).toHaveLength(100)
+  }, 60_000)
+
+  test("read numbers the refs of the page and its frames in one count, and leaves out a frame that can't be seen", async () => {
+    const { op } = await session()
+    await op(ops.navigate('/framed', APP_PORT))
+
+    const { result } = await op<PageContent>(ops.read())
+
+    expect(result.refs.map(r => [r.ref, r.name])).toEqual([
+      [1, 'Top'],
+      [2, 'Press'],
+    ])
+    expect(result.text.match(/Inside/g)).toHaveLength(1)
+  }, 60_000)
+
+  test('click acts on a ref inside a frame', async () => {
+    const { op } = await session()
+    const framed = await op<NavigatedContent>(ops.navigate('/framed', APP_PORT))
+
+    const { result } = await op<ActedContent>(ops.click(named(framed.result.refs, 'Press').ref))
+
+    expect(named(result.refs, 'Pressed').ref).toBe(2)
   }, 60_000)
 
   test('click follows a link and returns the new page, numbered afresh', async () => {
@@ -317,6 +362,32 @@ describe.if(linux)('ops', () => {
 
     const odd = await op<NavigatedContent>(ops.navigate("/orders?x=');process.exit(1);('", APP_PORT))
     expect(odd.result).toMatchObject({ title: 'Orders', status: 200 })
+  }, 60_000)
+
+  test("type fires the field's change handlers before it returns, but keeps focus on a field whose suggestions are open", async () => {
+    const { page, op } = await session()
+    const form = await op<NavigatedContent>(ops.navigate('/form', APP_PORT))
+
+    const name = await op<ActedContent>(ops.type(named(form.result.refs, 'Name').ref, 'Ada', false))
+    expect(name.result.text).toContain('name changed')
+
+    const city = await op<ActedContent>(ops.type(named(name.result.refs, 'City').ref, 'Oslo', false))
+    expect(city.result.text).not.toContain('city changed')
+    expect(await page.locator(':focus').getAttribute('aria-label')).toBe('City')
+  }, 60_000)
+
+  test('read names a select by its label, and type picks its option by text or value', async () => {
+    const { op } = await session()
+    const form = await op<NavigatedContent>(ops.navigate('/form', APP_PORT))
+    const size = (refs: PageRef[]) => refs.find(r => r.tag === 'select') as PageRef
+
+    expect(size(form.result.refs).name).toBe('Size')
+
+    const byText = await op<ActedContent>(ops.type(size(form.result.refs).ref, 'Large', false))
+    expect(size(byText.result.refs).value).toBe('l')
+
+    const byValue = await op<ActedContent>(ops.type(size(byText.result.refs).ref, 's', false))
+    expect(size(byValue.result.refs).value).toBe('s')
   }, 60_000)
 
   test('screenshot returns a PNG, of the whole page when asked', async () => {
@@ -374,31 +445,59 @@ describe.if(linux)('ops', () => {
     expect(result.text).toContain('Loaded')
   }, 60_000)
 
-  test('click waits for waitFor before it clicks', async () => {
+  test('read waits for any element that shows, not only the first that matches', async () => {
     const { op } = await session()
-    const late = await op<NavigatedContent>(ops.navigate('/late', APP_PORT))
+    await op(ops.navigate('/twice', APP_PORT))
 
-    const { result } = await op<PageContent>(ops.click(named(late.result.refs, 'Orders').ref, { selector: '#late' }))
+    const ran = await op<PageContent>(ops.read(undefined, { selector: '.ready', text: 'Ready', timeoutMs: 2000 }))
 
-    expect(result).toMatchObject({ title: 'Orders', url: `${APP}/orders` })
+    expect(ran.error).toBeNull()
+    expect(ran.result.text).toContain('Ready')
   }, 60_000)
 
-  test('click, type and screenshot whose waitFor runs out say wait_for_timed_out and do nothing', async () => {
-    const { page, op } = await session()
-    const home = await op<NavigatedContent>(ops.navigate('/', APP_PORT))
+  test('read waits for waitFor inside a frame', async () => {
+    const { op } = await session()
+    await op(ops.navigate('/late-frame', APP_PORT))
+
+    const { result } = await op<PageContent>(ops.read(undefined, { selector: '#late', text: 'Loaded' }))
+
+    expect(result.text).toContain('Loaded')
+  }, 60_000)
+
+  test('click waits for waitFor after it clicks, and returns the page that shows it', async () => {
+    const { op } = await session()
+    const form = await op<NavigatedContent>(ops.navigate('/form', APP_PORT))
+
+    const early = await op<ActedContent>(ops.click(named(form.result.refs, 'Later').ref))
+    expect(early.result).toMatchObject({ error: null })
+    expect(early.result.text).not.toContain('Done')
+
+    const again = await op<NavigatedContent>(ops.navigate('/form', APP_PORT))
+    const waited = await op<ActedContent>(ops.click(named(again.result.refs, 'Later').ref, { selector: '#done' }))
+    expect(waited.result).toMatchObject({ error: null })
+    expect(waited.result.text).toContain('Done')
+  }, 60_000)
+
+  test('click and type whose waitFor runs out still act, and say so on the page after', async () => {
+    const { op } = await session()
     const never = { selector: '#never', timeoutMs: 1000 }
 
-    expect(await op(ops.click(named(home.result.refs, 'Orders').ref, never))).toMatchObject({
-      result: null,
-      error: 'wait_for_timed_out',
-    })
-    expect(await op(ops.type(named(home.result.refs, 'q').ref, 'boots', true, never))).toMatchObject({
-      result: null,
-      error: 'wait_for_timed_out',
-    })
+    const home = await op<NavigatedContent>(ops.navigate('/', APP_PORT))
+    const clicked = await op<ActedContent>(ops.click(named(home.result.refs, 'Orders').ref, never))
+    expect(clicked).toMatchObject({ error: null, result: { title: 'Orders', error: 'waitFor timed out' } })
+
+    const back = await op<NavigatedContent>(ops.navigate('/', APP_PORT))
+    const typed = await op<ActedContent>(ops.type(named(back.result.refs, 'q').ref, 'boots', true, never))
+    expect(typed).toMatchObject({ error: null, result: { title: 'Search', error: 'waitFor timed out' } })
+  }, 60_000)
+
+  test('read and screenshot whose waitFor runs out say wait_for_timed_out', async () => {
+    const { op } = await session()
+    await op(ops.navigate('/', APP_PORT))
+    const never = { selector: '#never', timeoutMs: 1000 }
+
+    expect(await op(ops.read(undefined, never))).toMatchObject({ result: null, error: 'wait_for_timed_out' })
     expect(await op(ops.screenshot(false, never))).toMatchObject({ result: null, error: 'wait_for_timed_out' })
-    expect(page.url()).toBe(`${APP}/`)
-    expect(await page.locator('input[name="q"]').inputValue()).toBe('')
   }, 60_000)
 })
 

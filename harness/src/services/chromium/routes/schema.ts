@@ -32,6 +32,11 @@ export const NavigatedContent = Type.Object({
   error: Type.Union([Type.String(), Type.Null()]),
 })
 
+export const ActedContent = Type.Object({
+  ...PageContent.properties,
+  error: Type.Union([Type.String(), Type.Null()]),
+})
+
 export const Session = Type.Object({
   id: Id,
   workspaceId: Type.Union([Id, Type.Null()]),

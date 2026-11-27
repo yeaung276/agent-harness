@@ -11,7 +11,7 @@ import type { createPlacementService } from '../placement/index.ts'
 import type { createSandboxManager } from '../sandbox/manager.ts'
 import type { createWorkspaceService } from '../workspaces/index.ts'
 import { createChromium } from './chromium.ts'
-import { type NavigatedContent, ops, type PageContent, type WaitFor } from './ops.ts'
+import { type ActedContent, type NavigatedContent, ops, type PageContent, type WaitFor } from './ops.ts'
 import { createRunner } from './runner.ts'
 import { createSession, type Session, WORKSPACE_ORIGIN } from './session.ts'
 
@@ -213,11 +213,10 @@ export const createChromiumManager = ({
       await activities.record(sessionId, 'click', `ref ${ref}`, ran)
 
       if (ran.timedOut) throw new HttpError(504, "The call didn't finish in time")
-      if (ran.error === 'wait_for_timed_out') throw new HttpError(504, "What waitFor names didn't show up in time")
       if (ran.error === 'ref_not_found') throw new HttpError(404, 'No element on the page has this ref')
       if (ran.error !== null) throw new HttpError(400, ran.error)
 
-      return cleanUrls(ran.result as PageContent)
+      return cleanUrls(ran.result as ActedContent)
     },
 
     type: async (sessionId: string, ref: number, text: string, submit: boolean, waitFor?: WaitFor) => {
@@ -229,11 +228,10 @@ export const createChromiumManager = ({
       await activities.record(sessionId, 'type', `ref ${ref}: ${text}`, ran)
 
       if (ran.timedOut) throw new HttpError(504, "The call didn't finish in time")
-      if (ran.error === 'wait_for_timed_out') throw new HttpError(504, "What waitFor names didn't show up in time")
       if (ran.error === 'ref_not_found') throw new HttpError(404, 'No element on the page has this ref')
       if (ran.error !== null) throw new HttpError(400, ran.error)
 
-      return cleanUrls(ran.result as PageContent)
+      return cleanUrls(ran.result as ActedContent)
     },
 
     screenshot: async (sessionId: string, fullPage: boolean, waitFor?: WaitFor) => {

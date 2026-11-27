@@ -327,6 +327,17 @@ describe('a call', () => {
     expect(await manager.run(id, 'throw 1', 30_000)).toEqual({ result: null, error: 'boom', durationMs: 1 })
   })
 
+  test('answers a click or type whose wait ran out with the page after it and its error, not a 504', async () => {
+    const { id } = await manager.create('user-1', { workspaceId: null, record: false })
+    const page = { title: 'Orders', url: 'https://example.com/orders', text: '', refs: [], error: 'waitFor timed out' }
+
+    next.push(ok(page))
+    expect(await manager.click(id, 1, { text: 'x', timeoutMs: 1 })).toEqual(page)
+
+    next.push(ok(page))
+    expect(await manager.type(id, 1, 'boots', false, { text: 'x', timeoutMs: 1 })).toEqual(page)
+  })
+
   test('a call past its time answers 504 and keeps the tab; a run answers in its body', async () => {
     const { id } = await manager.create('user-1', { workspaceId: null, record: false })
 

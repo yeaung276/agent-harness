@@ -2,6 +2,7 @@ import type { FastifyPluginAsyncTypebox } from '@fastify/type-provider-typebox'
 import { Type } from 'typebox'
 
 import {
+  ActedContent,
   ClickBody,
   CloseBody,
   CreateBody,
@@ -37,13 +38,13 @@ export const chromiumRoutes: FastifyPluginAsyncTypebox = async app => {
     return app.chromium.read(sessionId, maxChars, waitFor)
   })
 
-  app.post('/click', { schema: { body: ClickBody, response: { 200: PageContent } } }, async request => {
+  app.post('/click', { schema: { body: ClickBody, response: { 200: ActedContent } } }, async request => {
     const { sessionId, ref, waitFor } = request.body
 
     return app.chromium.click(sessionId, ref, waitFor)
   })
 
-  app.post('/type', { schema: { body: TypeBody, response: { 200: PageContent } } }, async request => {
+  app.post('/type', { schema: { body: TypeBody, response: { 200: ActedContent } } }, async request => {
     const { sessionId, ref, text, submit, waitFor } = request.body
 
     return app.chromium.type(sessionId, ref, text, submit, waitFor)
