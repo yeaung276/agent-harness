@@ -219,7 +219,7 @@ const page = await sandbox.browser.navigate(&quot;/&quot;)</code></pre>
   text: string
   refs: { ref: number; tag: string; role: string | null; name: string; value: string; placeholder: string; href: string }[]
 }</code></pre>
-          <p>Each takes a <code>waitFor</code>, and <code>navigate</code> an <code>until</code>: <code>{ selector?, text?, timeoutMs? }</code>. The call waits until an element matching <code>selector</code> is visible and <code>text</code> is on the page, up to <code>timeoutMs</code> (10 seconds by default, 60 at most), then acts. When the wait runs out it throws <code>TIMEOUT</code> without acting.</p>
+          <p>Each takes a <code>waitFor</code>, and <code>navigate</code> an <code>until</code>: <code>{ selector?, text?, timeoutMs? }</code>. The call waits until an element matching <code>selector</code> is visible and <code>text</code> is on the page or in a frame on it, up to <code>timeoutMs</code> (10 seconds by default, 60 at most). <code>navigate</code>, <code>click</code> and <code>type</code> wait after they act; when the wait runs out they resolve with the page and <code>error: &quot;waitFor timed out&quot;</code>. <code>read</code> and <code>screenshot</code> wait before they act; when the wait runs out they throw <code>TIMEOUT</code>.</p>
 
           <h3>browser.navigate()</h3>
           <pre class="schema"><code>navigate(url: string, options?: { until?: WaitFor }): Promise&lt;Page &amp; { status: number | null; error: string | null }&gt;</code></pre>
@@ -229,14 +229,15 @@ const page = await sandbox.browser.navigate(&quot;/&quot;)</code></pre>
           <pre class="schema"><code>read(options?: { maxChars?: number; waitFor?: WaitFor }): Promise&lt;Page&gt;</code></pre>
 
           <h3>browser.click()</h3>
-          <pre class="schema"><code>click(ref: number, options?: { waitFor?: WaitFor }): Promise&lt;Page&gt;</code></pre>
+          <pre class="schema"><code>click(ref: number, options?: { waitFor?: WaitFor }): Promise&lt;Page &amp; { error: string | null }&gt;</code></pre>
+          <p>Clicks the element and resolves with the page after it. <code>waitFor</code> running out resolves too, with <code>error: &quot;waitFor timed out&quot;</code>.</p>
 
           <h3>browser.type()</h3>
-          <pre class="schema"><code>type(ref: number, text: string, options?: { submit?: boolean; waitFor?: WaitFor }): Promise&lt;Page&gt;</code></pre>
-          <p>Types into the field. <code>submit</code> presses Enter after.</p>
-          <pre class="schema"><code>let page = await browser.navigate(&quot;/login&quot;)
+          <pre class="schema"><code>type(ref: number, text: string, options?: { submit?: boolean; waitFor?: WaitFor }): Promise&lt;Page &amp; { error: string | null }&gt;</code></pre>
+          <p>Types into the field, or picks the option with that text or value in a <code>select</code>. <code>submit</code> presses Enter after; without it, the field loses focus, so the page's <code>change</code> and <code>blur</code> handlers run, unless its suggestions are open (<code>aria-expanded=&quot;true&quot;</code>). <code>waitFor</code> running out resolves, with <code>error: &quot;waitFor timed out&quot;</code>.</p>
+          <pre class="schema"><code>const page = await browser.navigate(&quot;/login&quot;)
 const email = page.refs.find(r =&gt; r.name === &quot;Email&quot;)!
-page = await browser.type(email.ref, &quot;ada@example.com&quot;, { submit: true, waitFor: { text: &quot;Welcome&quot; } })</code></pre>
+const welcome = await browser.type(email.ref, &quot;ada@example.com&quot;, { submit: true, waitFor: { text: &quot;Welcome&quot; } })</code></pre>
 
           <h3 id="browser-screenshot">browser.screenshot()</h3>
           <pre class="schema"><code>screenshot(options?: { fullPage?: boolean; waitFor?: WaitFor }): Promise&lt;{ png: Uint8Array; path: string | null }&gt;</code></pre>

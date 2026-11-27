@@ -1487,7 +1487,7 @@
   </div>
 </details>
 <details class="route">
-  <summary><span class="method post">POST</span><code class="route-path">/internal/chromium/click</code><span class="route-summary">Wait for waitFor, then click the element with a ref</span></summary>
+  <summary><span class="method post">POST</span><code class="route-path">/internal/chromium/click</code><span class="route-summary">Click the element with a ref, then wait for waitFor</span></summary>
   <div class="route-body">
 <h4>Request body</h4>
 <pre class="schema"><code>{
@@ -1536,7 +1536,8 @@
     &quot;title&quot;,
     &quot;url&quot;,
     &quot;text&quot;,
-    &quot;refs&quot;
+    &quot;refs&quot;,
+    &quot;error&quot;
   ],
   &quot;properties&quot;: {
     &quot;title&quot;: {
@@ -1592,6 +1593,16 @@
           }
         }
       }
+    },
+    &quot;error&quot;: {
+      &quot;anyOf&quot;: [
+        {
+          &quot;type&quot;: &quot;string&quot;
+        },
+        {
+          &quot;type&quot;: &quot;null&quot;
+        }
+      ]
     }
   }
 }</code></pre>
@@ -1600,7 +1611,7 @@
   </div>
 </details>
 <details class="route">
-  <summary><span class="method post">POST</span><code class="route-path">/internal/chromium/type</code><span class="route-summary">Wait for waitFor, then type into the element with a ref, then submit if asked</span></summary>
+  <summary><span class="method post">POST</span><code class="route-path">/internal/chromium/type</code><span class="route-summary">Type into the element with a ref, submit if asked, then wait for waitFor</span></summary>
   <div class="route-body">
 <h4>Request body</h4>
 <pre class="schema"><code>{
@@ -1659,7 +1670,8 @@
     &quot;title&quot;,
     &quot;url&quot;,
     &quot;text&quot;,
-    &quot;refs&quot;
+    &quot;refs&quot;,
+    &quot;error&quot;
   ],
   &quot;properties&quot;: {
     &quot;title&quot;: {
@@ -1715,6 +1727,16 @@
           }
         }
       }
+    },
+    &quot;error&quot;: {
+      &quot;anyOf&quot;: [
+        {
+          &quot;type&quot;: &quot;string&quot;
+        },
+        {
+          &quot;type&quot;: &quot;null&quot;
+        }
+      ]
     }
   }
 }</code></pre>

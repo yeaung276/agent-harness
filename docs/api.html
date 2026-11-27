@@ -950,9 +950,9 @@
 }</code></pre>
 
           <h3 id="browser-waiting">Waiting</h3>
-          <p>Read, click, type and screenshot take a <code>waitFor</code>, and navigate an <code>until</code>, with the same fields: <code>selector</code> waits until an element matching that CSS selector is visible, and <code>text</code> until that text is on the page. With both, it waits for both. <code>timeoutMs</code> is how long to wait: 10 seconds by default, 1 minute at most. <code>run</code> has none; its code waits with Playwright itself.</p>
-          <p>Read, click, type and screenshot wait before they act, on the page that is there: wait for <code>waitFor</code>, then read, click, type or take the screenshot, and answer. When the wait runs out, the call answers <code>504</code> without acting. Navigate waits after: go to the URL, wait for the page to load, wait for <code>until</code> on the new page, and answer. When the wait runs out there, the tab has already moved, so navigate answers <code>200</code> with the page it landed on and <code>error</code> set to <code>waitFor timed out</code>.</p>
-          <p>Click and type answer with the page as it is just after the action, and a page that changes on its own afterwards, like an app loading data, may not be there yet. To see the result, follow with a read whose <code>waitFor</code> names it; its refs are the ones to use next.</p>
+          <p>Read, click, type and screenshot take a <code>waitFor</code>, and navigate an <code>until</code>, with the same fields: <code>selector</code> waits until an element matching that CSS selector is visible, and <code>text</code> until that text is on the page. With both, it waits for both. Both look in the page and in every frame on it. <code>timeoutMs</code> is how long to wait: 10 seconds by default, 1 minute at most. <code>run</code> has none; its code waits with Playwright itself.</p>
+          <p>Navigate, click and type wait after they act: go to the URL, click, or type, wait for the page to load, wait for <code>waitFor</code> or <code>until</code>, and answer with the page. When the wait runs out there, the action has already happened, so the call answers <code>200</code> with the page as it is and <code>error</code> set to <code>waitFor timed out</code>. Without a wait, click and type answer with the page just after the action, and a page that changes on its own afterwards, like an app loading data, may not be there yet.</p>
+          <p>Read and screenshot wait before they act, on the page that is there: wait for <code>waitFor</code>, then read or take the screenshot, and answer. When the wait runs out, the call answers <code>504</code>.</p>
 
           <h3>Endpoints</h3>
 <div class="routes">
@@ -1182,7 +1182,7 @@
     }
   }
 }</code></pre>
-<p><code>text</code> is the page's visible text, cut to 20,000 characters unless <code>maxChars</code> says otherwise. <code>refs</code> numbers what can be clicked or typed into, up to 500, in page order; a ref is good until the next navigate, read, click or type. Password values are left out.</p>
+<p><code>text</code> is the page's visible text, then the text of each frame on it, cut to 20,000 characters unless <code>maxChars</code> says otherwise. <code>refs</code> numbers what can be clicked or typed into, up to 500, in page order and then frame by frame, in one count; a ref is good until the next navigate, read, click or type. Elements inside <code>aria-hidden="true"</code> or <code>inert</code> are left out, and so are frames that can't be seen. A ref's <code>name</code> is its visible text, or else its <code>aria-label</code>, <code>title</code> or <code>name</code>; a <code>select</code>'s is never its options' text. Password values are left out.</p>
 <h4>Errors · 404</h4>
 <p>No session has this id.</p>
 <h4>Errors · 504</h4>
@@ -1239,13 +1239,25 @@
 }</code></pre>
 <p><code>waitFor</code> is described in <a href="#browser-waiting">Waiting</a>.</p>
 <h4>Response 200</h4>
-<p>What the page shows just after the click, once it has loaded, as read returns it. It may not show the click's result yet; see <a href="#browser-waiting">Waiting</a>.</p>
+<p>What the page shows after the click, once it has loaded and shows what <code>waitFor</code> names, as read returns it, with one more field: <code>error</code>, <code>waitFor timed out</code> when the wait ran out after the click, or <code>null</code>. Without <code>waitFor</code>, it may not show the click's result yet; see <a href="#browser-waiting">Waiting</a>.</p>
+<pre class="schema"><code>{
+  &quot;error&quot;: {
+    &quot;anyOf&quot;: [
+      {
+        &quot;type&quot;: &quot;string&quot;
+      },
+      {
+        &quot;type&quot;: &quot;null&quot;
+      }
+    ]
+  }
+}</code></pre>
 <h4>Errors · 400</h4>
 <p>The click failed, for example the element is covered or disabled.</p>
 <h4>Errors · 404</h4>
 <p>No session has this id, or no element on the page has this ref.</p>
 <h4>Errors · 504</h4>
-<p>The call didn't finish in time. <code>waitFor</code> running out also answers <code>504</code>, without acting.</p>
+<p>The call didn't finish in time.</p>
   </div>
 </details>
 <details class="route">
@@ -1306,15 +1318,27 @@
   }
 }</code></pre>
 <p><code>waitFor</code> is described in <a href="#browser-waiting">Waiting</a>.</p>
-<p><code>text</code> replaces what the element holds. With <code>submit</code>, Enter is pressed after it.</p>
+<p><code>text</code> replaces what the element holds; on a <code>select</code>, it picks the option with that text or value. With <code>submit</code>, Enter is pressed after it. Without <code>submit</code>, the element loses focus after it, so the page's <code>change</code> and <code>blur</code> handlers run before the call answers; an element with <code>aria-expanded="true"</code>, a field whose suggestions are open, keeps focus.</p>
 <h4>Response 200</h4>
-<p>What the page shows just after typing, once it has loaded, as read returns it. It may not show the result yet; see <a href="#browser-waiting">Waiting</a>.</p>
+<p>What the page shows after typing, once it has loaded and shows what <code>waitFor</code> names, as read returns it, with one more field: <code>error</code>, <code>waitFor timed out</code> when the wait ran out after typing, or <code>null</code>. Without <code>waitFor</code>, it may not show the result yet; see <a href="#browser-waiting">Waiting</a>.</p>
+<pre class="schema"><code>{
+  &quot;error&quot;: {
+    &quot;anyOf&quot;: [
+      {
+        &quot;type&quot;: &quot;string&quot;
+      },
+      {
+        &quot;type&quot;: &quot;null&quot;
+      }
+    ]
+  }
+}</code></pre>
 <h4>Errors · 400</h4>
-<p>The element can't be typed into.</p>
+<p>The element can't be typed into, or the <code>select</code> has no option with that text or value.</p>
 <h4>Errors · 404</h4>
 <p>No session has this id, or no element on the page has this ref.</p>
 <h4>Errors · 504</h4>
-<p>The call didn't finish in time. <code>waitFor</code> running out also answers <code>504</code>, without acting.</p>
+<p>The call didn't finish in time.</p>
   </div>
 </details>
 <details class="route">
